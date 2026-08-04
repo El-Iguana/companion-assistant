@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenvs (deps live in the container image, not the source tree)
+venv/
+.venv/
+
+# Live app state — mounted volume of per-item JSON (characters, sessions,
+# relationships, etc.). Runtime data, not source; back up separately.
+data/
+
+# Baked ML model artifacts (downloaded at image build time, not versioned here)
+models/*.onnx
+models/*.bin
+models/kokoro/
+models/rembg/
+
+# Misc
+*.wav
+.env
+*.log

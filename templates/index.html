@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Companion</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header class="side-head">
+        <h1>Companion</h1>
+        <div id="status" class="status offline" title="KoboldCPP status">●</div>
+      </header>
+
+      <section class="side-block">
+        <div class="side-title">
+          <span>Characters</span>
+          <span class="side-actions">
+            <button id="new-card" class="btn-mini" title="Create a character">+ New</button>
+            <label class="btn-mini" title="Import PNG/JSON card">
+              Import
+              <input id="import-input" type="file" accept=".png,.json" hidden>
+            </label>
+          </span>
+        </div>
+        <ul id="card-list" class="list"></ul>
+      </section>
+
+      <section class="side-block">
+        <div class="side-title"><span>Chats</span></div>
+        <ul id="session-list" class="list"></ul>
+      </section>
+
+      <section class="side-block">
+        <div class="side-title">
+          <span>Personas</span>
+          <button id="new-persona" class="btn-mini" title="Create a persona">+ New</button>
+        </div>
+        <ul id="persona-list" class="list"></ul>
+      </section>
+
+      <section class="side-block">
+        <div class="side-title">
+          <span>Presets</span>
+          <button id="new-preset" class="btn-mini" title="Create a relationship preset">+ New</button>
+        </div>
+        <ul id="preset-list" class="list"></ul>
+      </section>
+    </aside>
+
+    <main id="chat-pane">
+      <header id="chat-head">
+        <span id="chat-title">Select or import a character to begin</span>
+        <span id="mood-meter" hidden>
+          <span id="mood-label" class="muted"></span>
+          <span class="mood-bar"><span id="mood-fill"></span></span>
+        </span>
+        <span class="head-actions">
+          <button id="tts-btn" class="btn-mini" title="Toggle voice" hidden>🔇</button>
+          <button id="voice-test" class="btn-mini" title="Hear this character's voice" hidden>▶</button>
+          <button id="gallery-btn" class="btn-mini" title="Review expression sprites" hidden>🖼 Gallery</button>
+          <button id="expr-btn" class="btn-mini" title="Generate expression sprites" hidden>🎭 Expressions</button>
+        </span>
+      </header>
+
+      <div id="rel-strip" hidden>
+        <span id="rel-stage"></span>
+        <div id="rel-axes"></div>
+        <span id="rel-intimacy" class="muted"></span>
+        <button id="rel-ctx-btn" class="btn-mini" title="Relationship context (power / social)">⚙</button>
+      </div>
+
+      <div id="expr-panel" hidden>
+        <div class="expr-row">
+          <label>Appearance prompt</label>
+          <textarea id="expr-appearance" rows="2" class="field"
+            placeholder="e.g. Lyria, silver-haired starship AI, glowing blue eyes, sleek bodysuit"></textarea>
+        </div>
+        <div class="expr-row inline">
+          <div>
+            <label>Checkpoint</label>
+            <select id="expr-checkpoint" class="field"></select>
+          </div>
+          <div>
+            <label>Style</label>
+            <select id="expr-style" class="field">
+              <option value="anime">anime</option>
+              <option value="none">none</option>
+              <option value="photorealistic">photorealistic</option>
+              <option value="fantasy_art">fantasy_art</option>
+              <option value="cinematic">cinematic</option>
+              <option value="dark_fantasy">dark_fantasy</option>
+            </select>
+          </div>
+          <div>
+            <label>Set</label>
+            <select id="expr-preset" class="field">
+              <option value="core">Core (8) — fast</option>
+              <option value="full">Full (28) — SillyTavern</option>
+            </select>
+          </div>
+        </div>
+        <div class="expr-row inline">
+          <label class="check"><input id="expr-transparent" type="checkbox" checked> Transparent background</label>
+          <button id="expr-generate" class="btn-mini">Generate sprites</button>
+          <span id="expr-status" class="muted"></span>
+        </div>
+      </div>
+
+      <div id="chat-body">
+        <div id="messages"></div>
+        <img id="portrait" alt="" hidden>
+      </div>
+      <form id="composer">
+        <textarea id="input" rows="1" placeholder="Message… (Enter to send, Shift+Enter for newline)" disabled></textarea>
+        <button id="regen" type="button" class="btn-icon" title="Regenerate last reply" disabled>↻</button>
+        <button id="send" type="submit" class="btn-icon" title="Send" disabled>➤</button>
+      </form>
+    </main>
+
+    <div id="card-editor" class="modal" hidden>
+      <div class="modal-box">
+        <header class="modal-head">
+          <span id="ce-title">New character</span>
+          <button id="ce-close" class="btn-icon-sm" title="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="ce-portrait">
+            <img id="ce-preview" alt="">
+            <label class="btn-mini">Portrait<input id="ce-image" type="file" accept="image/*" hidden></label>
+          </div>
+          <div class="ce-grid">
+            <label>Name<input id="ce-name" class="field"></label>
+            <label>Nickname<input id="ce-nickname" class="field"></label>
+            <label>Creator<input id="ce-creator" class="field"></label>
+            <label>Version<input id="ce-version" class="field"></label>
+          </div>
+          <label class="ce-full">Description (persistent character definition; use {{char}} / {{user}})
+            <textarea id="ce-description" class="field" rows="4"></textarea></label>
+          <label class="ce-full">Personality<textarea id="ce-personality" class="field" rows="2"></textarea></label>
+          <label class="ce-full">Scenario<textarea id="ce-scenario" class="field" rows="2"></textarea></label>
+          <label class="ce-full">Appearance (visual prompt for expression sprites)
+            <textarea id="ce-appearance" class="field" rows="2"></textarea></label>
+          <div class="ce-grid">
+            <label>Power dynamic: <output id="ce-power-val"></output>
+              <input id="ce-power" type="range" min="-100" max="100" step="5">
+              <span class="muted">−100 = {{user}} holds power · +100 = character does (|value| adds caution)</span></label>
+            <label>Social acceptance: <output id="ce-social-val"></output>
+              <input id="ce-social" type="range" min="0" max="100" step="5">
+              <span class="muted">0 = taboo/stigmatized · 100 = fully accepted</span></label>
+          </div>
+          <div class="ce-grid">
+            <label>Voice<select id="ce-voice" class="field"></select></label>
+            <label>&nbsp;<button id="ce-voice-test" type="button" class="btn-mini">▶ Test voice</button></label>
+          </div>
+          <label class="ce-full">First message (greeting)<textarea id="ce-first_mes" class="field" rows="3"></textarea></label>
+          <label class="ce-full">Alternate greetings (one per line)
+            <textarea id="ce-greetings" class="field" rows="2"></textarea></label>
+          <label class="ce-full">Example dialogue<textarea id="ce-mes_example" class="field" rows="3"></textarea></label>
+          <label class="ce-full">System prompt (overrides default)<textarea id="ce-system_prompt" class="field" rows="2"></textarea></label>
+          <label class="ce-full">Post-history instructions<textarea id="ce-phi" class="field" rows="2"></textarea></label>
+          <label class="ce-full">Tags (comma separated)<input id="ce-tags" class="field"></label>
+          <div class="ce-lore ce-full">
+            <div class="ce-lore-head">
+              <span>Lorebook — entries injected when a key appears in chat</span>
+              <button id="ce-add-lore" class="btn-mini" type="button">+ Add entry</button>
+            </div>
+            <div id="ce-lore-list"></div>
+          </div>
+        </div>
+        <footer class="modal-foot">
+          <button id="ce-delete" class="btn-mini danger" hidden>Delete</button>
+          <button id="ce-duplicate" class="btn-mini" hidden>Duplicate</button>
+          <span id="ce-status" class="muted"></span>
+          <span class="spacer"></span>
+          <button id="ce-cancel" class="btn-mini">Cancel</button>
+          <button id="ce-save" class="btn-mini primary">Save</button>
+        </footer>
+      </div>
+    </div>
+    <div id="gallery" class="modal" hidden>
+      <div class="modal-box">
+        <header class="modal-head">
+          <span id="gal-title">Expressions</span>
+          <button id="gal-close" class="btn-icon-sm" title="Close">✕</button>
+        </header>
+        <div class="gal-controls">
+          <select id="gal-checkpoint" class="field" title="Checkpoint for regeneration"></select>
+          <select id="gal-style" class="field" title="Style for regeneration">
+            <option value="anime">anime</option>
+            <option value="none">none</option>
+            <option value="photorealistic">photorealistic</option>
+            <option value="fantasy_art">fantasy_art</option>
+            <option value="cinematic">cinematic</option>
+            <option value="dark_fantasy">dark_fantasy</option>
+          </select>
+          <span id="gal-count" class="muted"></span>
+        </div>
+        <div class="modal-body"><div id="gal-grid" class="gal-grid"></div></div>
+      </div>
+    </div>
+    <div id="rel-ctx" class="modal" hidden>
+      <div class="modal-box" style="width:min(420px,92vw)">
+        <header class="modal-head"><span>Relationship context</span>
+          <button id="rel-ctx-close" class="btn-icon-sm" title="Close">✕</button></header>
+        <div class="modal-body">
+          <label>Power dynamic: <output id="rc-power-val"></output>
+            <input id="rc-power" type="range" min="-100" max="100" step="5">
+            <span class="muted">−100 = {{user}} holds power · +100 = character does</span></label>
+          <label>Social acceptance: <output id="rc-social-val"></output>
+            <input id="rc-social" type="range" min="0" max="100" step="5">
+            <span class="muted">0 = taboo · 100 = fully accepted</span></label>
+          <p class="muted">Overrides the card defaults for this relationship only.</p>
+        </div>
+        <footer class="modal-foot">
+          <button id="rc-clear" class="btn-mini">Use card default</button>
+          <span class="spacer"></span>
+          <button id="rc-save" class="btn-mini primary">Save</button>
+        </footer>
+      </div>
+    </div>
+    <div id="persona-editor" class="modal" hidden>
+      <div class="modal-box" style="width:min(560px,94vw)">
+        <header class="modal-head">
+          <span id="pe-title">New persona</span>
+          <button id="pe-close" class="btn-icon-sm" title="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="ce-portrait">
+            <img id="pe-preview" alt="">
+            <label class="btn-mini">Portrait<input id="pe-image" type="file" accept="image/*" hidden></label>
+          </div>
+          <div class="ce-grid">
+            <label>Name<input id="pe-name" class="field"></label>
+            <label>Role / title<input id="pe-title-in" class="field" placeholder="e.g. Ship Captain"></label>
+          </div>
+          <label class="ce-full">Description<textarea id="pe-description" class="field" rows="3"></textarea></label>
+          <label class="ce-full">Background<textarea id="pe-background" class="field" rows="4"></textarea></label>
+          <label class="check"><input id="pe-default" type="checkbox"> Use as active persona</label>
+        </div>
+        <footer class="modal-foot">
+          <button id="pe-delete" class="btn-mini danger" hidden>Delete</button>
+          <span id="pe-status" class="muted"></span>
+          <span class="spacer"></span>
+          <button id="pe-cancel" class="btn-mini">Cancel</button>
+          <button id="pe-save" class="btn-mini primary">Save</button>
+        </footer>
+      </div>
+    </div>
+    <div id="preset-editor" class="modal" hidden>
+      <div class="modal-box" style="width:min(640px,94vw)">
+        <header class="modal-head">
+          <span id="pr-title">New preset</span>
+          <button id="pr-close" class="btn-icon-sm" title="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="ce-grid">
+            <label>Name<input id="pr-name" class="field"></label>
+            <label>Suggested character<select id="pr-character" class="field"></select></label>
+            <label>Suggested persona<select id="pr-persona" class="field"></select></label>
+          </div>
+          <label class="ce-full">Description<textarea id="pr-description" class="field" rows="2"></textarea></label>
+          <div id="pr-sliders"></div>
+          <label class="ce-full">Scenario note (optional opening context)
+            <textarea id="pr-scenario" class="field" rows="2"></textarea></label>
+        </div>
+        <footer class="modal-foot">
+          <button id="pr-delete" class="btn-mini danger" hidden>Delete</button>
+          <span id="pr-status" class="muted"></span>
+          <span class="spacer"></span>
+          <button id="pr-cancel" class="btn-mini">Cancel</button>
+          <button id="pr-save" class="btn-mini primary">Save</button>
+        </footer>
+      </div>
+    </div>
+    <div id="newchat" class="modal" hidden>
+      <div class="modal-box" style="width:min(480px,92vw)">
+        <header class="modal-head">
+          <span id="nc-title">New chat</span>
+          <button id="nc-close" class="btn-icon-sm" title="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <label>Persona<select id="nc-persona" class="field"></select></label>
+          <label>Preset (optional)<select id="nc-preset" class="field"></select></label>
+          <div id="nc-mode" hidden>
+            <p class="muted">This preset defines a relationship. Start as:</p>
+            <label class="check"><input type="radio" name="ncmode" value="continue" checked>
+              Continue our ongoing relationship</label>
+            <label class="check"><input type="radio" name="ncmode" value="scenario">
+              Fresh preset scenario (new relationship for this chat)</label>
+          </div>
+        </div>
+        <footer class="modal-foot">
+          <span class="spacer"></span>
+          <button id="nc-cancel" class="btn-mini">Cancel</button>
+          <button id="nc-start" class="btn-mini primary">Start chat</button>
+        </footer>
+      </div>
+    </div>
+    <div id="toasts"></div>
+  </div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

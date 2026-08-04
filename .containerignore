@@ -1,0 +1,25 @@
+# Don't bake data into the image — it's mounted as volumes
+data/
+
+# Dev artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+
+# Editor / OS noise
+.git/
+.gitignore
+*.md
+.vscode/
+.idea/
+*.swp
+*~
+
+# Podman / compose files don't belong in the image
+Containerfile
+compose.yaml
+run-podman.sh

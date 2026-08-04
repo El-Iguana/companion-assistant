@@ -1,0 +1,38 @@
+# Companion — Podman Compose
+# Assumes KoboldCPP is already running on the "sillytavern-net" network.
+#
+#   podman-compose up -d
+#   podman-compose logs -f
+#   podman-compose down
+
+services:
+  companion:
+    image: localhost/companion:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: companion
+    restart: unless-stopped
+    ports:
+      - "7861:7861"
+    environment:
+      - KOBOLD_URL=http://koboldcpp:5001
+    volumes:
+      - ./data/characters:/app/data/characters:z
+      - ./data/personas:/app/data/personas:z
+      - ./data/sessions:/app/data/sessions:z
+      - ./data/relationships:/app/data/relationships:z
+      - ./data/presets:/app/data/presets:z
+      - ./data/expressions:/app/data/expressions:z
+    networks:
+      - sillytavern-net
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:7861/api/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+networks:
+  sillytavern-net:
+    external: true
