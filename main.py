@@ -839,6 +839,15 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         session.pending_milestone = ""
     messages = prompt_builder.build_messages(card, persona, session, relationship_note=rel_note,
                                              stage_rank=relationship._stage_rank(rel))
+    # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
+    # ignores it in the system prompt). The model then emits an empty <think></think>
+    # (stripped client-side) so the whole token budget goes to the actual reply.
+    # Mutates only the transient generation copy, not the stored history.
+    if _load_settings(cur).disable_thinking:
+        for m in reversed(messages):
+            if m["role"] == "user":
+                m["content"] += " /no_think"
+                break
     params = prompt_builder.kobold_params(session)
     # Stop if the model starts writing {{user}}'s turn (prevents multi-turn / speaking for the user).
     params["stop"] = list(params.get("stop") or []) + [f"\n{persona.name}:", f"\n{persona.name} —"]

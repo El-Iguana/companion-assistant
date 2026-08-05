@@ -1252,6 +1252,7 @@ $("#voicecfg-btn").addEventListener("click", () => {
   $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
   $("#vc-echo").value = voiceSettings.echo_suppress ?? 0.8;
   $("#vc-echo-val").textContent = Number(voiceSettings.echo_suppress ?? 0.8).toFixed(1);
+  $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
   $("#voice-cfg").hidden = false;
 });
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
@@ -1265,6 +1266,7 @@ $("#vc-save").addEventListener("click", async () => {
     vad_threshold: Number($("#vc-thresh").value),
     vad_silence_ms: Number($("#vc-silence").value),
     echo_suppress: Number($("#vc-echo").value),
+    disable_thinking: $("#vc-nothink").checked,
   });
   $("#voice-cfg").hidden = true;
 });

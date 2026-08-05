@@ -30,6 +30,7 @@ class AppSettings(BaseModel):
     vad_silence_ms: int = 800            # trailing silence that ends an utterance
     vad_threshold: float = 0.015         # RMS gate (0–1): speech vs. silence
     echo_suppress: float = 0.8           # ignore-herself: raise the start gate by this × her output level
+    disable_thinking: bool = False       # append /no_think so Qwen3 skips <think> reasoning (faster replies)
 
 
 # ---------------------------------------------------------------------------

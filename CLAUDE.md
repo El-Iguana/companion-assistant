@@ -114,7 +114,7 @@ GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   A
 GET  /api/status                           KoboldCPP {online, version, model}
 POST /api/tts ; GET /api/tts/voices        local Kokoro TTS (text→WAV) / 54 voices
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
-GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning)
+GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -204,6 +204,10 @@ per-relationship **context override** (⚙).
 ## Conventions & gotchas
 
 - Rebuild after code/template/static edits (`./run-podman.sh --rebuild`); `podman exec -i` for heredocs.
+- **Disable-thinking** (`AppSettings.disable_thinking`, ⚙ Settings modal): `chat()` appends `/no_think` to
+  the **last user turn** (this Qwen3 fine-tune ignores it in the system prompt). The model then emits an
+  empty `<think></think>` which `kobold._strip_think` removes — so the full token budget goes to the reply.
+  Mutates only the transient generation copy, not stored history.
 - CSS: `[hidden] { display:none !important }` at top of style.css so the HTML `hidden` attr wins over
   element display rules; toggle via `.hidden`.
 - Starlette: `TemplateResponse(request, "index.html")` (request first).
