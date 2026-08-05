@@ -77,19 +77,19 @@ Mic → local STT (whisper.cpp, streaming) ─┐
     open-mic. **Simplification:** this is **text-matched over the STT transcript**, not a dedicated
     always-on engine. *(openWakeWord — ONNX/CPU — is the upgrade for low-latency always-on detection and
     wake-word-**gated** barge-in.)*
-  - ✅ **Auto barge-in on detected speech** during playback — VAD speech-start reuses `stopSpeaking()` +
-    `abortChat()`.
-  - ✅ **Ignore-herself (echo/self-suppression)** — the mic's **start gate is ducked by her own live
-    output level**: the TTS player publishes `ttsLevel` (the amplitude already computed for lip-sync), and
-    while she's speaking (or within a 250 ms tail) the VAD start threshold rises to
-    `base + 0.01 + echo_suppress·ttsLevel`, so her voice bleeding into the mic can't self-trigger a
-    barge-in or a phantom message — you have to be **louder than her echo** to interrupt. Once you *are*
-    captured she's muted, so end-of-turn detection uses the plain threshold. On top of `getUserMedia`
-    `echoCancellation`. Tunable via **`echo_suppress`** (0 = off; default 0.8) in the ⚙ modal.
+  - ✅ **Ignore-herself — half-duplex** — while she's speaking (`ttsSource` active) or within a 400 ms
+    tail, the hands-free mic **does not listen at all** (`hfTick` skips the start gate). This fully
+    eliminates self-hearing. **Trade-off (accepted for now):** no *automatic* barge-in in hands-free mode
+    — to interrupt her, use **push-to-talk 🎤** (explicit press still cuts TTS + aborts generation).
+    On top of `getUserMedia` `echoCancellation`.
+    - *Superseded:* an earlier echo-**ducking** attempt (raise the gate by `echo_suppress·ttsLevel`) still
+      let her voice through at speaker volume, so we went full half-duplex. `echo_suppress` + `ttsLevel`
+      remain in the code/settings but are **dormant** until interruption returns.
   - **Settings store** — new singleton `GET/PUT /api/settings` (`data/settings/app.json`, mounted so it
     survives rebuilds); also holds VAD tuning (mic threshold, end-of-speech silence, echo suppression).
-  - ◻ **Follow-ups:** openWakeWord engine · Silero-VAD · wake-word-gated barge-in · (if echo still leaks
-    with loud external speakers) a WebRTC AEC path or headphone recommendation.
+  - ◻ **Interruption (deferred, by request):** bring back auto barge-in without self-hearing — options:
+    wake-word-gated barge-in (transcribe short windows during playback, only interrupt on the wake word),
+    proper WebRTC AEC, or a headphone path. openWakeWord + Silero-VAD are the accuracy upgrades.
 
 > **Deviation from the original plan:** this shipped as **in-process CPU faster-whisper**, not a GPU
 > whisper.cpp container on sillytavern-net. Reason: matches how Kokoro TTS actually shipped (in-process,

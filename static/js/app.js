@@ -937,7 +937,7 @@ function playBuffer(ctx, arrayBuf, valid) {
     src.onended = () => {
       if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
       if (img) img.style.transform = "";
-      ttsSource = null; ttsLevel = 0; ttsHangoverUntil = performance.now() + 250;  // tail: ignore reverb
+      ttsSource = null; ttsLevel = 0; ttsHangoverUntil = performance.now() + 400;  // tail: ignore reverb/echo after she stops
       resolve();
     };
     src.start();
@@ -1119,14 +1119,12 @@ function hfTick() {
   const base = voiceSettings.vad_threshold ?? 0.015;
 
   if (!hfSpeaking) {
-    // Start gate — ignore herself: while SHE is speaking (or just did), raise the
-    // bar by her own live output level so her voice bleeding into the mic can't
-    // self-trigger. You have to be louder than her echo to barge in.
+    // Half-duplex — ignore herself: do NOT listen at all while she's speaking
+    // (or within the tail after). This fully eliminates self-hearing; the cost is
+    // no auto barge-in in hands-free mode (use push-to-talk 🎤 to interrupt).
+    // Interruption comes back later; `echo_suppress` is dormant until then.
     const selfActive = !!ttsSource || now < ttsHangoverUntil;
-    const es = voiceSettings.echo_suppress ?? 0.8;
-    const startThresh = selfActive ? base + 0.01 + es * ttsLevel : base;
-    if (rms > startThresh) {
-      if (ttsSource || state.streaming) { stopSpeaking(); abortChat(); }   // barge-in
+    if (!selfActive && rms > base) {
       hfStartUtterance();
       hfSpeaking = true; hfSilenceStart = 0;
     }

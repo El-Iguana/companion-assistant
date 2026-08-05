@@ -203,11 +203,12 @@ per-relationship **context override** (⚙).
   generation (`abortChat`/AbortController).
   ✅ **Phase 1b (continuous / hands-free) done** — a **separate 🎙 toggle** (distinct from push-to-talk)
   arms an open-mic loop: in-browser **RMS energy VAD** (`hfTick`) segments utterances, transcribes each
-  via `/api/stt`, and auto-barges-in on detected speech. **Configurable wake word** (`applyWakeWord`) —
-  when set, only speech starting with it is sent (+strips the prefix); blank = pure open-mic.
-  **Ignore-herself:** the mic start-gate is ducked by her own live output level (`ttsLevel`, published by
-  the TTS player) — while she speaks, the VAD threshold rises to `base+0.01+echo_suppress·ttsLevel`, so
-  her voice can't self-trigger; you must be louder than her echo to barge in. Tuning (wake word, mic
+  via `/api/stt`. **Configurable wake word** (`applyWakeWord`) — when set, only speech starting with it is
+  sent (+strips the prefix); blank = pure open-mic.
+  **Ignore-herself = half-duplex:** while she's speaking (`ttsSource`) or within a 400 ms tail, the
+  hands-free mic doesn't listen at all (`hfTick` skips the start gate) — no self-hearing. Trade-off: no
+  *auto* barge-in in hands-free mode (use push-to-talk 🎤 to interrupt). `echo_suppress`/`ttsLevel` (an
+  earlier ducking approach) remain but are **dormant** until interruption returns. Tuning (wake word, mic
   threshold, silence, `echo_suppress`) in the **⚙ voice-settings modal**, persisted to the new
   **`GET/PUT /api/settings`** store (`AppSettings` → `data/settings/app.json`); plus `getUserMedia`
   `echoCancellation`. ◻ **Upgrades:** true wake-word engine (**openWakeWord**,
