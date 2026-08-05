@@ -15,7 +15,8 @@ from typing import List, Dict
 from models.schema import CharacterCard, Persona, ChatSession, CharacterBook
 
 
-DEFAULT_SYSTEM = (
+# Scene/world roleplay (the historical default).
+DEFAULT_ROLEPLAY = (
     "You are {{char}} in an immersive, ongoing roleplay with {{user}}. "
     "Stay fully in character as {{char}} at all times. Write ONLY {{char}}'s single next reply and "
     "then stop: one focused message that moves the scene forward by one concrete beat. "
@@ -24,6 +25,29 @@ DEFAULT_SYSTEM = (
     "just said. Do NOT repeat actions, phrasing, or descriptions you have already used — advance "
     "the moment with something new each time. Never break character or mention being an AI."
 )
+
+# Personality-forward conversation — no invented setting/scene (for assistant-type
+# characters like a Jarvis). Keeps the same anti-repetition / one-reply / stay-in-
+# character guardrails, but drops the "advance the scene" framing that makes small
+# models improvise a world.
+DEFAULT_ASSISTANT = (
+    "You are {{char}}, talking directly with {{user}} in a plain, ongoing conversation. "
+    "There is no physical setting or scene: do NOT invent surroundings, locations, events, or a "
+    "world, and do not narrate a scene. Reply as {{char}} in first person with full personality "
+    "and voice — opinions, wit, knowledge, tone; focus on what {{char}} thinks and says. Keep "
+    "*action* narration minimal or absent. Write ONLY {{char}}'s single next reply and then stop; "
+    "be reasonably concise and reactive to what {{user}} just said. Do NOT repeat phrasing you have "
+    "already used. Never speak, act, or decide for {{user}}. Stay fully in character and never "
+    "mention being an AI."
+)
+
+# Back-compat alias.
+DEFAULT_SYSTEM = DEFAULT_ROLEPLAY
+
+
+def default_system_for(card) -> str:
+    """Pick the built-in system prompt for a card's chat_mode."""
+    return DEFAULT_ASSISTANT if getattr(card, "chat_mode", "roleplay") == "assistant" else DEFAULT_ROLEPLAY
 
 
 def substitute_macros(text: str, char_name: str, user_name: str) -> str:
@@ -107,7 +131,7 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     lb_before, lb_after = select_lorebook(card.character_book, recent, stage_rank)
 
     # --- system message ---
-    sys_parts: list[str] = [sub(card.system_prompt) if card.system_prompt else sub(DEFAULT_SYSTEM)]
+    sys_parts: list[str] = [sub(card.system_prompt) if card.system_prompt else sub(default_system_for(card))]
     persona_bits = [b for b in (getattr(persona, "title", ""), persona.description,
                                 getattr(persona, "background", "")) if b and b.strip()]
     if persona_bits:

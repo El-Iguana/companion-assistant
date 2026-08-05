@@ -181,6 +181,13 @@
           <label class="ce-full">Alternate greetings (one per line)
             <textarea id="ce-greetings" class="field" rows="2"></textarea></label>
           <label class="ce-full">Example dialogue<textarea id="ce-mes_example" class="field" rows="3"></textarea></label>
+          <label class="ce-full">Chat mode
+            <select id="ce-chat_mode" class="field">
+              <option value="roleplay">Roleplay — scene &amp; world (default)</option>
+              <option value="assistant">Assistant — personality, no scene/world</option>
+            </select>
+            <span class="muted">Assistant mode stops her inventing settings/scenes and keeps the focus on
+              personality &amp; conversation. Ignored if you set a custom System prompt below.</span></label>
           <label class="ce-full">System prompt (overrides default)<textarea id="ce-system_prompt" class="field" rows="2"></textarea></label>
           <label class="ce-full">Post-history instructions<textarea id="ce-phi" class="field" rows="2"></textarea></label>
           <label class="ce-full">Tags (comma separated)<input id="ce-tags" class="field"></label>

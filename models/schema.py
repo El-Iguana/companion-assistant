@@ -86,6 +86,7 @@ class CharacterCard(BaseModel):
     mes_example: str = ""                 # example dialogue (<START> blocks)
     creator_notes: str = ""
     system_prompt: str = ""              # overrides default system prompt if set
+    chat_mode: str = "roleplay"          # "roleplay" (scene/world) | "assistant" (personality, no scene); picks the default system prompt
     post_history_instructions: str = ""  # injected after chat history (jailbreak/UJB)
     alternate_greetings: List[str] = []
     tags: List[str] = []

@@ -64,7 +64,9 @@ RELATIONSHIP_PLAN.md    # relationship system design + phases
   `mes_example`, `alternate_greetings`, `system_prompt`, `post_history_instructions`,
   `character_book`, `tags`, `nickname`, …). Local: `image` (base64 portrait), `appearance` (sprite
   prompt), `expressions` (emotion→base64), **`power_dynamic`** (−100…100), **`social_acceptance`** (0…100),
-  **`tts_voice`** (per-character Kokoro voice).
+  **`tts_voice`** (per-character Kokoro voice), **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
+  system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
+  invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);
   role+background injected as "About {{user}}". Sidebar has a personas list + editor; one active (default) at a time.
 - **ChatMessage** — `role`, `content`, `expression`, `swipes[]`, `swipe_index`, `swipe_expressions[]`.
