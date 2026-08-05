@@ -75,6 +75,18 @@
       </div>
 
       <div id="expr-panel" hidden>
+        <div id="expr-preview" class="expr-row">
+          <label>Preview — in-chat portrait sizing</label>
+          <div class="expr-preview-body">
+            <button id="expr-prev" type="button" class="btn-mini" title="Previous expression">‹</button>
+            <div id="expr-preview-stage">
+              <img id="expr-preview-img" alt="" hidden>
+              <div id="expr-preview-empty" class="muted">Generate sprites to preview them here.</div>
+            </div>
+            <button id="expr-next" type="button" class="btn-mini" title="Next expression">›</button>
+          </div>
+          <div id="expr-preview-label" class="muted"></div>
+        </div>
         <div class="expr-row">
           <label>Appearance prompt</label>
           <textarea id="expr-appearance" rows="2" class="field"

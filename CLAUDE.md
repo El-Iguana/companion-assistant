@@ -152,9 +152,12 @@ POST /api/chat                             SSE stream; done carries {expression,
 `state = {cards, sessions, persona, session, streaming}`. Chat pane: portrait overlay (mood-driven),
 header **mood meter** + **relationship strip** (stage, 4 axis bars, Emotional/Comfort readout), 🖼 Gallery,
 🎭 Expressions. Modals: card editor (all fields + portrait upload + **lorebook** + **power/social sliders**
-+ Duplicate), expression gallery (grid, per-sprite regen/delete). Key fns: `renderSession→renderMessages→
-updatePortrait/updateMood`, `renderRelationship/loadRelationship`, `send` (SSE), `gotoSwipe`, editor
-(`buildCardPayload/renderLore`), gallery (`refreshGallery/regenOne`).
++ Duplicate), expression gallery (grid, per-sprite regen/delete). The 🎭 Expressions panel also has a
+**preview stage** (`refreshExprPreview/showExprPreview`, ‹ › to cycle) that renders each sprite at the
+real in-chat `#portrait` framing (bottom-anchored, height-driven, over a transparency checker) + shows
+its natural WxH — for checking sizing/framing consistency across emotions. Key fns: `renderSession→
+renderMessages→updatePortrait/updateMood`, `renderRelationship/loadRelationship`, `send` (SSE),
+`gotoSwipe`, editor (`buildCardPayload/renderLore`), gallery (`refreshGallery/regenOne`).
 
 ## Feature set (all built + verified)
 

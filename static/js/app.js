@@ -274,6 +274,7 @@ function renderSession(session) {
   $("#expr-from-upload").checked = !!(card && card.expr_from_upload);
   const dn = (card && card.expr_denoise) || 0.55;
   $("#expr-denoise").value = dn; $("#expr-denoise-val").textContent = Number(dn).toFixed(2);
+  if (!$("#expr-panel").hidden) { previewIdx = 0; refreshExprPreview(); }   // keep preview in sync on card switch
   renderMessages();
   loadRelationship();
   $("#input").disabled = false; $("#send").disabled = false; $("#regen").disabled = false;
@@ -509,8 +510,46 @@ async function loadCheckpoints() {
 $("#expr-btn").addEventListener("click", async () => {
   const panel = $("#expr-panel");
   panel.hidden = !panel.hidden;
-  if (!panel.hidden) await loadCheckpoints();
+  if (!panel.hidden) { await loadCheckpoints(); await refreshExprPreview(); }
 });
+
+// ---- expression preview (renders each sprite at true in-chat portrait sizing) ----
+let previewEmotions = [], previewIdx = 0;
+
+async function refreshExprPreview() {
+  const card = currentCard();
+  const img = $("#expr-preview-img"), empty = $("#expr-preview-empty"), label = $("#expr-preview-label");
+  let present = [];
+  if (card) { try { present = (await api(`/cards/${card.id}/expressions`)).emotions || []; } catch {} }
+  previewEmotions = present.slice().sort((a, b) =>            // neutral first, then A–Z
+    a === "neutral" ? -1 : b === "neutral" ? 1 : a.localeCompare(b));
+  if (!previewEmotions.length) {
+    img.hidden = true; empty.hidden = false; label.textContent = "";
+    return;
+  }
+  empty.hidden = true;
+  if (previewIdx >= previewEmotions.length) previewIdx = 0;
+  showExprPreview();
+}
+
+function showExprPreview() {
+  const card = currentCard(); if (!card || !previewEmotions.length) return;
+  const emo = previewEmotions[previewIdx];
+  const img = $("#expr-preview-img"), label = $("#expr-preview-label");
+  const tag = `${emo} (${previewIdx + 1}/${previewEmotions.length})`;
+  img.onload = () => { label.textContent = `${tag} · ${img.naturalWidth}×${img.naturalHeight}px`; };
+  img.src = `/api/cards/${card.id}/expression/${emo}?t=${Date.now()}`;
+  img.hidden = false;
+  label.textContent = tag;
+}
+
+function cycleExprPreview(d) {
+  if (!previewEmotions.length) return;
+  previewIdx = (previewIdx + d + previewEmotions.length) % previewEmotions.length;
+  showExprPreview();
+}
+$("#expr-prev").addEventListener("click", () => cycleExprPreview(-1));
+$("#expr-next").addEventListener("click", () => cycleExprPreview(1));
 
 $("#expr-denoise").addEventListener("input", (e) => { $("#expr-denoise-val").textContent = Number(e.target.value).toFixed(2); });
 $("#expr-generate").addEventListener("click", async () => {
@@ -540,7 +579,8 @@ $("#expr-generate").addEventListener("click", async () => {
     card.expr_from_upload = $("#expr-from-upload").checked;
     card.expr_denoise = Number($("#expr-denoise").value);
     updatePortrait();
-    setTimeout(() => { $("#expr-panel").hidden = true; }, 1200);
+    previewIdx = 0;
+    await refreshExprPreview();     // show the freshly generated set at in-chat size
   } catch (e) {
     $("#expr-status").textContent = "Failed: " + (e.detail || e.message || e);
   } finally {

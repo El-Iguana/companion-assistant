@@ -58,6 +58,18 @@ body {
 /* Expression generator panel */
 #expr-panel { padding: 12px 20px; border-bottom: 1px solid var(--line);
   background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
+/* Preview stage mirrors the in-chat #portrait: bottom-anchored, height-driven,
+   over a transparency checker so cutout + framing consistency are visible. */
+.expr-preview-body { display: flex; align-items: center; gap: 10px; }
+#expr-preview-stage { position: relative; flex: 1; height: 260px; border-radius: 10px;
+  overflow: hidden; border: 1px solid var(--line);
+  background: repeating-conic-gradient(#3a3a48 0% 25%, #2a2a36 0% 50%) 50% / 20px 20px; }
+#expr-preview-img { position: absolute; right: 12px; bottom: 0; max-height: 100%;
+  max-width: 70%; object-fit: contain; filter: drop-shadow(0 4px 16px #0008); }
+#expr-preview-empty { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; text-align: center; padding: 0 16px; }
+#expr-preview-label { text-align: center; }
+#expr-prev, #expr-next { flex: 0 0 auto; }
 .expr-row { display: flex; flex-direction: column; gap: 4px; }
 .expr-row.inline { flex-direction: row; align-items: flex-end; gap: 12px; }
 .expr-row.inline > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
