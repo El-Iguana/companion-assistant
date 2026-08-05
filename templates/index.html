@@ -49,6 +49,13 @@
         </div>
         <ul id="preset-list" class="list"></ul>
       </section>
+
+      <div id="userbar">
+        <span id="user-name" class="muted"></span>
+        <span class="spacer"></span>
+        <button id="users-btn" class="btn-mini" title="Manage users" hidden>Users</button>
+        <button id="logout-btn" class="btn-mini" title="Log out">Logout</button>
+      </div>
     </aside>
 
     <main id="chat-pane">
@@ -277,6 +284,29 @@
         </footer>
       </div>
     </div>
+    <div id="users" class="modal" hidden>
+      <div class="modal-box" style="width:min(560px,94vw)">
+        <header class="modal-head"><span>Users</span>
+          <button id="users-close" class="btn-icon-sm" title="Close">✕</button></header>
+        <div class="modal-body">
+          <p class="muted">Each user has their own private library of characters, personas, and presets.
+            Only admins can add or remove users.</p>
+          <ul id="users-list" class="list"></ul>
+          <div class="ce-grid">
+            <label>Username<input id="nu-name" class="field" autocomplete="off"></label>
+            <label>Password<input id="nu-pass" type="password" class="field" autocomplete="new-password"></label>
+            <label>Role<select id="nu-role" class="field">
+              <option value="user">user</option>
+              <option value="admin">admin</option></select></label>
+          </div>
+          <div id="users-err" class="login-err"></div>
+        </div>
+        <footer class="modal-foot">
+          <span class="spacer"></span>
+          <button id="nu-add" class="btn-mini primary">Add user</button>
+        </footer>
+      </div>
+    </div>
     <div id="help" class="modal" hidden>
       <div class="modal-box help-box">
         <header class="modal-head"><span>Help &amp; guide</span>
@@ -443,6 +473,17 @@
     </div>
     <div id="toasts"></div>
   </div>
+  <div id="login" class="login-overlay" hidden>
+    <form id="login-form" class="login-card">
+      <h1>Companion</h1>
+      <p class="muted">Sign in to your private library.</p>
+      <label>Username<input id="login-user" class="field" autocomplete="username"></label>
+      <label>Password<input id="login-pass" type="password" class="field" autocomplete="current-password"></label>
+      <div id="login-err" class="login-err"></div>
+      <button type="submit" class="btn-mini primary">Sign in</button>
+    </form>
+  </div>
+
   <script src="/static/js/app.js?v={{ js_v }}"></script>
 </body>
 </html>

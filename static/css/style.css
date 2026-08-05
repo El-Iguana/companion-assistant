@@ -106,6 +106,26 @@ body {
 .modal-foot .spacer { flex: 1; }
 .btn-icon-sm { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; }
 
+/* Auth: login overlay + userbar + user list */
+.login-overlay { position: fixed; inset: 0; z-index: 100; background: #12121a;
+  display: flex; align-items: center; justify-content: center; }
+.login-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 28px; width: min(360px, 92vw); display: flex; flex-direction: column; gap: 12px; }
+.login-card h1 { margin: 0; }
+.login-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.login-card .field, #users .field { background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.login-card .field:focus, #users .field:focus { outline: none; border-color: var(--accent); }
+.login-err { color: #e66; font-size: 12px; min-height: 14px; }
+#userbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  margin-top: auto; border-top: 1px solid var(--line); }
+#userbar .spacer { flex: 1; }
+#users-list { margin-bottom: 12px; }
+#users-list li { display: flex; align-items: center; gap: 8px; padding: 7px 4px;
+  border-bottom: 1px solid var(--line); }
+#users-list .u-name { flex: 1; }
+#users-list .u-role { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
 /* Help modal */
 .help-box { width: min(780px, 94vw); }
 .help-body { line-height: 1.5; }

@@ -50,13 +50,35 @@ services/
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local Kokoro TTS (ONNX/CPU) — text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
+  auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js
-data/  characters/ personas/ sessions/ relationships/ presets/ expressions/ settings/   # one JSON per item (settings/ = singleton app.json)
+data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
+data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/   # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 RELATIONSHIP_PLAN.md    # relationship system design + phases
 ```
+
+## Auth / multi-user (privacy)
+
+Login-gated, role-based, per-user isolated libraries.
+- **Accounts** (`models.schema.User`): `data/auth/users/<uid>.json`; password = **scrypt** hash + per-user
+  salt (`services/auth.py`, stdlib — no bcrypt dep). Roles: **`admin`** | **`user`**.
+- **Session**: HMAC-signed stateless token (`uid.exp.sig`) in an **HttpOnly cookie**, signed with
+  `data/auth/secret` (persisted). `current_user`/`require_admin`/`get_ctx` FastAPI dependencies enforce it.
+- **Isolation**: every data route resolves a per-request **`Ctx`** → `data/u/<uid>/{characters,personas,
+  sessions,relationships,presets,settings}`. Users never see each other's data. (`_load/_save/_list` take
+  the Ctx's folder; relationship/settings/persona helpers take `cur`.)
+- **Admin-only**: `/api/users` CRUD + password reset; guards against deleting yourself or the last admin
+  (deleting a user removes their whole `data/u/<uid>` library). Normal users manage only their own libraries.
+- **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** (password `***REMOVED***`) and moves
+  any legacy flat `data/<subdir>/*` into the admin's library so nothing is orphaned. Change the seed
+  password after first login (userbar → your account, or admin reset).
+- **Frontend**: full-screen `#login` overlay; `boot()` checks `/api/me` and gates `init()`; `api()` shows
+  login on any 401; sidebar `#userbar` (name·role, Logout, admin-only **Users** modal).
+- **Volume**: the whole `data/` is now a single bind mount (`run-podman.sh`/`compose.yaml`) so `data/u`,
+  `data/auth`, and per-user subdirs all persist — no more per-subdir mount list to keep in sync.
 
 ## Data model (models/schema.py)
 
@@ -81,12 +103,18 @@ RELATIONSHIP_PLAN.md    # relationship system design + phases
 
 ## API endpoints (main.py)
 
+All `/api/*` except `login`/`me` require auth (401 otherwise); user-mgmt requires admin (403).
 ```
-GET  /                                     SPA
+GET  /                                     SPA (public; the SPA gates itself via /api/me)
+# auth
+POST /api/login ; POST /api/logout         set / clear the signed session cookie
+GET  /api/me                               {user:{username,role}} | {user:null}  (public)
+POST /api/me/password                      change own password (needs current)
+GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
 GET  /api/status                           KoboldCPP {online, version, model}
 POST /api/tts ; GET /api/tts/voices        local Kokoro TTS (text→WAV) / 54 voices
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
-GET/PUT /api/settings                      global app settings (hands_free, wake_word, VAD tuning)
+GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -183,8 +211,10 @@ per-relationship **context override** (⚙).
 - Relationship/mood update on generation only (not re-rolls). Sprites are same-character via img2img from a
   reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
 - All characters adult; intimacy code is abstract state (tiers/thresholds) — the local model writes prose.
-- New `data/` subdirs MUST be added to the volume mounts in `run-podman.sh` + `compose.yaml`
-  (relationships/ was missed once → state wiped on every rebuild until fixed).
+- The whole `data/` is one bind mount now, so new subdirs persist automatically (no per-subdir mount list).
+  Historically `run-podman.sh`/`compose.yaml` mounted each subdir and a missed one wiped state on rebuild.
+- `podman exec` heredocs need `-i`. Auth: never log/return password hashes; keep the scrypt params in
+  `services/auth.py` in sync with stored hashes (changing them invalidates existing passwords).
 
 ## Roadmap / next
 

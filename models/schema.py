@@ -33,6 +33,19 @@ class AppSettings(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth / users (login + per-user isolated libraries)
+# ---------------------------------------------------------------------------
+class User(BaseModel):
+    """A login account. Password is stored as a scrypt hash + per-user salt."""
+    id: str = Field(default_factory=_uid)
+    username: str = ""
+    role: str = "user"                   # "admin" | "user"; only admins manage users
+    salt: str = ""
+    password_hash: str = ""
+    created_at: str = Field(default_factory=_now)
+
+
+# ---------------------------------------------------------------------------
 # Character Card V2/V3
 # ---------------------------------------------------------------------------
 class LorebookEntry(BaseModel):

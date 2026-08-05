@@ -51,13 +51,7 @@ podman run -d \
   $NET_ARG \
   -p "${PORT}:7861" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
-  -v "$SCRIPT_DIR/data/characters:/app/data/characters:z" \
-  -v "$SCRIPT_DIR/data/personas:/app/data/personas:z" \
-  -v "$SCRIPT_DIR/data/sessions:/app/data/sessions:z" \
-  -v "$SCRIPT_DIR/data/relationships:/app/data/relationships:z" \
-  -v "$SCRIPT_DIR/data/presets:/app/data/presets:z" \
-  -v "$SCRIPT_DIR/data/expressions:/app/data/expressions:z" \
-  -v "$SCRIPT_DIR/data/settings:/app/data/settings:z" \
+  -v "$SCRIPT_DIR/data:/app/data:z" \
   "$IMAGE"
 
 echo ""

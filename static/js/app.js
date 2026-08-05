@@ -1,6 +1,9 @@
 // Companion — vanilla JS frontend. No framework, no build step.
 const $ = (s) => document.querySelector(s);
-const api = (p, o) => fetch("/api" + p, o).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)));
+const api = (p, o) => fetch("/api" + p, o).then(r => {
+  if (r.status === 401) { showLogin(); return Promise.reject({ detail: "not authenticated" }); }
+  return r.ok ? r.json() : r.json().then(e => Promise.reject(e));
+});
 
 const state = { cards: [], sessions: [], personas: [], presets: [], persona: null, session: null, streaming: false };
 
@@ -1291,9 +1294,95 @@ $("#help").addEventListener("click", (e) => {
   }).catch(() => {});
 });
 
+// ---- auth -----------------------------------------------------------------
+let currentUser = null;
+
+function showLogin() { $("#login").hidden = false; setTimeout(() => $("#login-user").focus(), 0); }
+function hideLogin() { $("#login").hidden = true; }
+
+async function onAuthed(user) {
+  currentUser = user;
+  hideLogin();
+  $("#user-name").textContent = `${user.username} · ${user.role}`;
+  $("#users-btn").hidden = user.role !== "admin";
+  await init();
+}
+
+$("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = $("#login-user").value.trim(), password = $("#login-pass").value;
+  $("#login-err").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }) });
+    if (!r.ok) { $("#login-err").textContent = "Invalid username or password."; return; }
+    $("#login-pass").value = "";
+    await onAuthed(await r.json());
+  } catch { $("#login-err").textContent = "Login failed — is the server running?"; }
+});
+
+$("#logout-btn").addEventListener("click", async () => {
+  try { await fetch("/api/logout", { method: "POST" }); } catch {}
+  location.reload();
+});
+
+// ---- users admin (admin only) ---------------------------------------------
+$("#users-btn").addEventListener("click", async () => { $("#users-err").textContent = ""; $("#users").hidden = false; await renderUsers(); });
+$("#users-close").addEventListener("click", () => { $("#users").hidden = true; });
+$("#users").addEventListener("click", (e) => { if (e.target.id === "users") $("#users").hidden = true; });
+$("#nu-add").addEventListener("click", addUser);
+
+async function renderUsers() {
+  const ul = $("#users-list"); ul.innerHTML = "";
+  let users = [];
+  try { users = await api("/users"); } catch { return; }
+  for (const u of users) {
+    const li = document.createElement("li");
+    const isSelf = currentUser && u.username === currentUser.username;
+    li.innerHTML = `<span class="u-name">${u.username}</span><span class="u-role">${u.role}</span>` +
+      `<button class="btn-mini u-pw" title="Reset password">Reset PW</button>` +
+      (isSelf ? "" : `<button class="btn-mini danger u-del" title="Delete user">✕</button>`);
+    li.querySelector(".u-pw").onclick = () => resetUserPw(u);
+    const del = li.querySelector(".u-del");
+    if (del) del.onclick = () => delUser(u);
+    ul.appendChild(li);
+  }
+}
+
+async function addUser() {
+  const username = $("#nu-name").value.trim(), password = $("#nu-pass").value, role = $("#nu-role").value;
+  $("#users-err").textContent = "";
+  try {
+    await api("/users", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, role }) });
+    $("#nu-name").value = ""; $("#nu-pass").value = "";
+    await renderUsers();
+  } catch (e) { $("#users-err").textContent = e.detail || "Could not add user."; }
+}
+
+async function delUser(u) {
+  if (!confirm(`Delete user "${u.username}" and their entire private library? This cannot be undone.`)) return;
+  try { await api("/users/" + u.id, { method: "DELETE" }); await renderUsers(); }
+  catch (e) { $("#users-err").textContent = e.detail || "Delete failed."; }
+}
+
+async function resetUserPw(u) {
+  const pw = prompt(`New password for "${u.username}" (min 4 chars):`);
+  if (!pw) return;
+  try { await api(`/users/${u.id}/password`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: pw }) }); alert("Password updated."); }
+  catch (e) { alert(e.detail || "Reset failed."); }
+}
+
 // ---- boot -----------------------------------------------------------------
-(async function init() {
+async function init() {
   await Promise.all([loadCards(), loadPersonas(), loadPresets(), refreshStatus(), loadSettings()]);
   await loadSessions();
-  setInterval(refreshStatus, 15000);
+  if (!init._statusTimer) init._statusTimer = setInterval(refreshStatus, 15000);
+}
+
+(async function boot() {
+  let user = null;
+  try { user = (await (await fetch("/api/me")).json()).user; } catch {}
+  if (user) await onAuthed(user); else showLogin();
 })();

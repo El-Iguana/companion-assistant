@@ -3,17 +3,22 @@
 A character-card AI companion. Talks to KoboldCPP (text) and optionally ComfyUI
 (portraits/expressions) on the shared `sillytavern-net` Podman network.
 
-No database: cards, personas, and sessions are JSON files under data/.
+No database: cards, personas, and sessions are JSON files under data/. Multi-user:
+each account has its own isolated library under data/u/<user_id>/… ; auth is a
+signed HttpOnly cookie (see services/auth.py). Only admins manage users.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import secrets
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.responses import (
     HTMLResponse, JSONResponse, StreamingResponse, Response,
 )
@@ -22,20 +27,22 @@ from fastapi.templating import Jinja2Templates
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
-    AppSettings,
+    AppSettings, User,
 )
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient
-from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt
+from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt, auth
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
 DATA = BASE / "data"
-CARDS, PERSONAS, SESSIONS = DATA / "characters", DATA / "personas", DATA / "sessions"
-RELATIONSHIPS = DATA / "relationships"
-PRESETS = DATA / "presets"
-SETTINGS = DATA / "settings"
-for d in (CARDS, PERSONAS, SESSIONS, RELATIONSHIPS, PRESETS, DATA / "expressions", SETTINGS):
+AUTH = DATA / "auth"
+USERS = AUTH / "users"
+UROOT = DATA / "u"                       # per-user library roots: data/u/<uid>/<subdir>/
+SUBDIRS = ("characters", "personas", "sessions", "relationships", "presets", "settings")
+# Old flat single-user dirs — migrated into the first admin on first run.
+LEGACY = {name: DATA / name for name in SUBDIRS}
+for d in (AUTH, USERS, UROOT):
     d.mkdir(parents=True, exist_ok=True)
 
 KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://koboldcpp:5001")
@@ -72,8 +79,112 @@ def _list(folder: Path, cls):
     return out
 
 
-def _load_settings() -> AppSettings:
-    p = SETTINGS / "app.json"
+# --------------------------------------------------------------------------
+# Auth: secret, user store, per-user context, dependencies
+# --------------------------------------------------------------------------
+_SECRET: Optional[bytes] = None
+
+
+def _secret() -> bytes:
+    global _SECRET
+    if _SECRET is None:
+        f = AUTH / "secret"
+        if not f.exists():
+            f.write_text(secrets.token_hex(32))
+        _SECRET = bytes.fromhex(f.read_text().strip())
+    return _SECRET
+
+
+def _save_user(u: User) -> None:
+    (USERS / f"{u.id}.json").write_text(u.model_dump_json(indent=2))
+
+
+def _all_users() -> list[User]:
+    return _list(USERS, User)
+
+
+def _user_by_id(uid: str) -> Optional[User]:
+    return _load(USERS, uid, User) if uid else None
+
+
+def _user_by_name(name: str) -> Optional[User]:
+    name = (name or "").strip().lower()
+    return next((u for u in _all_users() if u.username.lower() == name), None) if name else None
+
+
+@dataclass
+class Ctx:
+    """Per-request handle to the authenticated user and their private library dirs."""
+    user: User
+    cards: Path
+    personas: Path
+    sessions: Path
+    relationships: Path
+    presets: Path
+    settings: Path
+
+
+def _user_root(uid: str) -> Path:
+    root = UROOT / uid
+    for s in SUBDIRS:
+        (root / s).mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _ctx_for(user: User) -> Ctx:
+    r = _user_root(user.id)
+    return Ctx(user, r / "characters", r / "personas", r / "sessions",
+               r / "relationships", r / "presets", r / "settings")
+
+
+async def current_user(request: Request) -> User:
+    tok = request.cookies.get("session")
+    uid = auth.read_token(_secret(), tok) if tok else None
+    u = _user_by_id(uid) if uid else None
+    if not u:
+        raise HTTPException(401, "authentication required")
+    return u
+
+
+async def require_admin(user: User = Depends(current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(403, "admin only")
+    return user
+
+
+async def get_ctx(user: User = Depends(current_user)) -> Ctx:
+    return _ctx_for(user)
+
+
+def _seed_and_migrate() -> None:
+    """First run: create the ADMIN account and move any legacy flat data into it."""
+    if _all_users():
+        return
+    salt = auth.new_salt()
+    admin = User(username="ADMIN", role="admin", salt=salt,
+                 password_hash=auth.hash_password("***REMOVED***", salt))
+    _save_user(admin)
+    root = _user_root(admin.id)
+    for name, src in LEGACY.items():
+        if not src.exists():
+            continue
+        for f in src.glob("*.json"):
+            target = root / name / f.name
+            if not target.exists():
+                try:
+                    shutil.move(str(f), str(target))
+                except Exception:
+                    pass
+
+
+_seed_and_migrate()
+
+
+# --------------------------------------------------------------------------
+# Per-user settings / relationship / persona helpers (take the request Ctx)
+# --------------------------------------------------------------------------
+def _load_settings(cur: Ctx) -> AppSettings:
+    p = cur.settings / "app.json"
     if p.exists():
         try:
             return AppSettings.model_validate_json(p.read_text())
@@ -82,41 +193,36 @@ def _load_settings() -> AppSettings:
     return AppSettings()
 
 
-def _save_settings(s: AppSettings) -> None:
-    (SETTINGS / "app.json").write_text(s.model_dump_json(indent=2))
+def _save_settings(cur: Ctx, s: AppSettings) -> None:
+    (cur.settings / "app.json").write_text(s.model_dump_json(indent=2))
 
 
-def _load_relationship(character_id: str, persona_id: str) -> Relationship:
-    p = RELATIONSHIPS / f"{character_id}__{persona_id}.json"
+def _load_relationship(cur: Ctx, character_id: str, persona_id: str) -> Relationship:
+    p = cur.relationships / f"{character_id}__{persona_id}.json"
     if p.exists():
         return Relationship.model_validate_json(p.read_text())
     return Relationship(character_id=character_id, persona_id=persona_id)
 
 
-def _save_relationship(rel: Relationship) -> None:
-    (RELATIONSHIPS / f"{rel.character_id}__{rel.persona_id}.json").write_text(
+def _save_relationship(cur: Ctx, rel: Relationship) -> None:
+    (cur.relationships / f"{rel.character_id}__{rel.persona_id}.json").write_text(
         rel.model_dump_json(indent=2))
 
 
-def _clear_other_default_personas(keep_id: str) -> None:
-    for p in _list(PERSONAS, Persona):
+def _clear_other_default_personas(cur: Ctx, keep_id: str) -> None:
+    for p in _list(cur.personas, Persona):
         if p.id != keep_id and p.is_default:
             p.is_default = False
-            _save(p, PERSONAS)
+            _save(p, cur.personas)
 
 
-def _default_persona() -> Persona:
-    for p in _list(PERSONAS, Persona):
+def _default_persona(cur: Ctx) -> Persona:
+    for p in _list(cur.personas, Persona):
         if p.is_default:
             return p
     p = Persona(name="User", is_default=True)
-    _save(p, PERSONAS)
+    _save(p, cur.personas)
     return p
-
-
-@app.on_event("startup")
-async def _startup():
-    _default_persona()
 
 
 @app.on_event("shutdown")
@@ -144,13 +250,113 @@ async def index(request: Request):
     })
 
 
+# --------------------------------------------------------------------------
+# Auth routes (login / logout / me) + admin user management
+# --------------------------------------------------------------------------
+def _safe_user(u: User) -> dict:
+    return {"id": u.id, "username": u.username, "role": u.role, "created_at": u.created_at}
+
+
+@app.post("/api/login")
+async def login(body: dict):
+    u = _user_by_name(body.get("username", ""))
+    if not u or not auth.verify_password(body.get("password", ""), u.salt, u.password_hash):
+        raise HTTPException(401, "invalid username or password")
+    resp = JSONResponse({"username": u.username, "role": u.role})
+    resp.set_cookie("session", auth.make_token(_secret(), u.id),
+                    httponly=True, samesite="lax", max_age=30 * 86400, path="/")
+    return resp
+
+
+@app.post("/api/logout")
+async def logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("session", path="/")
+    return resp
+
+
+@app.get("/api/me")
+async def me(request: Request):
+    tok = request.cookies.get("session")
+    uid = auth.read_token(_secret(), tok) if tok else None
+    u = _user_by_id(uid) if uid else None
+    return {"user": {"username": u.username, "role": u.role} if u else None}
+
+
+@app.post("/api/me/password")
+async def change_my_password(body: dict, user: User = Depends(current_user)):
+    if not auth.verify_password(body.get("current", ""), user.salt, user.password_hash):
+        raise HTTPException(403, "current password incorrect")
+    pw = body.get("password") or ""
+    if len(pw) < 4:
+        raise HTTPException(400, "password too short (min 4)")
+    user.salt = auth.new_salt()
+    user.password_hash = auth.hash_password(pw, user.salt)
+    _save_user(user)
+    return {"ok": True}
+
+
+@app.get("/api/users")
+async def list_users(_: User = Depends(require_admin)):
+    return [_safe_user(u) for u in sorted(_all_users(), key=lambda x: x.username.lower())]
+
+
+@app.post("/api/users")
+async def create_user(body: dict, _: User = Depends(require_admin)):
+    name = (body.get("username") or "").strip()
+    pw = body.get("password") or ""
+    role = body.get("role") if body.get("role") in ("admin", "user") else "user"
+    if not name:
+        raise HTTPException(400, "username required")
+    if len(pw) < 4:
+        raise HTTPException(400, "password too short (min 4)")
+    if _user_by_name(name):
+        raise HTTPException(409, "username already exists")
+    salt = auth.new_salt()
+    u = User(username=name, role=role, salt=salt, password_hash=auth.hash_password(pw, salt))
+    _save_user(u)
+    _user_root(u.id)            # create their empty private library
+    return _safe_user(u)
+
+
+@app.delete("/api/users/{uid}")
+async def delete_user(uid: str, admin: User = Depends(require_admin)):
+    u = _user_by_id(uid)
+    if not u:
+        raise HTTPException(404, "user not found")
+    if u.id == admin.id:
+        raise HTTPException(400, "cannot delete yourself")
+    if u.role == "admin" and sum(1 for x in _all_users() if x.role == "admin") <= 1:
+        raise HTTPException(400, "cannot delete the last admin")
+    (USERS / f"{uid}.json").unlink(missing_ok=True)
+    shutil.rmtree(UROOT / uid, ignore_errors=True)   # remove their private library
+    return {"ok": True}
+
+
+@app.post("/api/users/{uid}/password")
+async def reset_password(uid: str, body: dict, _: User = Depends(require_admin)):
+    u = _user_by_id(uid)
+    if not u:
+        raise HTTPException(404, "user not found")
+    pw = body.get("password") or ""
+    if len(pw) < 4:
+        raise HTTPException(400, "password too short (min 4)")
+    u.salt = auth.new_salt()
+    u.password_hash = auth.hash_password(pw, u.salt)
+    _save_user(u)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Status / voice (auth required)
+# --------------------------------------------------------------------------
 @app.get("/api/status")
-async def status():
+async def status(_: User = Depends(current_user)):
     return await kobold.check_status()
 
 
 @app.post("/api/tts")
-async def tts_synth(body: dict):
+async def tts_synth(body: dict, _: User = Depends(current_user)):
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text required")
@@ -163,12 +369,12 @@ async def tts_synth(body: dict):
 
 
 @app.get("/api/tts/voices")
-async def tts_voices():
+async def tts_voices(_: User = Depends(current_user)):
     return {"voices": await asyncio.to_thread(tts.voices)}
 
 
 @app.post("/api/stt")
-async def stt_transcribe(file: UploadFile = File(...)):
+async def stt_transcribe(file: UploadFile = File(...), _: User = Depends(current_user)):
     audio = await file.read()
     if not audio:
         raise HTTPException(400, "empty audio")
@@ -180,16 +386,16 @@ async def stt_transcribe(file: UploadFile = File(...)):
 
 
 @app.get("/api/settings")
-async def get_settings():
-    return _load_settings().model_dump()
+async def get_settings(cur: Ctx = Depends(get_ctx)):
+    return _load_settings(cur).model_dump()
 
 
 @app.put("/api/settings")
-async def put_settings(body: dict):
-    data = _load_settings().model_dump()
+async def put_settings(body: dict, cur: Ctx = Depends(get_ctx)):
+    data = _load_settings(cur).model_dump()
     data.update({k: v for k, v in body.items() if k in data})   # ignore unknown keys
     s = AppSettings(**data)
-    _save_settings(s)
+    _save_settings(cur, s)
     return s.model_dump()
 
 
@@ -197,10 +403,10 @@ async def put_settings(body: dict):
 # Character cards
 # --------------------------------------------------------------------------
 @app.get("/api/cards")
-async def list_cards():
+async def list_cards(cur: Ctx = Depends(get_ctx)):
     # Trim the heavy expression sprite blobs from the list; expose a flag instead.
     out = []
-    for c in _list(CARDS, CharacterCard):
+    for c in _list(cur.cards, CharacterCard):
         d = c.model_dump(exclude={"expressions"})
         d["has_expressions"] = bool(c.expressions)
         out.append(d)
@@ -208,48 +414,48 @@ async def list_cards():
 
 
 @app.get("/api/cards/{card_id}")
-async def get_card(card_id: str):
-    c = _load(CARDS, card_id, CharacterCard)
+async def get_card(card_id: str, cur: Ctx = Depends(get_ctx)):
+    c = _load(cur.cards, card_id, CharacterCard)
     if not c:
         raise HTTPException(404, "card not found")
     return c.model_dump()
 
 
 @app.post("/api/cards/import")
-async def import_card(file: UploadFile = File(...)):
+async def import_card(file: UploadFile = File(...), cur: Ctx = Depends(get_ctx)):
     raw = await file.read()
     try:
         card = card_io.import_card_bytes(raw, file.filename or "")
     except Exception as e:
         raise HTTPException(400, f"could not parse card: {e}")
-    _save(card, CARDS)
+    _save(card, cur.cards)
     return card.model_dump()
 
 
 @app.post("/api/cards")
-async def create_card(card: CharacterCard):
-    _save(card, CARDS)
+async def create_card(card: CharacterCard, cur: Ctx = Depends(get_ctx)):
+    _save(card, cur.cards)
     return card.model_dump()
 
 
 @app.put("/api/cards/{card_id}")
-async def update_card(card_id: str, card: CharacterCard):
+async def update_card(card_id: str, card: CharacterCard, cur: Ctx = Depends(get_ctx)):
     card.id = card_id
-    _save(card, CARDS)
+    _save(card, cur.cards)
     return card.model_dump()
 
 
 @app.delete("/api/cards/{card_id}")
-async def delete_card(card_id: str):
-    p = CARDS / f"{card_id}.json"
+async def delete_card(card_id: str, cur: Ctx = Depends(get_ctx)):
+    p = cur.cards / f"{card_id}.json"
     if p.exists():
         p.unlink()
     return {"ok": True}
 
 
 @app.get("/api/cards/{card_id}/export")
-async def export_card(card_id: str, version: int = 2):
-    c = _load(CARDS, card_id, CharacterCard)
+async def export_card(card_id: str, version: int = 2, cur: Ctx = Depends(get_ctx)):
+    c = _load(cur.cards, card_id, CharacterCard)
     if not c:
         raise HTTPException(404, "card not found")
     png = card_io.export_card_png(c, version=version)
@@ -262,12 +468,12 @@ async def export_card(card_id: str, version: int = 2):
 # ComfyUI + expression sprites
 # --------------------------------------------------------------------------
 @app.get("/api/comfyui/status")
-async def comfyui_status():
+async def comfyui_status(_: User = Depends(current_user)):
     return await comfy.check_status()
 
 
 @app.get("/api/comfyui/checkpoints")
-async def comfyui_checkpoints():
+async def comfyui_checkpoints(_: User = Depends(current_user)):
     try:
         return {"checkpoints": await comfy.list_checkpoints()}
     except Exception as e:
@@ -275,14 +481,14 @@ async def comfyui_checkpoints():
 
 
 @app.get("/api/expressions/emotions")
-async def expression_emotions():
+async def expression_emotions(_: User = Depends(current_user)):
     return {"core": expressions.CORE_EMOTIONS, "full": expressions.FULL_EMOTIONS}
 
 
 @app.post("/api/cards/{card_id}/expressions")
-async def generate_expressions(card_id: str, body: dict):
+async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
     """Generate an expression sprite per emotion via ComfyUI and store them on the card."""
-    card = _load(CARDS, card_id, CharacterCard)
+    card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
     checkpoint = body.get("checkpoint")
@@ -320,14 +526,14 @@ async def generate_expressions(card_id: str, body: dict):
     # between Core/Full starts fresh — no stale sprites left over. Single-sprite
     # regen (below) still merges.
     card.expressions = sprites
-    _save(card, CARDS)
+    _save(card, cur.cards)
     return {"generated": list(sprites.keys()), "total": len(card.expressions)}
 
 
 @app.get("/api/cards/{card_id}/expression/{emotion}")
-async def get_expression(card_id: str, emotion: str):
+async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)):
     """Return one expression sprite as a PNG (falls back to neutral, then card art)."""
-    card = _load(CARDS, card_id, CharacterCard)
+    card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
     b64 = card.expressions.get(emotion) or card.expressions.get("neutral") or card.image
@@ -338,18 +544,18 @@ async def get_expression(card_id: str, emotion: str):
 
 
 @app.get("/api/cards/{card_id}/expressions")
-async def list_expressions(card_id: str):
+async def list_expressions(card_id: str, cur: Ctx = Depends(get_ctx)):
     """Which emotions this card currently has sprites for (names only, no blobs)."""
-    card = _load(CARDS, card_id, CharacterCard)
+    card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
     return {"emotions": sorted(card.expressions.keys())}
 
 
 @app.post("/api/cards/{card_id}/expression/{emotion}")
-async def regenerate_expression(card_id: str, emotion: str, body: dict):
+async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx = Depends(get_ctx)):
     """(Re)generate a single expression sprite."""
-    card = _load(CARDS, card_id, CharacterCard)
+    card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
     checkpoint = body.get("checkpoint")
@@ -366,17 +572,17 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict):
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
     card.expressions.update(sprites)
-    _save(card, CARDS)
+    _save(card, cur.cards)
     return {"ok": True, "emotion": emotion}
 
 
 @app.delete("/api/cards/{card_id}/expression/{emotion}")
-async def delete_expression(card_id: str, emotion: str):
-    card = _load(CARDS, card_id, CharacterCard)
+async def delete_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)):
+    card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
     card.expressions.pop(emotion, None)
-    _save(card, CARDS)
+    _save(card, cur.cards)
     return {"ok": True, "total": len(card.expressions)}
 
 
@@ -384,30 +590,30 @@ async def delete_expression(card_id: str, emotion: str):
 # Personas
 # --------------------------------------------------------------------------
 @app.get("/api/personas")
-async def list_personas():
-    return [p.model_dump() for p in _list(PERSONAS, Persona)]
+async def list_personas(cur: Ctx = Depends(get_ctx)):
+    return [p.model_dump() for p in _list(cur.personas, Persona)]
 
 
 @app.post("/api/personas")
-async def create_persona(persona: Persona):
-    _save(persona, PERSONAS)
+async def create_persona(persona: Persona, cur: Ctx = Depends(get_ctx)):
+    _save(persona, cur.personas)
     if persona.is_default:
-        _clear_other_default_personas(persona.id)
+        _clear_other_default_personas(cur, persona.id)
     return persona.model_dump()
 
 
 @app.put("/api/personas/{persona_id}")
-async def update_persona(persona_id: str, persona: Persona):
+async def update_persona(persona_id: str, persona: Persona, cur: Ctx = Depends(get_ctx)):
     persona.id = persona_id
-    _save(persona, PERSONAS)
+    _save(persona, cur.personas)
     if persona.is_default:
-        _clear_other_default_personas(persona.id)
+        _clear_other_default_personas(cur, persona.id)
     return persona.model_dump()
 
 
 @app.delete("/api/personas/{persona_id}")
-async def delete_persona(persona_id: str):
-    p = PERSONAS / f"{persona_id}.json"
+async def delete_persona(persona_id: str, cur: Ctx = Depends(get_ctx)):
+    p = cur.personas / f"{persona_id}.json"
     if p.exists():
         p.unlink()
     return {"ok": True}
@@ -417,9 +623,9 @@ async def delete_persona(persona_id: str):
 # Relationship
 # --------------------------------------------------------------------------
 @app.get("/api/relationship")
-async def get_relationship(character_id: str, persona_id: str):
-    rel = _load_relationship(character_id, persona_id)
-    card = _load(CARDS, character_id, CharacterCard)
+async def get_relationship(character_id: str, persona_id: str, cur: Ctx = Depends(get_ctx)):
+    rel = _load_relationship(cur, character_id, persona_id)
+    card = _load(cur.cards, character_id, CharacterCard)
     s = relationship.summary(rel)
     s["power_dynamic"] = rel.power_dynamic if rel.power_dynamic is not None else (card.power_dynamic if card else 0.0)
     s["social_acceptance"] = rel.social_acceptance if rel.social_acceptance is not None else (card.social_acceptance if card else 50.0)
@@ -428,17 +634,17 @@ async def get_relationship(character_id: str, persona_id: str):
 
 
 @app.put("/api/relationship")
-async def set_relationship(body: dict):
+async def set_relationship(body: dict, cur: Ctx = Depends(get_ctx)):
     """Per-relationship override of context (power_dynamic / social_acceptance). Null clears -> card default."""
     cid, pid = body.get("character_id"), body.get("persona_id")
     if not cid or not pid:
         raise HTTPException(400, "character_id and persona_id required")
-    rel = _load_relationship(cid, pid)
+    rel = _load_relationship(cur, cid, pid)
     if "power_dynamic" in body:
         rel.power_dynamic = body["power_dynamic"]
     if "social_acceptance" in body:
         rel.social_acceptance = body["social_acceptance"]
-    _save_relationship(rel)
+    _save_relationship(cur, rel)
     return relationship.summary(rel)
 
 
@@ -446,34 +652,34 @@ async def set_relationship(body: dict):
 # Relationship presets (reusable scenario seeds)
 # --------------------------------------------------------------------------
 @app.get("/api/presets")
-async def list_presets():
-    return [p.model_dump() for p in _list(PRESETS, RelationshipPreset)]
+async def list_presets(cur: Ctx = Depends(get_ctx)):
+    return [p.model_dump() for p in _list(cur.presets, RelationshipPreset)]
 
 
 @app.post("/api/presets")
-async def create_preset(preset: RelationshipPreset):
-    _save(preset, PRESETS)
+async def create_preset(preset: RelationshipPreset, cur: Ctx = Depends(get_ctx)):
+    _save(preset, cur.presets)
     return preset.model_dump()
 
 
 @app.get("/api/presets/{preset_id}")
-async def get_preset(preset_id: str):
-    p = _load(PRESETS, preset_id, RelationshipPreset)
+async def get_preset(preset_id: str, cur: Ctx = Depends(get_ctx)):
+    p = _load(cur.presets, preset_id, RelationshipPreset)
     if not p:
         raise HTTPException(404, "preset not found")
     return p.model_dump()
 
 
 @app.put("/api/presets/{preset_id}")
-async def update_preset(preset_id: str, preset: RelationshipPreset):
+async def update_preset(preset_id: str, preset: RelationshipPreset, cur: Ctx = Depends(get_ctx)):
     preset.id = preset_id
-    _save(preset, PRESETS)
+    _save(preset, cur.presets)
     return preset.model_dump()
 
 
 @app.delete("/api/presets/{preset_id}")
-async def delete_preset(preset_id: str):
-    p = PRESETS / f"{preset_id}.json"
+async def delete_preset(preset_id: str, cur: Ctx = Depends(get_ctx)):
+    p = cur.presets / f"{preset_id}.json"
     if p.exists():
         p.unlink()
     return {"ok": True}
@@ -483,20 +689,20 @@ async def delete_preset(preset_id: str):
 # Sessions
 # --------------------------------------------------------------------------
 @app.get("/api/sessions")
-async def list_sessions():
+async def list_sessions(cur: Ctx = Depends(get_ctx)):
     return [
         {"id": s.id, "title": s.title, "character_id": s.character_id,
          "updated_at": s.updated_at, "messages": len(s.messages)}
-        for s in _list(SESSIONS, ChatSession)
+        for s in _list(cur.sessions, ChatSession)
     ]
 
 
 @app.post("/api/sessions")
-async def create_session(body: dict):
-    card = _load(CARDS, body.get("character_id", ""), CharacterCard)
+async def create_session(body: dict, cur: Ctx = Depends(get_ctx)):
+    card = _load(cur.cards, body.get("character_id", ""), CharacterCard)
     if not card:
         raise HTTPException(400, "character_id required and must exist")
-    persona = _load(PERSONAS, body.get("persona_id", ""), Persona) or _default_persona()
+    persona = _load(cur.personas, body.get("persona_id", ""), Persona) or _default_persona(cur)
 
     session = ChatSession(
         title=card.name, character_id=card.id, persona_id=persona.id,
@@ -506,7 +712,7 @@ async def create_session(body: dict):
     scenario_note = ""
     preset_id = body.get("preset_id")
     if preset_id and body.get("mode") == "scenario":
-        preset = _load(PRESETS, preset_id, RelationshipPreset)
+        preset = _load(cur.presets, preset_id, RelationshipPreset)
         if preset:
             session.relationship = relationship.from_preset(preset, card.id, persona.id)
             scenario_note = preset.scenario_note or ""
@@ -527,13 +733,13 @@ async def create_session(body: dict):
         role="char",
         content=prompt_builder.substitute_macros(greeting, card.name, persona.name),
     ))
-    _save(session, SESSIONS)
+    _save(session, cur.sessions)
     return session.model_dump()
 
 
 @app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str):
-    s = _load(SESSIONS, session_id, ChatSession)
+async def get_session(session_id: str, cur: Ctx = Depends(get_ctx)):
+    s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
     d = s.model_dump()
@@ -543,17 +749,17 @@ async def get_session(session_id: str):
 
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    p = SESSIONS / f"{session_id}.json"
+async def delete_session(session_id: str, cur: Ctx = Depends(get_ctx)):
+    p = cur.sessions / f"{session_id}.json"
     if p.exists():
         p.unlink()
     return {"ok": True}
 
 
 @app.put("/api/sessions/{session_id}/swipe")
-async def set_swipe(session_id: str, body: dict):
+async def set_swipe(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
     """Select which stored alternate (swipe) of the last char message is active."""
-    s = _load(SESSIONS, session_id, ChatSession)
+    s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
     idx = int(body.get("swipe_index", 0))
@@ -567,7 +773,7 @@ async def set_swipe(session_id: str, body: dict):
                     m.swipe_expressions.append("")
                 # Reclassify this swipe if not already cached (and the card has sprites).
                 if not m.swipe_expressions[idx]:
-                    card = _load(CARDS, s.character_id, CharacterCard)
+                    card = _load(cur.cards, s.character_id, CharacterCard)
                     if card and card.expressions:
                         try:
                             m.swipe_expressions[idx] = await expressions.classify(
@@ -576,21 +782,21 @@ async def set_swipe(session_id: str, body: dict):
                             m.swipe_expressions[idx] = "neutral"
                 expr = m.swipe_expressions[idx] or m.expression
                 m.expression = expr
-                _save(s, SESSIONS)
+                _save(s, cur.sessions)
             break
     return {"ok": True, "expression": expr}
 
 
 @app.delete("/api/sessions/{session_id}/messages")
-async def clear_messages(session_id: str):
-    s = _load(SESSIONS, session_id, ChatSession)
+async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
+    s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
     # Keep the opening greeting; drop the rest and reset memory.
     s.messages = s.messages[:1]
     s.memory.summary = ""
     s.memory.last_summarized_index = 0
-    _save(s, SESSIONS)
+    _save(s, cur.sessions)
     return {"ok": True}
 
 
@@ -602,12 +808,12 @@ def _sse(obj: dict) -> str:
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest):
-    session = _load(SESSIONS, req.session_id, ChatSession)
+async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
+    session = _load(cur.sessions, req.session_id, ChatSession)
     if not session:
         raise HTTPException(404, "session not found")
-    card = _load(CARDS, session.character_id, CharacterCard)
-    persona = _load(PERSONAS, session.persona_id, Persona) or _default_persona()
+    card = _load(cur.cards, session.character_id, CharacterCard)
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
     if not card:
         raise HTTPException(400, "session has no character")
 
@@ -624,7 +830,7 @@ async def chat(req: ChatRequest):
         session.messages.append(ChatMessage(role="user", content=req.input_text))
 
     scenario = session.relationship is not None
-    rel = session.relationship if scenario else _load_relationship(session.character_id, persona.id)
+    rel = session.relationship if scenario else _load_relationship(cur, session.character_id, persona.id)
     power = rel.power_dynamic if rel.power_dynamic is not None else card.power_dynamic
     social = rel.social_acceptance if rel.social_acceptance is not None else card.social_acceptance
     rel_note = relationship.descriptor(rel, card.name, persona.name, power, social)
@@ -689,7 +895,7 @@ async def chat(req: ChatRequest):
             if scenario:
                 session.relationship = rel      # persisted with the session
             else:
-                _save_relationship(rel)
+                _save_relationship(cur, rel)
 
         # Keep per-swipe emotions aligned with swipes (older swipes cached from before).
         exprs = list(_pending_exprs)
@@ -706,7 +912,7 @@ async def chat(req: ChatRequest):
         except Exception:
             pass
 
-        _save(session, SESSIONS)
+        _save(session, cur.sessions)
         done_evt = {"done": True, "message_id": msg.id, "expression": msg.expression,
                     "mood": session.mood.mood, "valence": session.mood.valence,
                     "relationship": relationship.summary(rel)}

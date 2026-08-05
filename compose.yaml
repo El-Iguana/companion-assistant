@@ -18,13 +18,7 @@ services:
     environment:
       - KOBOLD_URL=http://koboldcpp:5001
     volumes:
-      - ./data/characters:/app/data/characters:z
-      - ./data/personas:/app/data/personas:z
-      - ./data/sessions:/app/data/sessions:z
-      - ./data/relationships:/app/data/relationships:z
-      - ./data/presets:/app/data/presets:z
-      - ./data/expressions:/app/data/expressions:z
-      - ./data/settings:/app/data/settings:z
+      - ./data:/app/data:z
     networks:
       - sillytavern-net
     healthcheck:
