@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import io
 import re
 
 from models.schema import CharacterCard
@@ -156,6 +157,17 @@ def _appearance_prompt(card: CharacterCard) -> str:
     return f"{card.name}, {base}" if base else card.name
 
 
+def _uploaded_base(b64_img: str, w: int, h: int) -> str:
+    """Turn the card's uploaded portrait into an img2img base: RGB, cropped to the
+    sprite's portrait aspect (cover + center-crop), re-encoded PNG base64."""
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(base64.b64decode(b64_img))).convert("RGB")
+    im = ImageOps.fit(im, (w, h), method=Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
 # ---------------------------------------------------------------------------
 # Background removal (rembg) — produces transparent sprites.
 # Sessions are cached module-wide so the ONNX model loads only once.
@@ -194,8 +206,17 @@ async def generate_expressions(
     style: str = "anime",
     emotions: list[str] | None = None,
     transparent: bool = True,
+    from_upload: bool = False,
 ) -> dict[str, str]:
-    """Generate a sprite per emotion. Returns {emotion: base64 PNG}."""
+    """Generate a sprite per emotion. Returns {emotion: base64 PNG}.
+
+    The BASE portrait every emotion is derived from (via img2img partial-denoise, so
+    all sprites are the SAME person) is either:
+      - `from_upload`: the card's uploaded portrait (`card.image`) — keeps the user's
+        own character. Note: img2img still restyles it toward the checkpoint, so
+        likeness drifts somewhat at the tuned denoise.
+      - otherwise: a fresh txt2img portrait from the appearance prompt.
+    """
     emotions = emotions or EMOTIONS
     appearance = _appearance_prompt(card)
     seed = _seed_for(card)
@@ -203,17 +224,18 @@ async def generate_expressions(
     # Portrait aspect regardless of the model's square default.
     w, h = (768, 1024) if d["is_sdxl"] or d["is_flux"] else (512, 768)
 
-    # One deterministic BASE portrait of the character. Every expression is derived
-    # from it via img2img (partial denoise), so all sprites are the SAME person and
-    # only the facial expression changes. The base is reproducible (fixed seed), so
-    # regenerating a single emotion later still matches the rest.
-    base_positive = (f"{appearance}, {EMOTION_PROMPTS['neutral']}, solo portrait, upper body, "
-                     "looking at viewer, plain flat pastel background")
-    base = await comfy.generate(
-        positive=base_positive, negative=_NEG, checkpoint=checkpoint, style=style,
-        width=w, height=h, steps=d["steps"], cfg=d["cfg"],
-        sampler=d["sampler"], scheduler=d["scheduler"], seed=seed,
-    )
+    # The base is reproducible (fixed seed / fixed upload), so regenerating a single
+    # emotion later still matches the rest.
+    if from_upload and card.image:
+        base = _uploaded_base(card.image, w, h)
+    else:
+        base_positive = (f"{appearance}, {EMOTION_PROMPTS['neutral']}, solo portrait, upper body, "
+                         "looking at viewer, plain flat pastel background")
+        base = await comfy.generate(
+            positive=base_positive, negative=_NEG, checkpoint=checkpoint, style=style,
+            width=w, height=h, steps=d["steps"], cfg=d["cfg"],
+            sampler=d["sampler"], scheduler=d["scheduler"], seed=seed,
+        )
 
     async def finish(b64: str) -> str:
         # rembg is CPU-bound and sync — offload so we don't block the loop.

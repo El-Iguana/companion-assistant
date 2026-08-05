@@ -291,6 +291,11 @@ async def generate_expressions(card_id: str, body: dict):
     if "appearance" in body:
         card.appearance = body["appearance"]
 
+    # Base source: the uploaded portrait (img2img) vs. txt2img. Persist the choice so
+    # single-sprite regen from the gallery stays consistent with the batch.
+    from_upload = bool(body.get("from_upload")) and bool(card.image)
+    card.expr_from_upload = from_upload
+
     # Resolve which emotions to generate: explicit list > preset ("core"|"full").
     emotions = body.get("emotions")
     if not emotions:
@@ -303,6 +308,7 @@ async def generate_expressions(card_id: str, body: dict):
             style=body.get("style", "anime"),
             emotions=emotions,
             transparent=body.get("transparent", True),
+            from_upload=from_upload,
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
@@ -349,6 +355,7 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict):
         sprites = await expressions.generate_expressions(
             comfy, card, checkpoint=checkpoint, style=body.get("style", "anime"),
             emotions=[emotion], transparent=body.get("transparent", True),
+            from_upload=card.expr_from_upload,   # match how the batch was generated
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")

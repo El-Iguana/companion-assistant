@@ -270,6 +270,8 @@ function renderSession(session) {
   $("#voice-test").hidden = !(card && ttsEnabled);
   $("#expr-panel").hidden = true;
   if (card) $("#expr-appearance").value = card.appearance || "";
+  $("#expr-from-upload-row").hidden = !(card && card.image);   // only when a portrait exists
+  $("#expr-from-upload").checked = !!(card && card.expr_from_upload);
   renderMessages();
   loadRelationship();
   $("#input").disabled = false; $("#send").disabled = false; $("#regen").disabled = false;
@@ -524,12 +526,14 @@ $("#expr-generate").addEventListener("click", async () => {
       body: JSON.stringify({
         appearance: $("#expr-appearance").value,
         checkpoint, style: $("#expr-style").value, preset,
-        transparent: $("#expr-transparent").checked
+        transparent: $("#expr-transparent").checked,
+        from_upload: $("#expr-from-upload").checked
       })
     });
     $("#expr-status").textContent = `Done — ${res.generated.length} sprites.`;
     card.has_expressions = true;
     card.appearance = $("#expr-appearance").value;
+    card.expr_from_upload = $("#expr-from-upload").checked;
     updatePortrait();
     setTimeout(() => { $("#expr-panel").hidden = true; }, 1200);
   } catch (e) {
