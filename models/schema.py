@@ -72,6 +72,7 @@ class CharacterCard(BaseModel):
     social_acceptance: float = 50.0      # 0 taboo/stigmatized .. 100 fully accepted (default context)
     tts_voice: str = ""                  # Kokoro voice id for this character ("" = default)
     expr_from_upload: bool = False       # derive expression sprites from the uploaded portrait (img2img) vs. txt2img
+    expr_denoise: float = 0.55           # img2img denoise for emotion sprites (lower = closer to base/likeness)
     expressions: Dict[str, str] = {}     # emotion -> base64 PNG sprite
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)

@@ -93,7 +93,7 @@ GET  /api/cards/{id}/export?version=2|3    download PNG card
 # expressions / ComfyUI
 GET  /api/comfyui/status | /checkpoints
 GET  /api/expressions/emotions             {core:[8], full:[28]}
-POST /api/cards/{id}/expressions           generate set (checkpoint, style, preset core|full, transparent, from_upload)
+POST /api/cards/{id}/expressions           generate set (checkpoint, style, preset core|full, transparent, from_upload, denoise)
 GET  /api/cards/{id}/expressions           labels the card has sprites for
 GET/POST/DELETE /api/cards/{id}/expression/{emotion}   serve PNG / regen one / delete one
 # personas
@@ -120,7 +120,8 @@ POST /api/chat                             SSE stream; done carries {expression,
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
 - **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;
   `generate_expressions()` makes ONE base portrait then derives each emotion via **img2img** (denoise
-  0.55) so all sprites are the same character; `rembg` cuts a transparent background. The base is either
+  adjustable via the panel slider, default 0.55, persisted `card.expr_denoise`; lower = closer to the
+  base/likeness) so all sprites are the same character; `rembg` cuts a transparent background. The base is either
   a fresh **txt2img** from the appearance prompt (default) or the card's **uploaded portrait**
   (`from_upload` → `_uploaded_base`, cover-cropped to portrait dims) — chosen via the "Use uploaded
   portrait as base" checkbox, persisted on `card.expr_from_upload` so single-sprite regen matches the

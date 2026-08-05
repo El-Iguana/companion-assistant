@@ -272,6 +272,8 @@ function renderSession(session) {
   if (card) $("#expr-appearance").value = card.appearance || "";
   $("#expr-from-upload-row").hidden = !(card && card.image);   // only when a portrait exists
   $("#expr-from-upload").checked = !!(card && card.expr_from_upload);
+  const dn = (card && card.expr_denoise) || 0.55;
+  $("#expr-denoise").value = dn; $("#expr-denoise-val").textContent = Number(dn).toFixed(2);
   renderMessages();
   loadRelationship();
   $("#input").disabled = false; $("#send").disabled = false; $("#regen").disabled = false;
@@ -510,6 +512,7 @@ $("#expr-btn").addEventListener("click", async () => {
   if (!panel.hidden) await loadCheckpoints();
 });
 
+$("#expr-denoise").addEventListener("input", (e) => { $("#expr-denoise-val").textContent = Number(e.target.value).toFixed(2); });
 $("#expr-generate").addEventListener("click", async () => {
   const card = currentCard(); if (!card) return;
   const checkpoint = $("#expr-checkpoint").value;
@@ -527,13 +530,15 @@ $("#expr-generate").addEventListener("click", async () => {
         appearance: $("#expr-appearance").value,
         checkpoint, style: $("#expr-style").value, preset,
         transparent: $("#expr-transparent").checked,
-        from_upload: $("#expr-from-upload").checked
+        from_upload: $("#expr-from-upload").checked,
+        denoise: Number($("#expr-denoise").value)
       })
     });
     $("#expr-status").textContent = `Done — ${res.generated.length} sprites.`;
     card.has_expressions = true;
     card.appearance = $("#expr-appearance").value;
     card.expr_from_upload = $("#expr-from-upload").checked;
+    card.expr_denoise = Number($("#expr-denoise").value);
     updatePortrait();
     setTimeout(() => { $("#expr-panel").hidden = true; }, 1200);
   } catch (e) {

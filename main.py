@@ -295,6 +295,8 @@ async def generate_expressions(card_id: str, body: dict):
     # single-sprite regen from the gallery stays consistent with the batch.
     from_upload = bool(body.get("from_upload")) and bool(card.image)
     card.expr_from_upload = from_upload
+    denoise = min(0.9, max(0.2, float(body.get("denoise", 0.55))))
+    card.expr_denoise = denoise
 
     # Resolve which emotions to generate: explicit list > preset ("core"|"full").
     emotions = body.get("emotions")
@@ -309,6 +311,7 @@ async def generate_expressions(card_id: str, body: dict):
             emotions=emotions,
             transparent=body.get("transparent", True),
             from_upload=from_upload,
+            denoise=denoise,
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
@@ -355,7 +358,7 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict):
         sprites = await expressions.generate_expressions(
             comfy, card, checkpoint=checkpoint, style=body.get("style", "anime"),
             emotions=[emotion], transparent=body.get("transparent", True),
-            from_upload=card.expr_from_upload,   # match how the batch was generated
+            from_upload=card.expr_from_upload, denoise=card.expr_denoise,   # match the batch
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")

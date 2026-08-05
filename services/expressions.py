@@ -207,6 +207,7 @@ async def generate_expressions(
     emotions: list[str] | None = None,
     transparent: bool = True,
     from_upload: bool = False,
+    denoise: float = 0.55,
 ) -> dict[str, str]:
     """Generate a sprite per emotion. Returns {emotion: base64 PNG}.
 
@@ -252,7 +253,7 @@ async def generate_expressions(
         img = await comfy.generate_img2img(
             base, positive=positive, negative=_NEG, checkpoint=checkpoint, style=style,
             steps=d["steps"], cfg=d["cfg"], sampler=d["sampler"], scheduler=d["scheduler"],
-            denoise=0.55, seed=seed,
+            denoise=denoise, seed=seed,
         )
         out[emo] = await finish(img)
     return out
