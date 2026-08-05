@@ -58,6 +58,7 @@ models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background remov
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 RELATIONSHIP_PLAN.md    # relationship system design + phases
+MEMORY_PLAN.md          # memory enhancement plan (pinned-facts UI, embeddings/RAG, tunable summarizer) — TODO
 ```
 
 ## Auth / multi-user (privacy)
