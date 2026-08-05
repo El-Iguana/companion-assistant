@@ -64,8 +64,20 @@ Mic → local STT (whisper.cpp, streaming) ─┐
   exact transcript, ~0.7 s).
 - ✅ **Barge-in (done)** — pressing 🎤 calls `stopSpeaking()` (cuts TTS) **and** `abortChat()`
   (AbortController aborts the in-flight `/api/chat` stream; server generator cancels best-effort).
-- ◻ **Next:** continuous/VAD capture (hands-free, no button) + auto barge-in on detected speech during
-  playback; open-mic loop. Currently push-to-talk only.
+- ◻ **Next — continuous / hands-free listening** (currently push-to-talk only). Requirements:
+  - **Separate mic control**: a distinct **toggle** for continuous mode (e.g. 🎙 "hands-free"),
+    *separate from* the existing hold-to-talk 🎤 (push-to-talk). Two independent controls — PTT stays
+    for one-shot input; the toggle arms/disarms the open-mic loop. Persist the toggle state.
+  - **Local VAD** to segment utterances hands-free (no button): detect speech start/end in-browser
+    (e.g. Web Audio energy/RMS gate or a small local VAD like Silero-VAD ONNX), POST each segment to
+    `/api/stt`, auto-send. Keep it fully local (no cloud), CPU-friendly like the rest of the voice stack.
+  - **Configurable wake word**: an optional, user-set phrase that arms listening / triggers barge-in
+    while she's speaking. Must use a **local** wake-word engine (e.g. **openWakeWord** — open, ONNX,
+    CPU; fits the in-process precedent). Wake word + on/off are a **user setting** (persisted; likely a
+    small settings store + editor UI). When set, continuous mode only acts on utterances after the wake
+    word; when blank, the toggle behaves as pure open-mic.
+  - **Auto barge-in on detected speech** during TTS playback (reuse `stopSpeaking()` + `abortChat()`),
+    gated by the wake word if one is configured (avoid the avatar interrupting herself / room noise).
 
 > **Deviation from the original plan:** this shipped as **in-process CPU faster-whisper**, not a GPU
 > whisper.cpp container on sillytavern-net. Reason: matches how Kokoro TTS actually shipped (in-process,
