@@ -24,6 +24,11 @@ RUN mkdir -p /app/models/kokoro && \
     curl -fsSL -o "$KOKORO_MODEL" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx && \
     curl -fsSL -o "$KOKORO_VOICES" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 
+# Bake the faster-whisper STT model (CPU int8) into the image.
+ENV WHISPER_MODEL=base.en
+ENV WHISPER_CACHE=/app/models/whisper
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8', download_root='${WHISPER_CACHE}')"
+
 COPY main.py run.py ./
 COPY models/ ./models/
 COPY services/ ./services/

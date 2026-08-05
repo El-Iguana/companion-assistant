@@ -49,10 +49,12 @@ services/
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local Kokoro TTS (ONNX/CPU) — text -> WAV, strips *action* narration
+  stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
 templates/index.html · static/css/style.css · static/js/app.js
 data/  characters/ personas/ sessions/ relationships/ presets/ expressions/   # one JSON per item
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
+models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 RELATIONSHIP_PLAN.md    # relationship system design + phases
 ```
 
@@ -81,6 +83,7 @@ RELATIONSHIP_PLAN.md    # relationship system design + phases
 GET  /                                     SPA
 GET  /api/status                           KoboldCPP {online, version, model}
 POST /api/tts ; GET /api/tts/voices        local Kokoro TTS (text→WAV) / 54 voices
+POST /api/stt                              local faster-whisper STT (multipart audio → {text})
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -193,8 +196,12 @@ per-relationship **context override** (⚙).
     the wizard (`openNewChat`).
 - **VTuber upgrade** (voiced, animated avatar) — plan in `vtuber-upgrade-plan.md`.
   ✅ **Phase 0 done** — local Kokoro TTS + amplitude lip-sync + barge-in on existing sprites.
-  Next: ◻ Phase 1 STT (whisper.cpp) + barge-in loop · ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship)
-  · ◻ Phase 3 VRM (`@pixiv/three-vrm`). Local-first voice throughout.
+  ✅ **Phase 1 (push-to-talk) done** — local **faster-whisper** STT (`base.en`, CPU int8, in-process,
+  baked at `models/whisper/`); `services/stt.py` + `POST /api/stt`; hold-to-talk 🎤 in the composer
+  (MediaRecorder → WebM/Opus), transcript auto-sends; **barge-in** cuts TTS (`stopSpeaking`) and aborts
+  generation (`abortChat`/AbortController). ◻ **Next:** continuous/VAD open-mic (no button).
+  Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 VRM
+  (`@pixiv/three-vrm`). Local-first voice throughout.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - Group chats · persona editor modal · embedding memory · TTS · faster inference backend.
 - Tuning knobs: `relationship.RATE/WRATE/ESC_RATE/_TIER_THRESHOLDS`, `expressions` img2img denoise, `GenerationConfig`.

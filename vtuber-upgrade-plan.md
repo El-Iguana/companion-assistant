@@ -56,8 +56,22 @@ Mic → local STT (whisper.cpp, streaming) ─┐
 - TODO next: better mouth (open-mouth sprite variant vs the pulse).
 
 **Phase 1 — Voice input + barge-in** (hands-free loop)
-- Local **STT** (whisper.cpp, GPU). Push-to-talk first, then VAD/continuous.
-- **Barge-in**: detect user speech during TTS playback → cut audio, stop generation, start listening.
+- ✅ **Push-to-talk STT (done)** — local **faster-whisper** (`base.en`, CPU int8, baked into the
+  companion image at `/app/models/whisper`; in-process like Kokoro, *not* a separate GPU container —
+  see deviation note below). `services/stt.py` + `POST /api/stt` (multipart audio → `{text}`,
+  `vad_filter` on). Frontend: hold-to-talk 🎤 in the composer (pointer events, MediaRecorder →
+  WebM/Opus → `/api/stt`), transcript auto-sends. Verified via a TTS→STT round-trip (WAV + WebM/Opus,
+  exact transcript, ~0.7 s).
+- ✅ **Barge-in (done)** — pressing 🎤 calls `stopSpeaking()` (cuts TTS) **and** `abortChat()`
+  (AbortController aborts the in-flight `/api/chat` stream; server generator cancels best-effort).
+- ◻ **Next:** continuous/VAD capture (hands-free, no button) + auto barge-in on detected speech during
+  playback; open-mic loop. Currently push-to-talk only.
+
+> **Deviation from the original plan:** this shipped as **in-process CPU faster-whisper**, not a GPU
+> whisper.cpp container on sillytavern-net. Reason: matches how Kokoro TTS actually shipped (in-process,
+> CPU, baked), avoids VRAM contention with Kobold+ComfyUI, and `base.en` is fast enough for short clips.
+> The GPU whisper.cpp container remains the upgrade path if latency/accuracy needs it — swap by pointing
+> `WHISPER_*` / `services/stt.py` at the container.
 
 **Phase 2 — Expression channel (hybrid)**
 - System-prompt the model to emit inline `[expr:x]` tags; add a streaming tag-parser (reuse the

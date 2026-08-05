@@ -271,6 +271,7 @@ function renderSession(session) {
   renderMessages();
   loadRelationship();
   $("#input").disabled = false; $("#send").disabled = false; $("#regen").disabled = false;
+  $("#mic").disabled = false;
   $("#input").focus();
   loadSessions();
 }
@@ -329,16 +330,26 @@ async function deleteSession(id, title) {
     $("#messages").innerHTML = "";
     $("#chat-title").textContent = "Select or import a character to begin";
     $("#input").disabled = true; $("#send").disabled = true; $("#regen").disabled = true;
+    $("#mic").disabled = true;
     $("#portrait").hidden = true; $("#expr-btn").hidden = true;
   }
   await loadSessions();
 }
 
 // ---- streaming chat -------------------------------------------------------
+let chatAbort = null;
+
+// Barge-in: stop generation already in flight (client-side; the server-side
+// generator is cancelled best-effort when the response stream is dropped).
+function abortChat() {
+  if (chatAbort) { try { chatAbort.abort(); } catch {} chatAbort = null; }
+}
+
 async function send(text, regenerate) {
   if (state.streaming || !state.session) return;
   state.streaming = true;
   stopSpeaking();                     // barge-in: cut any current speech
+  chatAbort = new AbortController();
   const card = currentCard();
   if (!regenerate && text) addMsg("user", text, state.persona?.name || "You");
   const bubble = addMsg("char", "", card ? card.name : "");
@@ -348,7 +359,8 @@ async function send(text, regenerate) {
   try {
     const resp = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: state.session.id, input_text: text, regenerate: !!regenerate })
+      body: JSON.stringify({ session_id: state.session.id, input_text: text, regenerate: !!regenerate }),
+      signal: chatAbort.signal
     });
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
@@ -371,8 +383,10 @@ async function send(text, regenerate) {
       }
     }
   } catch (e) {
-    bubble.innerHTML = `<em>⚠ ${e.message || e}</em>`;
+    if (e.name === "AbortError") { if (!acc) bubble.innerHTML = "<em>…</em>"; }  // barge-in: keep partial
+    else bubble.innerHTML = `<em>⚠ ${e.message || e}</em>`;
   } finally {
+    chatAbort = null;
     if (acc) bubble.innerHTML = md(acc);
     state.streaming = false;
     // Reload from server so swipe controls reflect the newly stored alternate.
@@ -987,6 +1001,60 @@ async function playSample(voice) {
   if (buf && run === ttsRun) await playBuffer(ctx, buf, () => run === ttsRun);
 }
 $("#voice-test").addEventListener("click", () => playSample(currentVoice()));
+
+// ---- speech input (push-to-talk STT + barge-in) ---------------------------
+let micStream = null, mediaRec = null, recChunks = [], recording = false;
+
+async function ensureMic() {
+  if (micStream) return micStream;
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return micStream;
+}
+
+async function startRecording() {
+  if (recording || $("#mic").disabled) return;
+  stopSpeaking();        // barge-in: cut her voice…
+  abortChat();           // …and stop any in-flight generation
+  let stream;
+  try { stream = await ensureMic(); }
+  catch { alert("Microphone access denied."); return; }
+  recChunks = [];
+  mediaRec = new MediaRecorder(stream);
+  mediaRec.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+  mediaRec.onstop = onRecordingStop;
+  mediaRec.start();
+  recording = true;
+  $("#mic").classList.add("recording");
+}
+
+function stopRecording() {
+  if (!recording) return;
+  recording = false;
+  $("#mic").classList.remove("recording");
+  try { if (mediaRec && mediaRec.state !== "inactive") mediaRec.stop(); } catch {}
+}
+
+async function onRecordingStop() {
+  const blob = new Blob(recChunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" });
+  recChunks = [];
+  if (!blob.size) return;
+  $("#mic").classList.add("busy");
+  try {
+    const fd = new FormData();
+    fd.append("file", blob, "speech.webm");
+    const r = await fetch("/api/stt", { method: "POST", body: fd });
+    if (!r.ok) return;
+    const t = ((await r.json()).text || "").trim();
+    if (t && !state.streaming) send(t, false);     // hands-free: transcript goes straight to chat
+  } catch { /* ignore */ }
+  finally { $("#mic").classList.remove("busy"); }
+}
+
+const mic = $("#mic");
+mic.addEventListener("pointerdown", (e) => { e.preventDefault(); startRecording(); });
+mic.addEventListener("pointerup",   (e) => { e.preventDefault(); stopRecording(); });
+mic.addEventListener("pointerleave", () => stopRecording());
+mic.addEventListener("pointercancel", () => stopRecording());
 
 // ---- boot -----------------------------------------------------------------
 (async function init() {

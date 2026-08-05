@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Companion</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ css_v }}">
 </head>
 <body>
   <div id="app">
@@ -114,6 +114,7 @@
         <img id="portrait" alt="" hidden>
       </div>
       <form id="composer">
+        <button id="mic" type="button" class="btn-icon" title="Hold to talk (push-to-talk)" disabled>🎤</button>
         <textarea id="input" rows="1" placeholder="Message… (Enter to send, Shift+Enter for newline)" disabled></textarea>
         <button id="regen" type="button" class="btn-icon" title="Regenerate last reply" disabled>↻</button>
         <button id="send" type="submit" class="btn-icon" title="Send" disabled>➤</button>
@@ -301,6 +302,6 @@
     </div>
     <div id="toasts"></div>
   </div>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v={{ js_v }}"></script>
 </body>
 </html>

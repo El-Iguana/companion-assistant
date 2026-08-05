@@ -25,7 +25,7 @@ from models.schema import (
 )
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient
-from services import card_io, prompt_builder, memory, expressions, relationship, tts
+from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
@@ -112,9 +112,20 @@ async def _shutdown():
 # --------------------------------------------------------------------------
 # UI
 # --------------------------------------------------------------------------
+def _asset_ver(rel: str) -> int:
+    """mtime of a static asset — appended as ?v= so rebuilds bust the browser cache."""
+    try:
+        return int((BASE / "static" / rel).stat().st_mtime)
+    except OSError:
+        return 0
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(request, "index.html", {
+        "css_v": _asset_ver("css/style.css"),
+        "js_v": _asset_ver("js/app.js"),
+    })
 
 
 @app.get("/api/status")
@@ -138,6 +149,18 @@ async def tts_synth(body: dict):
 @app.get("/api/tts/voices")
 async def tts_voices():
     return {"voices": await asyncio.to_thread(tts.voices)}
+
+
+@app.post("/api/stt")
+async def stt_transcribe(file: UploadFile = File(...)):
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(400, "empty audio")
+    try:
+        text = await asyncio.to_thread(stt.transcribe, audio)
+    except Exception as e:
+        raise HTTPException(500, f"stt failed: {e}")
+    return {"text": text}
 
 
 # --------------------------------------------------------------------------
