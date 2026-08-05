@@ -32,7 +32,7 @@ if podman container exists "$CONTAINER"; then
   podman rm -f "$CONTAINER"
 fi
 
-mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions}
+mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions,settings}
 
 if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
@@ -57,6 +57,7 @@ podman run -d \
   -v "$SCRIPT_DIR/data/relationships:/app/data/relationships:z" \
   -v "$SCRIPT_DIR/data/presets:/app/data/presets:z" \
   -v "$SCRIPT_DIR/data/expressions:/app/data/expressions:z" \
+  -v "$SCRIPT_DIR/data/settings:/app/data/settings:z" \
   "$IMAGE"
 
 echo ""

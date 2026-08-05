@@ -35,7 +35,7 @@ COPY services/ ./services/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-RUN mkdir -p /app/data/characters /app/data/personas /app/data/sessions /app/data/expressions
+RUN mkdir -p /app/data/characters /app/data/personas /app/data/sessions /app/data/expressions /app/data/settings
 
 # KoboldCPP URL — override with -e KOBOLD_URL=http://... at runtime.
 ENV KOBOLD_URL=http://koboldcpp:5001

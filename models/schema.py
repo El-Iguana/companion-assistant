@@ -21,6 +21,18 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
+# App settings (singleton — data/settings/app.json)
+# ---------------------------------------------------------------------------
+class AppSettings(BaseModel):
+    """Global, non-per-character settings. Voice / hands-free config lives here."""
+    hands_free: bool = False             # continuous open-mic listening on/off
+    wake_word: str = ""                  # optional; "" = pure open-mic (no gate)
+    vad_silence_ms: int = 800            # trailing silence that ends an utterance
+    vad_threshold: float = 0.015         # RMS gate (0–1): speech vs. silence
+    echo_suppress: float = 0.8           # ignore-herself: raise the start gate by this × her output level
+
+
+# ---------------------------------------------------------------------------
 # Character Card V2/V3
 # ---------------------------------------------------------------------------
 class LorebookEntry(BaseModel):

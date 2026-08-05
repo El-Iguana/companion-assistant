@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
+    AppSettings,
 )
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient
@@ -33,7 +34,8 @@ DATA = BASE / "data"
 CARDS, PERSONAS, SESSIONS = DATA / "characters", DATA / "personas", DATA / "sessions"
 RELATIONSHIPS = DATA / "relationships"
 PRESETS = DATA / "presets"
-for d in (CARDS, PERSONAS, SESSIONS, RELATIONSHIPS, PRESETS, DATA / "expressions"):
+SETTINGS = DATA / "settings"
+for d in (CARDS, PERSONAS, SESSIONS, RELATIONSHIPS, PRESETS, DATA / "expressions", SETTINGS):
     d.mkdir(parents=True, exist_ok=True)
 
 KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://koboldcpp:5001")
@@ -68,6 +70,20 @@ def _list(folder: Path, cls):
         except Exception:
             pass
     return out
+
+
+def _load_settings() -> AppSettings:
+    p = SETTINGS / "app.json"
+    if p.exists():
+        try:
+            return AppSettings.model_validate_json(p.read_text())
+        except Exception:
+            pass
+    return AppSettings()
+
+
+def _save_settings(s: AppSettings) -> None:
+    (SETTINGS / "app.json").write_text(s.model_dump_json(indent=2))
 
 
 def _load_relationship(character_id: str, persona_id: str) -> Relationship:
@@ -161,6 +177,20 @@ async def stt_transcribe(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"stt failed: {e}")
     return {"text": text}
+
+
+@app.get("/api/settings")
+async def get_settings():
+    return _load_settings().model_dump()
+
+
+@app.put("/api/settings")
+async def put_settings(body: dict):
+    data = _load_settings().model_dump()
+    data.update({k: v for k, v in body.items() if k in data})   # ignore unknown keys
+    s = AppSettings(**data)
+    _save_settings(s)
+    return s.model_dump()
 
 
 # --------------------------------------------------------------------------

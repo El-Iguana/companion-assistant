@@ -64,20 +64,32 @@ Mic → local STT (whisper.cpp, streaming) ─┐
   exact transcript, ~0.7 s).
 - ✅ **Barge-in (done)** — pressing 🎤 calls `stopSpeaking()` (cuts TTS) **and** `abortChat()`
   (AbortController aborts the in-flight `/api/chat` stream; server generator cancels best-effort).
-- ◻ **Next — continuous / hands-free listening** (currently push-to-talk only). Requirements:
-  - **Separate mic control**: a distinct **toggle** for continuous mode (e.g. 🎙 "hands-free"),
-    *separate from* the existing hold-to-talk 🎤 (push-to-talk). Two independent controls — PTT stays
-    for one-shot input; the toggle arms/disarms the open-mic loop. Persist the toggle state.
-  - **Local VAD** to segment utterances hands-free (no button): detect speech start/end in-browser
-    (e.g. Web Audio energy/RMS gate or a small local VAD like Silero-VAD ONNX), POST each segment to
-    `/api/stt`, auto-send. Keep it fully local (no cloud), CPU-friendly like the rest of the voice stack.
-  - **Configurable wake word**: an optional, user-set phrase that arms listening / triggers barge-in
-    while she's speaking. Must use a **local** wake-word engine (e.g. **openWakeWord** — open, ONNX,
-    CPU; fits the in-process precedent). Wake word + on/off are a **user setting** (persisted; likely a
-    small settings store + editor UI). When set, continuous mode only acts on utterances after the wake
-    word; when blank, the toggle behaves as pure open-mic.
-  - **Auto barge-in on detected speech** during TTS playback (reuse `stopSpeaking()` + `abortChat()`),
-    gated by the wake word if one is configured (avoid the avatar interrupting herself / room noise).
+- ✅ **Continuous / hands-free listening (done)** — shipped as a fully-local, dependency-free first cut:
+  - ✅ **Separate mic control** — a distinct **🎙 toggle** in the header, independent of the hold-to-talk
+    🎤 (PTT). PTT stays for one-shot input; the toggle arms/disarms the open-mic loop. Toggle state is
+    **persisted** (`AppSettings.hands_free`); re-engages on first user gesture after reload (mic needs a
+    gesture).
+  - ✅ **Local VAD** — in-browser **RMS energy gate** (`hfTick`, Web Audio `AnalyserNode`): speech start
+    opens a `MediaRecorder`, trailing silence (`vad_silence_ms`) ends the utterance → POST to `/api/stt`
+    → auto-send. No cloud, no model. *(Silero-VAD ONNX is the accuracy upgrade.)*
+  - ✅ **Configurable wake word** — `AppSettings.wake_word` via the **⚙ voice-settings modal**; when set,
+    `applyWakeWord()` only sends utterances that start with it (and strips the prefix); blank = pure
+    open-mic. **Simplification:** this is **text-matched over the STT transcript**, not a dedicated
+    always-on engine. *(openWakeWord — ONNX/CPU — is the upgrade for low-latency always-on detection and
+    wake-word-**gated** barge-in.)*
+  - ✅ **Auto barge-in on detected speech** during playback — VAD speech-start reuses `stopSpeaking()` +
+    `abortChat()`.
+  - ✅ **Ignore-herself (echo/self-suppression)** — the mic's **start gate is ducked by her own live
+    output level**: the TTS player publishes `ttsLevel` (the amplitude already computed for lip-sync), and
+    while she's speaking (or within a 250 ms tail) the VAD start threshold rises to
+    `base + 0.01 + echo_suppress·ttsLevel`, so her voice bleeding into the mic can't self-trigger a
+    barge-in or a phantom message — you have to be **louder than her echo** to interrupt. Once you *are*
+    captured she's muted, so end-of-turn detection uses the plain threshold. On top of `getUserMedia`
+    `echoCancellation`. Tunable via **`echo_suppress`** (0 = off; default 0.8) in the ⚙ modal.
+  - **Settings store** — new singleton `GET/PUT /api/settings` (`data/settings/app.json`, mounted so it
+    survives rebuilds); also holds VAD tuning (mic threshold, end-of-speech silence, echo suppression).
+  - ◻ **Follow-ups:** openWakeWord engine · Silero-VAD · wake-word-gated barge-in · (if echo still leaks
+    with loud external speakers) a WebRTC AEC path or headphone recommendation.
 
 > **Deviation from the original plan:** this shipped as **in-process CPU faster-whisper**, not a GPU
 > whisper.cpp container on sillytavern-net. Reason: matches how Kokoro TTS actually shipped (in-process,

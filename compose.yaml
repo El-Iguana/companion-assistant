@@ -24,6 +24,7 @@ services:
       - ./data/relationships:/app/data/relationships:z
       - ./data/presets:/app/data/presets:z
       - ./data/expressions:/app/data/expressions:z
+      - ./data/settings:/app/data/settings:z
     networks:
       - sillytavern-net
     healthcheck:

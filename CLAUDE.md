@@ -51,7 +51,7 @@ services/
   tts.py                # local Kokoro TTS (ONNX/CPU) — text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
 templates/index.html · static/css/style.css · static/js/app.js
-data/  characters/ personas/ sessions/ relationships/ presets/ expressions/   # one JSON per item
+data/  characters/ personas/ sessions/ relationships/ presets/ expressions/ settings/   # one JSON per item (settings/ = singleton app.json)
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
@@ -84,6 +84,7 @@ GET  /                                     SPA
 GET  /api/status                           KoboldCPP {online, version, model}
 POST /api/tts ; GET /api/tts/voices        local Kokoro TTS (text→WAV) / 54 voices
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
+GET/PUT /api/settings                      global app settings (hands_free, wake_word, VAD tuning)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -199,7 +200,18 @@ per-relationship **context override** (⚙).
   ✅ **Phase 1 (push-to-talk) done** — local **faster-whisper** STT (`base.en`, CPU int8, in-process,
   baked at `models/whisper/`); `services/stt.py` + `POST /api/stt`; hold-to-talk 🎤 in the composer
   (MediaRecorder → WebM/Opus), transcript auto-sends; **barge-in** cuts TTS (`stopSpeaking`) and aborts
-  generation (`abortChat`/AbortController). ◻ **Next:** continuous/VAD open-mic (no button).
+  generation (`abortChat`/AbortController).
+  ✅ **Phase 1b (continuous / hands-free) done** — a **separate 🎙 toggle** (distinct from push-to-talk)
+  arms an open-mic loop: in-browser **RMS energy VAD** (`hfTick`) segments utterances, transcribes each
+  via `/api/stt`, and auto-barges-in on detected speech. **Configurable wake word** (`applyWakeWord`) —
+  when set, only speech starting with it is sent (+strips the prefix); blank = pure open-mic.
+  **Ignore-herself:** the mic start-gate is ducked by her own live output level (`ttsLevel`, published by
+  the TTS player) — while she speaks, the VAD threshold rises to `base+0.01+echo_suppress·ttsLevel`, so
+  her voice can't self-trigger; you must be louder than her echo to barge in. Tuning (wake word, mic
+  threshold, silence, `echo_suppress`) in the **⚙ voice-settings modal**, persisted to the new
+  **`GET/PUT /api/settings`** store (`AppSettings` → `data/settings/app.json`); plus `getUserMedia`
+  `echoCancellation`. ◻ **Upgrades:** true wake-word engine (**openWakeWord**,
+  ONNX/CPU) + **Silero-VAD** for accuracy; wake-word-gated barge-in.
   Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 VRM
   (`@pixiv/three-vrm`). Local-first voice throughout.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.

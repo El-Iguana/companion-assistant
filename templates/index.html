@@ -59,6 +59,8 @@
         </span>
         <span class="head-actions">
           <button id="tts-btn" class="btn-mini" title="Toggle voice" hidden>🔇</button>
+          <button id="hf-btn" class="btn-mini" title="Hands-free listening (continuous mic)" hidden>🎙</button>
+          <button id="voicecfg-btn" class="btn-mini" title="Voice settings (wake word)" hidden>⚙</button>
           <button id="voice-test" class="btn-mini" title="Hear this character's voice" hidden>▶</button>
           <button id="gallery-btn" class="btn-mini" title="Review expression sprites" hidden>🖼 Gallery</button>
           <button id="expr-btn" class="btn-mini" title="Generate expression sprites" hidden>🎭 Expressions</button>
@@ -219,6 +221,32 @@
           <button id="rc-clear" class="btn-mini">Use card default</button>
           <span class="spacer"></span>
           <button id="rc-save" class="btn-mini primary">Save</button>
+        </footer>
+      </div>
+    </div>
+    <div id="voice-cfg" class="modal" hidden>
+      <div class="modal-box" style="width:min(440px,92vw)">
+        <header class="modal-head"><span>Voice settings</span>
+          <button id="vc-close" class="btn-icon-sm" title="Close">✕</button></header>
+        <div class="modal-body">
+          <label>Wake word / phrase
+            <input id="vc-wake" class="field" placeholder="e.g. hey luna  (blank = always listen)">
+            <span class="muted">In hands-free mode, only speech that starts with this phrase is sent
+              (and it interrupts her). Leave blank for pure open-mic.</span></label>
+          <label>Mic sensitivity: <output id="vc-thresh-val"></output>
+            <input id="vc-thresh" type="range" min="0.005" max="0.05" step="0.001">
+            <span class="muted">Lower = picks up quieter speech (may false-trigger on noise).</span></label>
+          <label>End-of-speech silence: <output id="vc-silence-val"></output>
+            <input id="vc-silence" type="range" min="300" max="2000" step="100">
+            <span class="muted">How long a pause ends your turn.</span></label>
+          <label>Ignore her own voice: <output id="vc-echo-val"></output>
+            <input id="vc-echo" type="range" min="0" max="2" step="0.1">
+            <span class="muted">Higher = she won't hear herself while speaking (but you must be louder
+              to interrupt). 0 = off.</span></label>
+        </div>
+        <footer class="modal-foot">
+          <span class="spacer"></span>
+          <button id="vc-save" class="btn-mini primary">Save</button>
         </footer>
       </div>
     </div>

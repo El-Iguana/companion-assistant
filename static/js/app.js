@@ -265,6 +265,8 @@ function renderSession(session) {
   $("#expr-btn").hidden = !card;
   $("#gallery-btn").hidden = !card;
   $("#tts-btn").hidden = !card;
+  $("#hf-btn").hidden = !card;
+  $("#voicecfg-btn").hidden = !card;
   $("#voice-test").hidden = !(card && ttsEnabled);
   $("#expr-panel").hidden = true;
   if (card) $("#expr-appearance").value = card.appearance || "";
@@ -871,6 +873,7 @@ $("#preset-editor").addEventListener("click", (e) => { if (e.target.id === "pres
 
 // ---- voice (local TTS + amplitude lip-sync) -------------------------------
 let ttsEnabled = false, audioCtx = null, ttsRun = 0, ttsSource = null, mouthRAF = null;
+let ttsLevel = 0, ttsHangoverUntil = 0;   // her live output RMS + a short tail — used to ignore herself
 let speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
 let ttsVoicesList = [];
 
@@ -898,7 +901,7 @@ function stopSpeaking() {
   ttsRun++;                                   // invalidate any in-flight queue
   speechQueue = []; speechConsuming = false; speechFedLen = 0; anyQuote = false;
   try { if (ttsSource) ttsSource.stop(); } catch {}
-  ttsSource = null;
+  ttsSource = null; ttsLevel = 0;
   if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
   const img = $("#portrait"); if (img) img.style.transform = "";
 }
@@ -926,13 +929,16 @@ function playBuffer(ctx, arrayBuf, valid) {
       analyser.getByteTimeDomainData(data);
       let sum = 0; for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
       const amp = Math.sqrt(sum / data.length);
+      ttsLevel = amp;                     // publish her output level for the mic's self-suppression
       if (img && !img.hidden) img.style.transform = `scaleY(${1 + Math.min(amp * 0.5, 0.06)})`;
       mouthRAF = requestAnimationFrame(tick);
     };
     tick();
     src.onended = () => {
       if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
-      if (img) img.style.transform = ""; ttsSource = null; resolve();
+      if (img) img.style.transform = "";
+      ttsSource = null; ttsLevel = 0; ttsHangoverUntil = performance.now() + 250;  // tail: ignore reverb
+      resolve();
     };
     src.start();
   });
@@ -1034,20 +1040,24 @@ function stopRecording() {
   try { if (mediaRec && mediaRec.state !== "inactive") mediaRec.stop(); } catch {}
 }
 
+async function transcribeBlob(blob) {
+  try {
+    const fd = new FormData();
+    fd.append("file", blob, "speech.webm");
+    const r = await fetch("/api/stt", { method: "POST", body: fd });
+    return r.ok ? ((await r.json()).text || "") : "";
+  } catch { return ""; }
+}
+
 async function onRecordingStop() {
   const blob = new Blob(recChunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" });
   recChunks = [];
   if (!blob.size) return;
   $("#mic").classList.add("busy");
   try {
-    const fd = new FormData();
-    fd.append("file", blob, "speech.webm");
-    const r = await fetch("/api/stt", { method: "POST", body: fd });
-    if (!r.ok) return;
-    const t = ((await r.json()).text || "").trim();
-    if (t && !state.streaming) send(t, false);     // hands-free: transcript goes straight to chat
-  } catch { /* ignore */ }
-  finally { $("#mic").classList.remove("busy"); }
+    const t = (await transcribeBlob(blob)).trim();   // push-to-talk: no wake-word gate (explicit press)
+    if (t && !state.streaming) send(t, false);
+  } finally { $("#mic").classList.remove("busy"); }
 }
 
 const mic = $("#mic");
@@ -1056,9 +1066,166 @@ mic.addEventListener("pointerup",   (e) => { e.preventDefault(); stopRecording()
 mic.addEventListener("pointerleave", () => stopRecording());
 mic.addEventListener("pointercancel", () => stopRecording());
 
+// ---- hands-free (continuous VAD) + voice settings -------------------------
+// Separate switch from push-to-talk: the 🎙 toggle arms an open-mic loop that
+// uses an in-browser RMS energy gate (VAD) to segment utterances, transcribes
+// each via /api/stt, and — if a wake word is set — only sends speech that
+// starts with it (which also barges in). Fully local; no extra model. A true
+// wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
+let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015 };
+let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
+let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
+
+function applyWakeWord(text) {
+  const w = (voiceSettings.wake_word || "").trim().toLowerCase();
+  if (!w) return text.trim();
+  const low = text.toLowerCase().replace(/^[^\w]+/, "");     // ignore leading punctuation
+  if (!low.startsWith(w)) return "";                          // no wake word → drop this utterance
+  return text.trim().replace(/^[^\w]+/, "").slice(w.length).replace(/^[\s,.:!?-]+/, "").trim();
+}
+
+function hfStartUtterance() {
+  if (!hfStream) return;
+  hfChunks = [];
+  try { hfRec = new MediaRecorder(hfStream); } catch { return; }
+  hfRec.ondataavailable = (e) => { if (e.data.size) hfChunks.push(e.data); };
+  hfRec.onstop = hfOnUtterance;
+  hfRec.start();
+  $("#hf-btn").classList.add("listening");
+}
+
+function hfStopUtterance() {
+  $("#hf-btn").classList.remove("listening");
+  try { if (hfRec && hfRec.state !== "inactive") hfRec.stop(); } catch {}
+}
+
+async function hfOnUtterance() {
+  const blob = new Blob(hfChunks, { type: (hfRec && hfRec.mimeType) || "audio/webm" });
+  hfChunks = [];
+  if (!blob.size || !hfActive) return;
+  const raw = (await transcribeBlob(blob)).trim();
+  if (!raw) return;
+  const msg = applyWakeWord(raw);
+  if (msg && !state.streaming) send(msg, false);
+}
+
+function hfTick() {
+  if (!hfActive) return;
+  const data = new Uint8Array(hfAnalyser.frequencyBinCount);
+  hfAnalyser.getByteTimeDomainData(data);
+  let sum = 0; for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
+  const rms = Math.sqrt(sum / data.length);
+  const now = performance.now();
+  const base = voiceSettings.vad_threshold ?? 0.015;
+
+  if (!hfSpeaking) {
+    // Start gate — ignore herself: while SHE is speaking (or just did), raise the
+    // bar by her own live output level so her voice bleeding into the mic can't
+    // self-trigger. You have to be louder than her echo to barge in.
+    const selfActive = !!ttsSource || now < ttsHangoverUntil;
+    const es = voiceSettings.echo_suppress ?? 0.8;
+    const startThresh = selfActive ? base + 0.01 + es * ttsLevel : base;
+    if (rms > startThresh) {
+      if (ttsSource || state.streaming) { stopSpeaking(); abortChat(); }   // barge-in
+      hfStartUtterance();
+      hfSpeaking = true; hfSilenceStart = 0;
+    }
+  } else {
+    // Already capturing your speech: track end-of-turn with the plain threshold
+    // (she's muted now, so no echo to fight).
+    if (rms > base) hfSilenceStart = 0;
+    else if (!hfSilenceStart) hfSilenceStart = now;
+    else if (now - hfSilenceStart > (voiceSettings.vad_silence_ms ?? 800)) {
+      hfSpeaking = false; hfSilenceStart = 0;
+      hfStopUtterance();
+    }
+  }
+  hfRAF = requestAnimationFrame(hfTick);
+}
+
+async function engageHandsFree() {
+  if (hfActive) return true;
+  try {
+    hfStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+  } catch { return false; }
+  hfCtx = new (window.AudioContext || window.webkitAudioContext)();
+  hfAnalyser = hfCtx.createAnalyser(); hfAnalyser.fftSize = 512;
+  hfCtx.createMediaStreamSource(hfStream).connect(hfAnalyser);
+  hfActive = true; hfSpeaking = false; hfSilenceStart = 0;
+  hfTick();
+  return true;
+}
+
+function disengageHandsFree() {
+  hfActive = false; hfSpeaking = false;
+  if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
+  try { if (hfRec && hfRec.state !== "inactive") hfRec.stop(); } catch {}
+  hfRec = null;
+  $("#hf-btn").classList.remove("listening");
+  if (hfStream) { hfStream.getTracks().forEach(t => t.stop()); hfStream = null; }
+  if (hfCtx) { try { hfCtx.close(); } catch {} hfCtx = null; }
+}
+
+async function persistSettings(patch) {
+  Object.assign(voiceSettings, patch);
+  try {
+    await api("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  } catch {}
+}
+
+async function setHandsFree(on) {
+  $("#hf-btn").classList.toggle("active", on);
+  if (on) {
+    if (!await engageHandsFree()) { alert("Microphone access denied."); $("#hf-btn").classList.remove("active"); on = false; }
+  } else {
+    disengageHandsFree();
+  }
+  await persistSettings({ hands_free: on });
+}
+
+$("#hf-btn").addEventListener("click", () => setHandsFree(!voiceSettings.hands_free));
+
+// voice settings modal (wake word + VAD tuning)
+$("#voicecfg-btn").addEventListener("click", () => {
+  $("#vc-wake").value = voiceSettings.wake_word || "";
+  $("#vc-thresh").value = voiceSettings.vad_threshold ?? 0.015;
+  $("#vc-thresh-val").textContent = Number(voiceSettings.vad_threshold ?? 0.015).toFixed(3);
+  $("#vc-silence").value = voiceSettings.vad_silence_ms ?? 800;
+  $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
+  $("#vc-echo").value = voiceSettings.echo_suppress ?? 0.8;
+  $("#vc-echo-val").textContent = Number(voiceSettings.echo_suppress ?? 0.8).toFixed(1);
+  $("#voice-cfg").hidden = false;
+});
+$("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
+$("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
+$("#vc-thresh").addEventListener("input", (e) => { $("#vc-thresh-val").textContent = Number(e.target.value).toFixed(3); });
+$("#vc-silence").addEventListener("input", (e) => { $("#vc-silence-val").textContent = e.target.value + " ms"; });
+$("#vc-echo").addEventListener("input", (e) => { $("#vc-echo-val").textContent = Number(e.target.value).toFixed(1); });
+$("#vc-save").addEventListener("click", async () => {
+  await persistSettings({
+    wake_word: $("#vc-wake").value.trim(),
+    vad_threshold: Number($("#vc-thresh").value),
+    vad_silence_ms: Number($("#vc-silence").value),
+    echo_suppress: Number($("#vc-echo").value),
+  });
+  $("#voice-cfg").hidden = true;
+});
+
+async function loadSettings() {
+  try { voiceSettings = Object.assign(voiceSettings, await api("/settings")); } catch {}
+  if (voiceSettings.hands_free) {          // persisted ON → show active, engage on first user gesture
+    $("#hf-btn").classList.add("active");
+    window.addEventListener("pointerdown", async function resume() {
+      if (voiceSettings.hands_free && !hfActive && !await engageHandsFree()) $("#hf-btn").classList.remove("active");
+    }, { once: true });
+  }
+}
+
 // ---- boot -----------------------------------------------------------------
 (async function init() {
-  await Promise.all([loadCards(), loadPersonas(), loadPresets(), refreshStatus()]);
+  await Promise.all([loadCards(), loadPersonas(), loadPresets(), refreshStatus(), loadSettings()]);
   await loadSessions();
   setInterval(refreshStatus, 15000);
 })();
