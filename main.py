@@ -316,7 +316,10 @@ async def generate_expressions(card_id: str, body: dict):
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
 
-    card.expressions.update(sprites)
+    # Bulk generate REPLACES the whole set (clears old sprites first) so switching
+    # between Core/Full starts fresh — no stale sprites left over. Single-sprite
+    # regen (below) still merges.
+    card.expressions = sprites
     _save(card, CARDS)
     return {"generated": list(sprites.keys()), "total": len(card.expressions)}
 

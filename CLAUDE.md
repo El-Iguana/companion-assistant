@@ -95,7 +95,7 @@ GET  /api/cards/{id}/export?version=2|3    download PNG card
 # expressions / ComfyUI
 GET  /api/comfyui/status | /checkpoints
 GET  /api/expressions/emotions             {core:[8], full:[28]}
-POST /api/cards/{id}/expressions           generate set (checkpoint, style, preset core|full, transparent, from_upload, denoise)
+POST /api/cards/{id}/expressions           generate set — REPLACES all sprites (checkpoint, style, preset core|full, transparent, from_upload, denoise)
 GET  /api/cards/{id}/expressions           labels the card has sprites for
 GET/POST/DELETE /api/cards/{id}/expression/{emotion}   serve PNG / regen one / delete one
 # personas
