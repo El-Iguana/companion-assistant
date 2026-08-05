@@ -11,6 +11,7 @@
     <aside id="sidebar">
       <header class="side-head">
         <h1>Companion</h1>
+        <button id="help-btn" class="btn-mini" title="Help &amp; guide">?</button>
         <div id="status" class="status offline" title="KoboldCPP status">●</div>
       </header>
 
@@ -274,6 +275,92 @@
           <span class="spacer"></span>
           <button id="vc-save" class="btn-mini primary">Save</button>
         </footer>
+      </div>
+    </div>
+    <div id="help" class="modal" hidden>
+      <div class="modal-box help-box">
+        <header class="modal-head"><span>Help &amp; guide</span>
+          <button id="help-close" class="btn-icon-sm" title="Close">✕</button></header>
+        <div class="modal-body help-body">
+
+          <section>
+            <h2>Custom system prompts — curating the experience</h2>
+            <p>The <strong>System prompt</strong> is the “director’s note” at the very top of what the
+              model sees. It sets the frame — tone, format, pacing, boundaries — that everything else
+              operates inside. It is <em>not</em> the whole character: identity and lore are injected
+              separately, so you don’t need to restate them here.</p>
+
+            <h3>How the prompt is assembled</h3>
+            <ol>
+              <li><strong>System prompt</strong> (yours, or the <code>Chat mode</code> default)</li>
+              <li><code>About {{user}}</code> — the persona</li>
+              <li>the <strong>relationship</strong> descriptor (stage, intimacy, mood)</li>
+              <li>lorebook entries → the <strong>character</strong> block (description, personality, scenario)
+                → example dialogue</li>
+              <li>memory (pinned facts + running summary)</li>
+              <li>…the chat history…</li>
+              <li><strong>Post-history instructions</strong> — a second system message <em>after</em> the history</li>
+            </ol>
+
+            <h3>Two slots, different jobs</h3>
+            <ul>
+              <li><strong>System prompt (top):</strong> the frame. Read first, but a long chat can drift from it.</li>
+              <li><strong>Post-history instructions (bottom):</strong> strongest adherence. Put the one or two
+                hard rules the model keeps forgetting here (e.g. “Never write {{user}}’s dialogue”).</li>
+            </ul>
+
+            <h3>What you can curate</h3>
+            <ul>
+              <li><strong>Prose &amp; POV</strong> — “third-person past-tense literary prose” vs “casual texting, no narration”.</li>
+              <li><strong>Length / pacing</strong> — “reply in 2–4 sentences”, “a single line of dialogue”.</li>
+              <li><strong>Dialogue vs action balance</strong> — “mostly spoken dialogue, minimal action”.</li>
+              <li><strong>Tone</strong> — wry, tender, ominous, comedic, clinical.</li>
+              <li><strong>Anti-patterns</strong> — “don’t repeat earlier phrasing”, “don’t end by asking what I want to do”.</li>
+              <li><strong>World on/off</strong> — a custom prompt replaces the <code>Chat mode</code> default, so add
+                “no invented setting/scene” yourself if you want assistant behaviour with a custom prompt.</li>
+            </ul>
+
+            <h3>App trick: formatting drives the voice</h3>
+            <p>Text-to-speech here <strong>speaks only words in "double quotes"</strong> and strips
+              <code>*asterisk actions*</code>. So a formatting rule is also a voice control:</p>
+            <div class="help-example">
+              <div class="help-example-head"><strong>Voice-clean formatting</strong>
+                <button class="btn-mini help-copy">Copy</button></div>
+              <pre>Always put spoken words in "double quotes" and physical actions in *asterisks*. Keep narration brief.</pre>
+            </div>
+
+            <h3>Gotcha</h3>
+            <p>Your custom prompt <strong>fully replaces</strong> the built-in default — which is where the
+              guardrails live (one reply, stay in character, don’t speak for {{user}}, no repetition, never
+              mention being an AI). If you write a bare prompt, <strong>bake those in</strong> or keep them in
+              Post-history instructions.</p>
+
+            <h3>Examples — copy &amp; paste into a card’s System prompt</h3>
+
+            <div class="help-example">
+              <div class="help-example-head"><strong>Witty assistant (Jarvis-style, no scene)</strong>
+                <button class="btn-mini help-copy">Copy</button></div>
+              <pre>You are {{char}}, in direct conversation with {{user}} — no scene or setting to narrate; never invent surroundings or events. Voice: dry, precise, quietly witty, unflappably competent. Reply in 1–4 sentences, mostly plain speech. Put any spoken words in "quotes". Write only {{char}}'s next reply; never speak or act for {{user}}; don't repeat earlier phrasing; stay in character and never mention being an AI.</pre>
+            </div>
+
+            <div class="help-example">
+              <div class="help-example-head"><strong>Literary roleplay narrator</strong>
+                <button class="btn-mini help-copy">Copy</button></div>
+              <pre>You are {{char}} in an ongoing story with {{user}}. Write in immersive third-person present tense: vivid but economical prose, "dialogue in quotes", *actions in asterisks*. Advance the moment by ONE concrete beat, 3–6 sentences, then stop. Never narrate, speak, or decide for {{user}}. No repetition; end mid-scene, not on a question.</pre>
+            </div>
+
+            <div class="help-example">
+              <div class="help-example-head"><strong>Casual texting companion</strong>
+                <button class="btn-mini help-copy">Copy</button></div>
+              <pre>You are {{char}} texting {{user}}. Casual, warm, lowercase, no narration or *actions* — just what you'd actually type. 1–3 short lines. Put everything in "quotes" so it's all spoken. Never text as {{user}}; stay in character.</pre>
+            </div>
+
+            <p class="muted">Both fields live in the character editor (System prompt / Post-history
+              instructions) and are per-character. Prefer the built-in <code>Chat mode</code> toggle for a
+              quick roleplay↔assistant switch without writing a prompt.</p>
+          </section>
+
+        </div>
       </div>
     </div>
     <div id="persona-editor" class="modal" hidden>

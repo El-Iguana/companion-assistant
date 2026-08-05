@@ -1272,6 +1272,21 @@ async function loadSettings() {
   }
 }
 
+// ---- help modal -----------------------------------------------------------
+$("#help-btn").addEventListener("click", () => { $("#help").hidden = false; });
+$("#help-close").addEventListener("click", () => { $("#help").hidden = true; });
+$("#help").addEventListener("click", (e) => {
+  if (e.target.id === "help") { $("#help").hidden = true; return; }   // backdrop
+  const btn = e.target.closest(".help-copy");
+  if (!btn) return;
+  const pre = btn.closest(".help-example").querySelector("pre");
+  navigator.clipboard.writeText(pre.textContent).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = "Copied ✓"; btn.classList.add("help-copied");
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove("help-copied"); }, 1200);
+  }).catch(() => {});
+});
+
 // ---- boot -----------------------------------------------------------------
 (async function init() {
   await Promise.all([loadCards(), loadPersonas(), loadPresets(), refreshStatus(), loadSettings()]);
