@@ -304,8 +304,12 @@ function openNewChat(cardId) {
 function ncPresetChanged() {
   const pr = state.presets.find(p => p.id === $("#nc-preset").value);
   $("#nc-mode").hidden = !pr;
-  if (pr && pr.persona_id && state.personas.some(p => p.id === pr.persona_id))
-    $("#nc-persona").value = pr.persona_id;      // preset suggests a persona
+  if (pr) {
+    const scen = document.querySelector('input[name="ncmode"][value="scenario"]');
+    if (scen) scen.checked = true;                 // picking a preset ⇒ apply its values by default
+    if (pr.persona_id && state.personas.some(p => p.id === pr.persona_id))
+      $("#nc-persona").value = pr.persona_id;      // preset suggests a persona
+  }
 }
 
 async function createChatFromWizard() {

@@ -427,11 +427,11 @@
           <label>Persona<select id="nc-persona" class="field"></select></label>
           <label>Preset (optional)<select id="nc-preset" class="field"></select></label>
           <div id="nc-mode" hidden>
-            <p class="muted">This preset defines a relationship. Start as:</p>
-            <label class="check"><input type="radio" name="ncmode" value="continue" checked>
-              Continue our ongoing relationship</label>
-            <label class="check"><input type="radio" name="ncmode" value="scenario">
-              Fresh preset scenario (new relationship for this chat)</label>
+            <p class="muted">This preset defines a starting relationship. Start as:</p>
+            <label class="check"><input type="radio" name="ncmode" value="scenario" checked>
+              Use this preset's relationship values (fresh, this chat only)</label>
+            <label class="check"><input type="radio" name="ncmode" value="continue">
+              Ignore the numbers — continue our existing relationship</label>
           </div>
         </div>
         <footer class="modal-foot">

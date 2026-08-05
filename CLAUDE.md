@@ -206,7 +206,9 @@ per-relationship **context override** (⚙).
     (continue|scenario). Fresh scenario seeds a **session-scoped** `ChatSession.relationship` from the
     preset (+ `scenario_note` into the opening); `chat()` uses it when present, else the persistent file.
     `GET /api/sessions/{id}` returns `relationship_summary` for scenario sessions; the character list opens
-    the wizard (`openNewChat`).
+    the wizard (`openNewChat`). **A preset's slider values only apply in `scenario` mode** — picking a
+    preset now defaults the wizard to `scenario` (`ncPresetChanged`); `continue` intentionally ignores the
+    preset numbers and uses the persistent relationship.
 - **VTuber upgrade** (voiced, animated avatar) — plan in `vtuber-upgrade-plan.md`.
   ✅ **Phase 0 done** — local Kokoro TTS + amplitude lip-sync + barge-in on existing sprites.
   ✅ **Phase 1 (push-to-talk) done** — local **faster-whisper** STT (`base.en`, CPU int8, in-process,
