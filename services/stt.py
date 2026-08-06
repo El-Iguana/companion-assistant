@@ -3,7 +3,7 @@
 CPU int8 by default — mirrors the Kokoro TTS choice (local, no torch, no cloud).
 The model is baked into the image at build time (see Containerfile). For short
 push-to-talk clips `base.en` on CPU is fast enough; if latency disappoints, move
-STT to a GPU whisper.cpp container on sillytavern-net (the original plan) and
+STT to a GPU whisper.cpp container on ai-net (the original plan) and
 point WHISPER_* at it instead.
 
 `faster-whisper` bundles ffmpeg via PyAV, so it decodes the browser's WebM/Opus

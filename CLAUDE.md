@@ -2,7 +2,7 @@
 
 A self-hosted **character-card AI companion**. FastAPI + uvicorn, runs as a Podman container,
 talks to **KoboldCPP** (text) and **ComfyUI** (portraits/expressions) on the shared
-`sillytavern-net` network. Everything local; no external services, no database.
+`ai-net` network. Everything local; no external services, no database.
 
 Built around the **Character Card V2/V3 spec** (SillyTavern/Chub compatible). Scaffolded from
 `~/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`). Frontend is **vanilla JS,
@@ -30,8 +30,8 @@ is baked in — rebuild after edits.** `podman exec` needs `-i` to receive a std
 
 | Container  | Network         | Address                         | Role         |
 |------------|-----------------|---------------------------------|--------------|
-| companion  | sillytavern-net | `0.0.0.0:7861`                  | this app     |
-| koboldcpp  | sillytavern-net | `koboldcpp:5001`                | LLM text gen |
+| companion  | ai-net | `0.0.0.0:7861`                  | this app     |
+| koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
 
 ## File structure

@@ -17,7 +17,7 @@ lip-syncs, and emotes in real time — reusing the emotion/mood/relationship eng
 
 ## Design principles
 1. **Fully local voice.** This app has intimate/adult content — no cloud STT/TTS. Everything on the 4070,
-   containerized like `koboldcpp` (Containerfile + `sillytavern-net`).
+   containerized like `koboldcpp` (Containerfile + `ai-net`).
 2. **Hybrid expression, not a rewrite.** Combine three signals instead of replacing what exists:
    - **Resting affect** from the running **mood + relationship** (baseline face/posture).
    - **Momentary beats** from inline **`[expr:x]` tags** the LLM emits (mid-sentence changes).
@@ -92,7 +92,7 @@ Mic → local STT (whisper.cpp, streaming) ─┐
     proper WebRTC AEC, or a headphone path. openWakeWord + Silero-VAD are the accuracy upgrades.
 
 > **Deviation from the original plan:** this shipped as **in-process CPU faster-whisper**, not a GPU
-> whisper.cpp container on sillytavern-net. Reason: matches how Kokoro TTS actually shipped (in-process,
+> whisper.cpp container on ai-net. Reason: matches how Kokoro TTS actually shipped (in-process,
 > CPU, baked), avoids VRAM contention with Kobold+ComfyUI, and `base.en` is fast enough for short clips.
 > The GPU whisper.cpp container remains the upgrade path if latency/accuracy needs it — swap by pointing
 > `WHISPER_*` / `services/stt.py` at the container.
@@ -124,7 +124,7 @@ Mic → local STT (whisper.cpp, streaming) ─┐
 - Emotion set (`expressions.CORE/FULL_EMOTIONS`) as the tag vocabulary; classifier as fallback.
 - `session.mood` + `relationship.summary()` for resting affect / posture.
 - Existing sprites for Phase 0/2 avatar; keep the SPA — add a togglable VTuber view.
-- New TTS/STT as containers on `sillytavern-net` (koboldcpp pattern); mind VRAM sharing with Kobold+ComfyUI.
+- New TTS/STT as containers on `ai-net` (koboldcpp pattern); mind VRAM sharing with Kobold+ComfyUI.
 
 ## Expression tag protocol (keep simple + versioned)
 - `[expr:label]` inline, label ∈ the emotion set. Parser is stream-safe (handles tags split across tokens).

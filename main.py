@@ -1,7 +1,7 @@
 """Companion — FastAPI app.
 
 A character-card AI companion. Talks to KoboldCPP (text) and optionally ComfyUI
-(portraits/expressions) on the shared `sillytavern-net` Podman network.
+(portraits/expressions) on the shared `ai-net` Podman network.
 
 No database: cards, personas, and sessions are JSON files under data/. Multi-user:
 each account has its own isolated library under data/u/<user_id>/… ; auth is a

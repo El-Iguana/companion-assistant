@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="localhost/companion:latest"
 CONTAINER="companion"
-NETWORK="sillytavern-net"
+NETWORK="ai-net"
 PORT="7861"
 
 REBUILD=0

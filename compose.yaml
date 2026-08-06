@@ -1,5 +1,5 @@
 # Companion — Podman Compose
-# Assumes KoboldCPP is already running on the "sillytavern-net" network.
+# Assumes KoboldCPP is already running on the "ai-net" network.
 #
 #   podman-compose up -d
 #   podman-compose logs -f
@@ -20,7 +20,7 @@ services:
     volumes:
       - ./data:/app/data:z
     networks:
-      - sillytavern-net
+      - ai-net
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:7861/api/status"]
       interval: 30s
@@ -29,5 +29,5 @@ services:
       retries: 3
 
 networks:
-  sillytavern-net:
+  ai-net:
     external: true
