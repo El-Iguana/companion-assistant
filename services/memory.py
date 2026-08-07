@@ -50,9 +50,8 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
     )
 
     try:
-        summary = await kobold.generate(prompt, {
-            "max_tokens": 400, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05,
-        })
+        summary = await kobold.generate_answer(prompt, {
+            "max_length": 400, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
     except Exception:
         return  # summarization is best-effort; never block the chat
 

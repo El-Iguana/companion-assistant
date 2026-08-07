@@ -85,6 +85,15 @@ class KoboldClient:
         # Strip any think blocks from non-streaming output
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
+    async def generate_answer(self, prompt: str, params: dict) -> str:
+        """Answer `prompt` directly, bypassing this model's runaway <think>: wrap it in a
+        ChatML turn with a PREFILLED empty <think></think> so generation continues at the
+        answer (the reliable way to disable thinking for small classifier/summary calls).
+        Raw /api/v1/generate → use max_length in params. Returns the answer (think stripped)."""
+        chatml = (f"<|im_start|>user\n{prompt}<|im_end|>\n"
+                  f"<|im_start|>assistant\n<think>\n\n</think>\n\n")
+        return await self.generate(chatml, {"stop_sequence": ["<|im_end|>"], **params})
+
     async def chat_generate_stream(
         self, messages: list[dict], params: dict
     ) -> AsyncGenerator[str, None]:

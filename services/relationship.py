@@ -124,7 +124,7 @@ async def classify_activity(kobold, reply: str) -> int:
         f"Passage:\n{reply[:1500]}\n\nNumber:"
     )
     try:
-        out = await kobold.generate(prompt, {"max_tokens": 4, "temperature": 0.0, "top_p": 1.0})
+        out = await kobold.generate_answer(prompt, {"max_length": 8, "temperature": 0.0, "top_p": 1.0})
     except Exception:
         return 0
     m = re.search(r"[0-7]", out or "")

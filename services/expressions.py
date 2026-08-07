@@ -131,9 +131,8 @@ async def classify(kobold: KoboldClient, reply: str, labels: list[str] | None = 
         f"Reply:\n{reply[:1500]}\n\nEmotion:"
     )
     try:
-        out = await kobold.generate(prompt, {
-            "max_tokens": 6, "temperature": 0.0, "top_p": 1.0, "rep_pen": 1.0,
-        })
+        out = await kobold.generate_answer(prompt, {
+            "max_length": 16, "temperature": 0.0, "top_p": 1.0, "rep_pen": 1.0})
     except Exception:
         return default
 
