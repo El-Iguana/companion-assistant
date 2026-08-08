@@ -940,9 +940,13 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
 
         session.messages.append(msg)
 
-        # Best-effort long-term memory maintenance.
+        # Best-effort long-term memory maintenance (thresholds are user-tunable).
         try:
-            await memory.summarize(kobold, session, card, persona)
+            st = _load_settings(cur)
+            await memory.summarize(kobold, session, card, persona,
+                                   summarize_after=st.summarize_after,
+                                   keep_recent=st.keep_recent,
+                                   max_tokens=st.summary_max_tokens)
         except Exception:
             pass
 

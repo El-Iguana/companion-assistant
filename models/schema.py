@@ -31,6 +31,10 @@ class AppSettings(BaseModel):
     vad_threshold: float = 0.015         # RMS gate (0–1): speech vs. silence
     echo_suppress: float = 0.8           # ignore-herself: raise the start gate by this × her output level
     disable_thinking: bool = False       # append /no_think so Qwen3 skips <think> reasoning (faster replies)
+    # Long-term memory: rolling-summarizer tuning (services/memory.py).
+    summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
+    keep_recent: int = Field(12, ge=2, le=100)              # most recent turns always kept verbatim
+    summary_max_tokens: int = Field(400, ge=100, le=1200)   # token budget for the "Story so far" summary
 
 
 # ---------------------------------------------------------------------------

@@ -1132,7 +1132,8 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // each via /api/stt, and — if a wake word is set — only sends speech that
 // starts with it (which also barges in). Fully local; no extra model. A true
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
-let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015 };
+let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
+  summarize_after: 24, keep_recent: 12, summary_max_tokens: 400 };
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
 let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
 
@@ -1255,8 +1256,16 @@ $("#voicecfg-btn").addEventListener("click", () => {
   $("#vc-echo").value = voiceSettings.echo_suppress ?? 0.8;
   $("#vc-echo-val").textContent = Number(voiceSettings.echo_suppress ?? 0.8).toFixed(1);
   $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
+  const sa = voiceSettings.summarize_after ?? 24, kr = voiceSettings.keep_recent ?? 12,
+        sc = voiceSettings.summary_max_tokens ?? 400;
+  $("#vc-sumafter").value = sa;      $("#vc-sumafter-val").textContent = sa + " msgs";
+  $("#vc-keeprecent").value = kr;    $("#vc-keeprecent-val").textContent = kr + " msgs";
+  $("#vc-sumcap").value = sc;        $("#vc-sumcap-val").textContent = sc + " tokens";
   $("#voice-cfg").hidden = false;
 });
+$("#vc-sumafter").addEventListener("input", (e) => { $("#vc-sumafter-val").textContent = e.target.value + " msgs"; });
+$("#vc-keeprecent").addEventListener("input", (e) => { $("#vc-keeprecent-val").textContent = e.target.value + " msgs"; });
+$("#vc-sumcap").addEventListener("input", (e) => { $("#vc-sumcap-val").textContent = e.target.value + " tokens"; });
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
 $("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
 
@@ -1305,6 +1314,9 @@ $("#vc-save").addEventListener("click", async () => {
     vad_silence_ms: Number($("#vc-silence").value),
     echo_suppress: Number($("#vc-echo").value),
     disable_thinking: $("#vc-nothink").checked,
+    summarize_after: Number($("#vc-sumafter").value),
+    keep_recent: Number($("#vc-keeprecent").value),
+    summary_max_tokens: Number($("#vc-sumcap").value),
   });
   $("#voice-cfg").hidden = true;
 });

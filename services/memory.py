@@ -10,26 +10,36 @@ from models.schema import ChatSession, CharacterCard, Persona
 from services.kobold import KoboldClient
 from services.prompt_builder import substitute_macros
 
-# Start summarizing once this many un-summarized messages accumulate,
-# and keep this many recent turns verbatim in the live prompt.
-SUMMARIZE_AFTER = 24
-KEEP_RECENT = 12
+# Defaults for the rolling summarizer. Overridable per-user via AppSettings
+# (summarize_after / keep_recent / summary_max_tokens); these constants remain
+# the fallback when no settings are passed.
+SUMMARIZE_AFTER = 24        # start summarizing once this many un-summarized messages accumulate
+KEEP_RECENT = 12            # keep this many recent turns verbatim in the live prompt
+SUMMARY_MAX_TOKENS = 400    # token budget for the summary pass
 
 
-def needs_summary(session: ChatSession) -> bool:
+def needs_summary(session: ChatSession, summarize_after: int = SUMMARIZE_AFTER) -> bool:
     unsummarized = len(session.messages) - session.memory.last_summarized_index
-    return unsummarized >= SUMMARIZE_AFTER
+    return unsummarized >= summarize_after
 
 
 async def summarize(kobold: KoboldClient, session: ChatSession,
-                    card: CharacterCard, persona: Persona) -> None:
-    """Fold older turns into session.memory.summary (mutates session)."""
-    if not needs_summary(session):
+                    card: CharacterCard, persona: Persona,
+                    summarize_after: int = SUMMARIZE_AFTER,
+                    keep_recent: int = KEEP_RECENT,
+                    max_tokens: int = SUMMARY_MAX_TOKENS) -> None:
+    """Fold older turns into session.memory.summary (mutates session).
+
+    Thresholds/cap default to the module constants but can be overridden from
+    per-user settings. `keep_recent` is capped below `summarize_after` so a fold
+    always covers at least one turn."""
+    keep_recent = min(keep_recent, summarize_after - 1)
+    if not needs_summary(session, summarize_after):
         return
 
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
-    fold_end = len(session.messages) - KEEP_RECENT
+    fold_end = len(session.messages) - keep_recent
     if fold_end <= session.memory.last_summarized_index:
         return
 
@@ -51,7 +61,7 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
 
     try:
         summary = await kobold.generate_answer(prompt, {
-            "max_length": 400, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
+            "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
     except Exception:
         return  # summarization is best-effort; never block the chat
 

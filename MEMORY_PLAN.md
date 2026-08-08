@@ -27,10 +27,14 @@ Scope + gaps:
   header button opens a `#memory` modal — add/remove pinned facts + edit the rolling "Story so far" summary.
   Injection was already wired in `prompt_builder` (Important facts / Story so far). Auto-pin by the model is
   deferred to the optional auto-fact-extraction item below.
-- **Phase 2 — Tunable + hardened summarizer.** Expose `SUMMARIZE_AFTER` / `KEEP_RECENT` / summary token cap in
-  ⚙ Settings. Harden the summary pass against the heavy-thinking model (append `/no_think`, maybe raise the
-  cap) so summaries never come back empty/truncated. Consider summarizing via chat-completions for template
-  correctness.
+- **Phase 2 — Tunable + hardened summarizer. ✅ DONE.** `summarize_after` / `keep_recent` /
+  `summary_max_tokens` are now on `AppSettings` (bounded `Field`s) and exposed as sliders in the ⚙ Settings
+  modal (MEMORY section). `memory.summarize()`/`needs_summary()` take them as params (module constants remain
+  the fallback); the chat flow passes the per-user settings. Hardening against the runaway thinking model was
+  already in place — `memory.summarize` uses `kobold.generate_answer`, which prefills an empty
+  `<think></think>` (commit e0d74dc), so summaries don't come back as reasoning. `keep_recent` is clamped
+  below `summarize_after` so a fold always covers ≥1 turn. (Chat-completions-based summarizing left as a
+  possible later refinement.)
 - **Phase 3 — Embedding / vector memory (RAG).** Semantic recall of old turns/facts on demand.
   - **Embed** what: individual turns, summary chunks, and/or pinned facts.
   - **Backend**: KoboldCPP can serve `/v1/embeddings` (needs an embeddings model loaded) — or a small local

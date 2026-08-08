@@ -301,6 +301,17 @@
           <label class="check"><input id="vc-nothink" type="checkbox"> Disable model thinking (faster replies)</label>
           <span class="muted">Skips Qwen3's hidden &lt;think&gt; reasoning so the whole reply budget goes to
             the actual message. Turn off if replies feel less thoughtful.</span>
+          <p class="muted" style="margin:.7rem 0 0;font-weight:600;letter-spacing:.03em">MEMORY</p>
+          <label>Summarize after: <output id="vc-sumafter-val"></output>
+            <input id="vc-sumafter" type="range" min="6" max="60" step="2">
+            <span class="muted">Fold older turns into the running summary once this many un-summarized
+              messages pile up. Lower = summarizes sooner (cheaper prompt, more lossy).</span></label>
+          <label>Keep recent verbatim: <output id="vc-keeprecent-val"></output>
+            <input id="vc-keeprecent" type="range" min="2" max="40" step="2">
+            <span class="muted">Most recent turns always sent word-for-word, never summarized.</span></label>
+          <label>Summary length: <output id="vc-sumcap-val"></output>
+            <input id="vc-sumcap" type="range" min="100" max="1000" step="50">
+            <span class="muted">Token budget for the "Story so far" summary. Raise if summaries feel truncated.</span></label>
         </div>
         <footer class="modal-foot">
           <span class="spacer"></span>
