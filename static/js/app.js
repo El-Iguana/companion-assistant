@@ -270,6 +270,7 @@ function renderSession(session) {
   $("#tts-btn").hidden = !card;
   $("#hf-btn").hidden = !card;
   $("#voicecfg-btn").hidden = !card;
+  $("#mem-btn").hidden = false;                  // memory is session-scoped, works with or without a card
   $("#voice-test").hidden = !(card && ttsEnabled);
   $("#expr-panel").hidden = true;
   if (card) $("#expr-appearance").value = card.appearance || "";
@@ -346,6 +347,7 @@ async function deleteSession(id, title) {
     $("#input").disabled = true; $("#send").disabled = true; $("#regen").disabled = true;
     $("#mic").disabled = true;
     $("#portrait").hidden = true; $("#expr-btn").hidden = true;
+    $("#mem-btn").hidden = true;
   }
   await loadSessions();
 }
@@ -1257,6 +1259,42 @@ $("#voicecfg-btn").addEventListener("click", () => {
 });
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
 $("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
+
+// ---- Memory (pinned facts + rolling summary) ------------------------------
+function addPinnedRow(text = "") {
+  const li = document.createElement("li");
+  li.innerHTML = `<input class="field mem-fact" type="text" value="" placeholder="e.g. Lives on the starship Meridian; afraid of deep water">` +
+    `<button class="btn-mini danger mem-del" title="Remove">✕</button>`;
+  li.querySelector(".mem-fact").value = text;                 // set via property so quotes/HTML are safe
+  li.querySelector(".mem-del").onclick = () => li.remove();
+  $("#mem-pinned").appendChild(li);
+}
+function renderMemory() {
+  const mem = (state.session && state.session.memory) || { pinned: [], summary: "" };
+  $("#mem-pinned").innerHTML = "";
+  (mem.pinned || []).forEach(addPinnedRow);
+  $("#mem-summary").value = mem.summary || "";
+}
+$("#mem-btn").addEventListener("click", () => {
+  if (!state.session) return;
+  renderMemory();
+  $("#memory").hidden = false;
+});
+$("#mem-close").addEventListener("click", () => { $("#memory").hidden = true; });
+$("#memory").addEventListener("click", (e) => { if (e.target.id === "memory") $("#memory").hidden = true; });
+$("#mem-add").addEventListener("click", () => addPinnedRow(""));
+$("#mem-save").addEventListener("click", async () => {
+  if (!state.session) return;
+  const pinned = [...document.querySelectorAll("#mem-pinned .mem-fact")]
+    .map(i => i.value.trim()).filter(Boolean);
+  const summary = $("#mem-summary").value.trim();
+  const mem = await api(`/sessions/${state.session.id}/memory`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned, summary }),
+  });
+  state.session.memory = mem;                                 // keep local state in sync
+  $("#memory").hidden = true;
+});
 $("#vc-thresh").addEventListener("input", (e) => { $("#vc-thresh-val").textContent = Number(e.target.value).toFixed(3); });
 $("#vc-silence").addEventListener("input", (e) => { $("#vc-silence-val").textContent = e.target.value + " ms"; });
 $("#vc-echo").addEventListener("input", (e) => { $("#vc-echo-val").textContent = Number(e.target.value).toFixed(1); });

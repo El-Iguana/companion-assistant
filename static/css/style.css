@@ -37,6 +37,11 @@ body {
   object-fit: cover; background: var(--panel2); flex: 0 0 26px; }
 .list li .meta { color: var(--muted); font-size: 11px; margin-left: auto; }
 
+/* Memory modal: editable pinned-fact rows (not clickable list items) */
+#mem-pinned li { cursor: default; padding: 4px 0; }
+#mem-pinned li:hover { background: none; }
+#mem-pinned .mem-fact { flex: 1; width: auto; }
+
 .field { width: 100%; background: var(--panel2); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
   margin-bottom: 6px; font: inherit; resize: vertical; }

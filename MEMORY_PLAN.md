@@ -22,10 +22,11 @@ Scope + gaps:
 
 ## Enhancements (rough phases — reorder as we like)
 
-- **Phase 1 — Pinned-facts UI (quick win).** Schema + injection already exist; add CRUD so the user (and
-  optionally the model) can lock in never-forget facts. Decisions: scope = **per-session** (`MemoryState.pinned`)
-  vs **per-character** (survives all that character's chats). Endpoints `GET/PUT /api/sessions/{id}/memory`
-  (or a card-level field) + a small editor (e.g. a "📌 Memory" panel).
+- **Phase 1 — Pinned-facts UI (quick win). ✅ DONE.** Scope chosen: **per-session** (`MemoryState.pinned`).
+  `GET/PUT /api/sessions/{id}/memory` (main.py) read/write `pinned[]` + `summary`; frontend `📌 Memory`
+  header button opens a `#memory` modal — add/remove pinned facts + edit the rolling "Story so far" summary.
+  Injection was already wired in `prompt_builder` (Important facts / Story so far). Auto-pin by the model is
+  deferred to the optional auto-fact-extraction item below.
 - **Phase 2 — Tunable + hardened summarizer.** Expose `SUMMARIZE_AFTER` / `KEEP_RECENT` / summary token cap in
   ⚙ Settings. Harden the summary pass against the heavy-thinking model (append `/no_think`, maybe raise the
   cap) so summaries never come back empty/truncated. Consider summarizing via chat-completions for template

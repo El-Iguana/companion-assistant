@@ -787,6 +787,31 @@ async def set_swipe(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
     return {"ok": True, "expression": expr}
 
 
+@app.get("/api/sessions/{session_id}/memory")
+async def get_memory(session_id: str, cur: Ctx = Depends(get_ctx)):
+    s = _load(cur.sessions, session_id, ChatSession)
+    if not s:
+        raise HTTPException(404, "session not found")
+    return s.memory.model_dump()
+
+
+@app.put("/api/sessions/{session_id}/memory")
+async def set_memory(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
+    """Edit the session's pinned facts and/or rolling summary (user-curated)."""
+    s = _load(cur.sessions, session_id, ChatSession)
+    if not s:
+        raise HTTPException(404, "session not found")
+    if "pinned" in body:
+        raw = body.get("pinned") or []
+        if not isinstance(raw, list):
+            raise HTTPException(400, "pinned must be a list of strings")
+        s.memory.pinned = [str(x).strip() for x in raw if str(x).strip()]
+    if "summary" in body:
+        s.memory.summary = str(body.get("summary") or "").strip()
+    _save(s, cur.sessions)
+    return s.memory.model_dump()
+
+
 @app.delete("/api/sessions/{session_id}/messages")
 async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     s = _load(cur.sessions, session_id, ChatSession)
