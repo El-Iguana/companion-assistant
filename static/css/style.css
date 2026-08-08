@@ -42,6 +42,11 @@ body {
 #mem-pinned li:hover { background: none; }
 #mem-pinned .mem-fact { flex: 1; width: auto; }
 
+/* End labels under a bipolar range (e.g. power dynamic): who's at each pole */
+.range-ends { display: flex; justify-content: space-between; font-size: 11px;
+  color: var(--muted); margin: 2px 0 4px; }
+.range-ends b { color: var(--text); font-weight: 600; }
+
 .field { width: 100%; background: var(--panel2); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
   margin-bottom: 6px; font: inherit; resize: vertical; }

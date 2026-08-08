@@ -7,6 +7,9 @@ const api = (p, o) => fetch("/api" + p, o).then(r => {
 
 const state = { cards: [], sessions: [], personas: [], presets: [], persona: null, session: null, streaming: false };
 
+// Bipolar power-dynamic readout: name the side that holds power (− = user, + = char).
+const powerLabel = (v) => { v = Number(v); return v === 0 ? "Balanced" : (v < 0 ? "User " : "Char ") + Math.abs(v); };
+
 // ---- rendering helpers ----------------------------------------------------
 function md(t) {  // minimal: *italics* for actions/emotes
   const esc = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -137,7 +140,7 @@ async function openRelCtx() {
   const r = await api(`/relationship?character_id=${card.id}&persona_id=${state.persona.id}`);
   $("#rc-power").value = r.power_dynamic ?? 0;
   $("#rc-social").value = r.social_acceptance ?? 50;
-  $("#rc-power-val").textContent = $("#rc-power").value;
+  $("#rc-power-val").textContent = powerLabel($("#rc-power").value);
   $("#rc-social-val").textContent = $("#rc-social").value;
   $("#rel-ctx").hidden = false;
 }
@@ -155,7 +158,7 @@ $("#rel-ctx-close").addEventListener("click", () => { $("#rel-ctx").hidden = tru
 $("#rel-ctx").addEventListener("click", (e) => { if (e.target.id === "rel-ctx") $("#rel-ctx").hidden = true; });
 $("#rc-save").addEventListener("click", () => saveRelCtx(false));
 $("#rc-clear").addEventListener("click", () => saveRelCtx(true));
-$("#rc-power").addEventListener("input", (e) => { $("#rc-power-val").textContent = e.target.value; });
+$("#rc-power").addEventListener("input", (e) => { $("#rc-power-val").textContent = powerLabel(e.target.value); });
 $("#rc-social").addEventListener("input", (e) => { $("#rc-social-val").textContent = e.target.value; });
 
 // Header mood meter: label + a valence bar filling from the center.
@@ -698,7 +701,7 @@ async function openCardEditor(card) {
   v("tags", (ceBase.tags || []).join(", "));
   $("#ce-power").value = ceBase.power_dynamic ?? 0;
   $("#ce-social").value = ceBase.social_acceptance ?? 50;
-  $("#ce-power-val").textContent = $("#ce-power").value;
+  $("#ce-power-val").textContent = powerLabel($("#ce-power").value);
   $("#ce-social-val").textContent = $("#ce-social").value;
   await loadVoices();
   fillVoiceSelect($("#ce-voice"), ceBase.tts_voice);
@@ -828,7 +831,7 @@ $("#ce-delete").addEventListener("click", deleteCard);
 $("#ce-duplicate").addEventListener("click", duplicateCard);
 $("#card-editor").addEventListener("click", (e) => { if (e.target.id === "card-editor") closeCardEditor(); });
 $("#ce-voice-test").addEventListener("click", () => playSample($("#ce-voice").value));
-$("#ce-power").addEventListener("input", (e) => { $("#ce-power-val").textContent = e.target.value; });
+$("#ce-power").addEventListener("input", (e) => { $("#ce-power-val").textContent = powerLabel(e.target.value); });
 $("#ce-social").addEventListener("input", (e) => { $("#ce-social-val").textContent = e.target.value; });
 $("#ce-image").addEventListener("change", (e) => {
   const f = e.target.files[0]; if (!f) return;

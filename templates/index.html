@@ -177,7 +177,8 @@
           <div class="ce-grid">
             <label>Power dynamic: <output id="ce-power-val"></output>
               <input id="ce-power" type="range" min="-100" max="100" step="5">
-              <span class="muted">−100 = {{user}} holds power · +100 = character does (|value| adds caution)</span></label>
+              <div class="range-ends"><span>◀ <b>User</b> holds power</span><span><b>Char</b> holds power ▶</span></div>
+              <span class="muted">Centre = equal footing. |value| adds caution — pushing either way slows intimacy.</span></label>
             <label>Social acceptance: <output id="ce-social-val"></output>
               <input id="ce-social" type="range" min="0" max="100" step="5">
               <span class="muted">0 = taboo/stigmatized · 100 = fully accepted</span></label>
@@ -246,7 +247,8 @@
         <div class="modal-body">
           <label>Power dynamic: <output id="rc-power-val"></output>
             <input id="rc-power" type="range" min="-100" max="100" step="5">
-            <span class="muted">−100 = {{user}} holds power · +100 = character does</span></label>
+            <div class="range-ends"><span>◀ <b>User</b> holds power</span><span><b>Char</b> holds power ▶</span></div>
+            <span class="muted">Centre = equal footing. |value| adds caution — pushing either way slows intimacy.</span></label>
           <label>Social acceptance: <output id="rc-social-val"></output>
             <input id="rc-social" type="range" min="0" max="100" step="5">
             <span class="muted">0 = taboo · 100 = fully accepted</span></label>
