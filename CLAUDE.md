@@ -5,7 +5,7 @@ talks to **KoboldCPP** (text) and **ComfyUI** (portraits/expressions) on the sha
 `ai-net` network. Everything local; no external services, no database.
 
 Built around the **Character Card V2/V3 spec** (SillyTavern/Chub compatible). Scaffolded from
-`~/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`). Frontend is **vanilla JS,
+`~/Development/ai_ecosystem/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`). Frontend is **vanilla JS,
 no framework, no build step**.
 
 Companion features layered on top: streaming chat, swipes, transparent expression sprites with a
@@ -21,7 +21,7 @@ python run.py                # local dev w/ autoreload (needs deps on host)
 # open http://localhost:7861 ; logs: podman logs -f companion ; stop: podman stop companion
 ```
 
-Prereqs: `~/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
+Prereqs: `~/Development/ai_ecosystem/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
 distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absolutereality_v181`) when both
 run. **Data (`data/…`) is a mounted volume**, so editing card/session/relationship JSON is live; **code
 is baked in — rebuild after edits.** `podman exec` needs `-i` to receive a stdin heredoc.
