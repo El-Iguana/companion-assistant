@@ -46,7 +46,7 @@ for d in (AUTH, USERS, UROOT):
     d.mkdir(parents=True, exist_ok=True)
 
 KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://koboldcpp:5001")
-COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://host.containers.internal:8188")
+COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://comfyui:8188")
 kobold = KoboldClient(KOBOLD_URL)
 comfy = ComfyUIClient(COMFYUI_URL)
 

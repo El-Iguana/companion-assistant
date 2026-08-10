@@ -232,7 +232,7 @@ class KoboldSettings(BaseModel):
 
 
 class ComfyUISettings(BaseModel):
-    url: str = "http://host.containers.internal:8188"
+    url: str = "http://comfyui:8188"
     checkpoint: str = ""
     style: str = "anime"
 

@@ -419,7 +419,7 @@ def _build_workflow(
 
 
 class ComfyUIClient:
-    def __init__(self, base_url: str = "http://host.containers.internal:8188"):
+    def __init__(self, base_url: str = "http://comfyui:8188"):
         self.base_url = base_url.rstrip("/")
         self.client_id = str(uuid.uuid4())
         self._client: Optional[httpx.AsyncClient] = None
