@@ -16,7 +16,7 @@ export losslessly.
   transparent cutouts, Core-8 / Full-28 sets, with a live mood-driven portrait
 - **Relationship system** — multi-axis (affection / trust / attraction / tension), stages,
   intimacy/consent with agency-preserving behavior, milestones, stage-gated lorebook, scenario presets
-- **Local voice** — Kokoro TTS (per-character voice) + push-to-talk & hands-free faster-whisper STT
+- **Local voice** — Kokoro + Piper TTS (per-character voice) + push-to-talk & hands-free faster-whisper STT
 - **Multi-user** — login with `admin`/`user` roles; each account has its own **private, isolated**
   library of characters, personas, and presets
 - **Roleplay vs assistant** chat modes, custom system prompts, and a `/no_think` speed toggle

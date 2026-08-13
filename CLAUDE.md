@@ -51,7 +51,7 @@ services/
   memory.py             # rolling per-session summary + cross-session long-term memory (fold/inject)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
-  tts.py                # local Kokoro TTS (ONNX/CPU) — text -> WAV, strips *action* narration
+  tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js
@@ -59,6 +59,7 @@ data/auth/  secret · users/<uid>.json                    # accounts + signing s
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
+models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 RELATIONSHIP_PLAN.md    # relationship system design + phases
 MEMORY_PLAN.md          # memory enhancement plan (pinned-facts UI, embeddings/RAG, tunable summarizer) — TODO
@@ -90,7 +91,7 @@ Login-gated, role-based, per-user isolated libraries.
   `mes_example`, `alternate_greetings`, `system_prompt`, `post_history_instructions`,
   `character_book`, `tags`, `nickname`, …). Local: `image` (base64 portrait), `appearance` (sprite
   prompt), `expressions` (emotion→base64), **`power_dynamic`** (−100…100), **`social_acceptance`** (0…100),
-  **`tts_voice`** (per-character Kokoro voice), **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
+  **`tts_voice`** (per-character voice — Kokoro id or `piper:<name>`), **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
   system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
   invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);
@@ -120,7 +121,7 @@ GET  /api/me                               {user:{username,role}} | {user:null} 
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
 GET  /api/status                           KoboldCPP {online, version, model}
-POST /api/tts ; GET /api/tts/voices        local Kokoro TTS (text→WAV) / 54 voices
+POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
 GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking)
 # cards
@@ -229,6 +230,16 @@ per-relationship **context override** (⚙).
   element display rules; toggle via `.hidden`.
 - Starlette: `TemplateResponse(request, "index.html")` (request first).
 - `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
+- **TTS backends** (`services/tts.py`): voice ids prefixed **`piper:`** route to Piper (one ONNX per voice,
+  loaded from `PIPER_DIR`, cached; its espeak-ng data ships in the `piper-tts` wheel), everything else to
+  Kokoro. Piper voices are **mounted, not baked** (`../jarvis` → `/app/models/piper:ro,z`) — dropping a new
+  `<name>.onnx` + `<name>.onnx.json` pair in there needs only a container restart, no rebuild. Piper honours
+  each voice's own `inference` block; `speed` scales its `length_scale` inversely. Note Piper voices carry
+  their own sample rate (jarvis = 22.05 kHz vs Kokoro's 24 kHz).
+  **Loudness:** Piper runs with `normalize_audio=False` + a fixed `PIPER_GAIN` (3.5) instead of its default
+  per-chunk normalisation — normalising would pin every *sentence* to full scale, which pumps the level in
+  the frontend's chunked streaming queue and skews the amplitude lip-sync. 3.5 was measured to match
+  Kokoro (rms 0.104 on both) without clipping; retune it per voice via the `PIPER_GAIN` env var.
 - Relationship/mood update on generation only (not re-rolls). Sprites are same-character via img2img from a
   reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
 - All characters adult; intimacy code is abstract state (tiers/thresholds) — the local model writes prose.

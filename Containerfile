@@ -24,6 +24,11 @@ RUN mkdir -p /app/models/kokoro && \
     curl -fsSL -o "$KOKORO_MODEL" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx && \
     curl -fsSL -o "$KOKORO_VOICES" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 
+# Piper voices (one .onnx + .onnx.json per voice) are NOT baked — the shared
+# ~/Development/ai_ecosystem/jarvis dir is mounted here read-only at run time.
+ENV PIPER_DIR=/app/models/piper
+RUN mkdir -p ${PIPER_DIR}
+
 # Bake the faster-whisper STT model (CPU int8) into the image.
 ENV WHISPER_MODEL=base.en
 ENV WHISPER_CACHE=/app/models/whisper

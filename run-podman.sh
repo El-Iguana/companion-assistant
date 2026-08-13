@@ -44,6 +44,14 @@ else
   echo "==> Network '$NETWORK' not found; falling back to host networking"
 fi
 
+# Piper TTS voices (shared, read-only) — skipped if the dir isn't there.
+PIPER_SRC="$(dirname "$SCRIPT_DIR")/jarvis"
+PIPER_ARG=()
+if [[ -d "$PIPER_SRC" ]]; then
+  PIPER_ARG=(-v "$PIPER_SRC:/app/models/piper:ro,z")
+  echo "==> Mounting Piper voices from $PIPER_SRC"
+fi
+
 echo "==> Starting $CONTAINER on port $PORT …"
 podman run -d \
   --name "$CONTAINER" \
@@ -52,6 +60,7 @@ podman run -d \
   -p "${PORT}:7861" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
+  "${PIPER_ARG[@]}" \
   "$IMAGE"
 
 echo ""

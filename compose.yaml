@@ -19,6 +19,7 @@ services:
       - KOBOLD_URL=http://koboldcpp:5001
     volumes:
       - ./data:/app/data:z
+      - ../jarvis:/app/models/piper:ro,z   # Piper TTS voices (shared, read-only)
     networks:
       - ai-net
     healthcheck:

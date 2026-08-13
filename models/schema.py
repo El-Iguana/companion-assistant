@@ -88,7 +88,7 @@ class CharacterCard(BaseModel):
     appearance: str = ""                 # visual prompt used to generate expression sprites
     power_dynamic: float = 0.0           # -100 ({{user}} holds power) .. +100 (character holds power); |value| = caution
     social_acceptance: float = 50.0      # 0 taboo/stigmatized .. 100 fully accepted (default context)
-    tts_voice: str = ""                  # Kokoro voice id for this character ("" = default)
+    tts_voice: str = ""                  # voice id: Kokoro ("af_sarah") or Piper ("piper:jarvis-medium"); "" = default
     expr_from_upload: bool = False       # derive expression sprites from the uploaded portrait (img2img) vs. txt2img
     expr_denoise: float = 0.55           # img2img denoise for emotion sprites (lower = closer to base/likeness)
     expressions: Dict[str, str] = {}     # emotion -> base64 PNG sprite

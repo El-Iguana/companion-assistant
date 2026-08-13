@@ -113,7 +113,10 @@ Mic → local STT (whisper.cpp, streaming) ─┐
 
 ## Component choices (local-first)
 - **TTS**: **Kokoro** (fast, good quality) or **XTTS-v2** (expressive, voice-cloneable) — start Kokoro for
-  latency, offer XTTS for quality. Piper as a lightweight fallback. Streaming/sentence-chunked.
+  latency, offer XTTS for quality. Streaming/sentence-chunked.
+  ✅ **Piper landed as a second backend** — voice ids `piper:<name>`, one ONNX per voice mounted ro from
+  `../jarvis` (first voice: `jarvis-medium`, en_GB RP). Same `/api/tts` path, so lip-sync/streaming are
+  unchanged. Still open: XTTS for voice-cloning.
 - **STT**: **whisper.cpp** (CUDA) — `base`/`small` for latency, streaming partials.
 - **VRM in browser**: `three.js` + `@pixiv/three-vrm`.
 - **VRM sourcing on Linux**: VRoid Studio has **no native Linux build** → use the **VRM Add-on for Blender**
