@@ -147,7 +147,11 @@ LONGTERM_PROMPT = (
 # and deletes it. So this is deliberately reluctant — NONE is a good answer, the
 # per-fold cap is small, and near-duplicates are dropped in code rather than
 # trusted to the prompt.
-AUTO_FACT_MAX_NEW = 3          # per fold; small on purpose
+AUTO_FACT_MAX_NEW = 3          # per fold; small on purpose. Fallback only — the live
+                               # value comes from AppSettings.auto_facts_max_new, since
+                               # the right setting is a judgement call: low over-selects
+                               # (a four-fact conversation loses one), high risks storing
+                               # marginal facts that then persist into every future chat.
 AUTO_FACT_DEDUPE_SIM = 0.86    # cosine above this against an existing fact -> drop
 
 # Each Do-NOT below is a failure seen against the 9B fine-tune. The transient
@@ -246,7 +250,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              upto: int | None = None,
                              max_tokens: int = 500,
                              index_path=None,
-                             extract_facts: bool = False) -> bool:
+                             extract_facts: bool = False,
+                             max_new_facts: int = AUTO_FACT_MAX_NEW) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -300,7 +305,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     # which is rewritten wholesale on every fold and can quietly drop them. Only
     # ever ADDS, and only with origin="auto"; user-written facts are never touched.
     if extract_facts:
-        new_facts = await extract_auto_facts(kobold, mem, transcript, char_name, user_name)
+        new_facts = await extract_auto_facts(kobold, mem, transcript, char_name,
+                                             user_name, max_new=max_new_facts)
         for text in new_facts:
             mem.facts.append(MemoryFact(text=text, origin="auto"))
         if new_facts:

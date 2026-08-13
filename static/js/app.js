@@ -1138,7 +1138,8 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
   summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
-  recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true };
+  recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
+  auto_facts_max_new: 3 };
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
 let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
 
@@ -1269,6 +1270,8 @@ $("#voicecfg-btn").addEventListener("click", () => {
   const rk = voiceSettings.recall_top_k ?? 4;
   $("#vc-recall").checked = voiceSettings.recall_enabled !== false;
   $("#vc-autofacts").checked = voiceSettings.auto_facts_enabled !== false;
+  const afn = voiceSettings.auto_facts_max_new ?? 3;
+  $("#vc-autofactsn").value = afn; $("#vc-autofactsn-val").textContent = afn + " max";
   $("#vc-recallk").value = rk;       $("#vc-recallk-val").textContent = rk + " snippets";
   $("#voice-cfg").hidden = false;
 });
@@ -1276,6 +1279,7 @@ $("#vc-sumafter").addEventListener("input", (e) => { $("#vc-sumafter-val").textC
 $("#vc-keeprecent").addEventListener("input", (e) => { $("#vc-keeprecent-val").textContent = e.target.value + " msgs"; });
 $("#vc-sumcap").addEventListener("input", (e) => { $("#vc-sumcap-val").textContent = e.target.value + " tokens"; });
 $("#vc-recallk").addEventListener("input", (e) => { $("#vc-recallk-val").textContent = e.target.value + " snippets"; });
+$("#vc-autofactsn").addEventListener("input", (e) => { $("#vc-autofactsn-val").textContent = e.target.value + " max"; });
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
 $("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
 
@@ -1407,6 +1411,7 @@ $("#vc-save").addEventListener("click", async () => {
     recall_enabled: $("#vc-recall").checked,
     recall_top_k: Number($("#vc-recallk").value),
     auto_facts_enabled: $("#vc-autofacts").checked,
+    auto_facts_max_new: Number($("#vc-autofactsn").value),
   });
   $("#voice-cfg").hidden = true;
 });

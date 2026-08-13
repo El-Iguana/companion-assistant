@@ -337,6 +337,11 @@
             <span class="muted">Pull durable facts (names, allergies, preferences) out of finished
               conversations into long-term memory. They appear in 📌 Memory → Long-term with an
               AUTO badge, and you can edit or delete any of them.</span></label>
+          <label>Facts per conversation: <output id="vc-autofactsn-val"></output>
+            <input id="vc-autofactsn" type="range" min="1" max="10" step="1">
+            <span class="muted">Ceiling on how many she may add from one swept conversation. Lower
+              keeps memory clean but can miss a fact; higher captures more and risks storing
+              marginal ones, which stick until you remove them.</span></label>
           <label>Recall depth: <output id="vc-recallk-val"></output>
             <input id="vc-recallk" type="range" min="1" max="10" step="1">
             <span class="muted">How many remembered snippets may be injected per turn. Shares the

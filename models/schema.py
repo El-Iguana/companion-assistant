@@ -39,6 +39,7 @@ class AppSettings(BaseModel):
     recall_enabled: bool = True                             # retrieve related past turns/facts per turn
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
     auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
+    auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
 
 
 # ---------------------------------------------------------------------------
