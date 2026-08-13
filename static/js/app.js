@@ -1137,7 +1137,8 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // starts with it (which also barges in). Fully local; no extra model. A true
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
-  summarize_after: 24, keep_recent: 12, summary_max_tokens: 400 };
+  summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
+  recall_enabled: true, recall_top_k: 4 };
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
 let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
 
@@ -1265,11 +1266,15 @@ $("#voicecfg-btn").addEventListener("click", () => {
   $("#vc-sumafter").value = sa;      $("#vc-sumafter-val").textContent = sa + " msgs";
   $("#vc-keeprecent").value = kr;    $("#vc-keeprecent-val").textContent = kr + " msgs";
   $("#vc-sumcap").value = sc;        $("#vc-sumcap-val").textContent = sc + " tokens";
+  const rk = voiceSettings.recall_top_k ?? 4;
+  $("#vc-recall").checked = voiceSettings.recall_enabled !== false;
+  $("#vc-recallk").value = rk;       $("#vc-recallk-val").textContent = rk + " snippets";
   $("#voice-cfg").hidden = false;
 });
 $("#vc-sumafter").addEventListener("input", (e) => { $("#vc-sumafter-val").textContent = e.target.value + " msgs"; });
 $("#vc-keeprecent").addEventListener("input", (e) => { $("#vc-keeprecent-val").textContent = e.target.value + " msgs"; });
 $("#vc-sumcap").addEventListener("input", (e) => { $("#vc-sumcap-val").textContent = e.target.value + " tokens"; });
+$("#vc-recallk").addEventListener("input", (e) => { $("#vc-recallk-val").textContent = e.target.value + " snippets"; });
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
 $("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
 
@@ -1398,6 +1403,8 @@ $("#vc-save").addEventListener("click", async () => {
     summarize_after: Number($("#vc-sumafter").value),
     keep_recent: Number($("#vc-keeprecent").value),
     summary_max_tokens: Number($("#vc-sumcap").value),
+    recall_enabled: $("#vc-recall").checked,
+    recall_top_k: Number($("#vc-recallk").value),
   });
   $("#voice-cfg").hidden = true;
 });

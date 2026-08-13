@@ -35,6 +35,9 @@ class AppSettings(BaseModel):
     summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
     keep_recent: int = Field(12, ge=2, le=100)              # most recent turns always kept verbatim
     summary_max_tokens: int = Field(400, ge=100, le=1200)   # token budget for the "Story so far" summary
+    # Semantic recall (services/embeddings.py + memory.index_search).
+    recall_enabled: bool = True                             # retrieve related past turns/facts per turn
+    recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
 
 
 # ---------------------------------------------------------------------------

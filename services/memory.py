@@ -6,9 +6,14 @@ preserving continuity. Uses the same KoboldCPP backend for the summarization pas
 """
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 
+import numpy as np
+
 from models.schema import ChatSession, CharacterCard, CharacterMemory, Persona
+from services import embeddings
 from services.kobold import KoboldClient
 from services.prompt_builder import substitute_macros
 
@@ -136,7 +141,8 @@ LONGTERM_PROMPT = (
 async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              session: ChatSession, card: CharacterCard, persona: Persona,
                              upto: int | None = None,
-                             max_tokens: int = 500) -> bool:
+                             max_tokens: int = 500,
+                             index_path=None) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -182,6 +188,24 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     mem.summary = summary.strip()
     mem.swept_sessions[session.id] = upto
     mem.updated_at = datetime.now().isoformat()
+
+    # Index the same turns for semantic recall (Phase 4). Done HERE, inside the
+    # fold, so the threshold and idle triggers can't drift apart on what got
+    # indexed; best-effort, and index_add() swallows its own failures.
+    # USER turns only. Her own replies restate what the user just said, wrapped in
+    # personality — indexing them duplicates the signal and, worse, drags the
+    # median similarity up, which is exactly what index_search's margin gate is
+    # measured against. Observed on a live index: with her turns included, 2 of 6
+    # deliberately irrelevant queries ("tell me a joke" -> "RagTest: Hey.") slipped
+    # through the gate; with user turns only, 0 of 6 did, and all 5 relevant
+    # queries still retrieved the right turn.
+    if index_path is not None:
+        index_add(index_path, [
+            {"text": f"{user_name}: {m.content}", "kind": "turn"}
+            for m in session.messages[start:upto]
+            if m.role == "user" and m.content
+            and len(m.content.strip()) >= RECALL_MIN_TEXT
+        ])
     return True
 
 
@@ -228,3 +252,172 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
     if summary:
         parts.append(f"Earlier history:\n{summary}")
     return "\n".join(parts) if (kept or summary) else ""
+
+
+# ---------------------------------------------------------------------------
+# Semantic recall (MEMORY_PLAN Phase 4)
+# ---------------------------------------------------------------------------
+# The long-term summary above is lossy by design — it keeps what matters in
+# general and drops specifics. This recovers the specifics: past turns and facts
+# are embedded once, and the turn the user just typed retrieves the few that
+# actually relate to it.
+#
+# Layered ON TOP of Phase 3 rather than replacing it, and sharing its character
+# budget rather than adding to it, so enabling recall can't silently double the
+# memory footprint of every prompt.
+#
+# Everything here is best-effort: no embedding model baked in, an onnxruntime
+# failure, a corrupt index — all degrade to "no recall block" and leave the chat
+# turn untouched. Never raise into the hot path.
+
+RECALL_TOP_K = 4
+RECALL_MAX_VECTORS = 2000      # per pairing; ~3 MB at 384 dims, oldest turns evicted first
+RECALL_MAX_CHARS = 240         # per stored entry, so one long turn can't dominate
+
+# Relevance gate. BGE's absolute cosine scores are NOT calibrated — measured on a
+# companion-shaped corpus, "hello" scored 0.541 while the genuinely relevant
+# "what can't I eat?" scored 0.523, so any fixed floor either lets greetings
+# through or drops real hits. What DOES separate them is the margin between the
+# best hit and the median hit: relevant queries scored >= 0.114 above median,
+# irrelevant ones <= 0.094. Hence a margin gate, with the raw floor kept only as
+# a loose sanity check.
+#
+# Calibrated on 8 documents and 13 queries — a heuristic, not a validated
+# threshold. Retune here if recall starts surfacing noise.
+RECALL_MIN_MARGIN = 0.10
+RECALL_MIN_SCORE = 0.45
+RECALL_MIN_INDEX = 3           # below this the median is too noisy to gate on
+RECALL_MIN_QUERY_WORDS = 3     # "hello" / "ok" / "thanks" retrieve nothing
+RECALL_MIN_TEXT = 20           # skip trivially short turns ("ok", "sure", "Hey.")
+
+
+def _index_load(path) -> tuple:
+    """Return (vectors (N,D) float32 | None, meta list). Any problem -> empty."""
+    try:
+        if not path.exists():
+            return None, []
+        with np.load(path, allow_pickle=False) as z:
+            vectors = z["vectors"]
+            meta = json.loads(str(z["meta"]))
+        if len(meta) != len(vectors):
+            return None, []          # torn write -> rebuild from scratch
+        return vectors, meta
+    except Exception:
+        return None, []
+
+
+def _index_save(path, vectors, meta) -> None:
+    tmp = path.with_suffix(".tmp.npz")
+    np.savez(tmp, vectors=vectors.astype(np.float32), meta=np.array(json.dumps(meta)))
+    os.replace(tmp, path)
+
+
+def index_add(path, entries: list[dict], replace_kind: str = None) -> bool:
+    """Embed `entries` ([{text, kind}]) and append them to the index at `path`.
+
+    replace_kind: drop every existing entry of that kind first. Facts are
+    editable and deletable, so re-indexing them wholesale on save is both
+    simpler and more correct than trying to diff them.
+
+    Returns True if the index was written. Never raises.
+    """
+    try:
+        if not embeddings.available():
+            return False
+        entries = [e for e in entries if (e.get("text") or "").strip()]
+        vectors, meta = _index_load(path)
+
+        if replace_kind and meta:
+            keep = [i for i, m in enumerate(meta) if m.get("kind") != replace_kind]
+            meta = [meta[i] for i in keep]
+            vectors = vectors[keep] if vectors is not None and keep else None
+        if not entries and replace_kind is None:
+            return False
+
+        new_meta, new_text = [], []
+        for e in entries:
+            text = " ".join((e["text"] or "").split())[:RECALL_MAX_CHARS]
+            new_meta.append({"text": text, "kind": e.get("kind", "turn"),
+                             "created_at": datetime.now().isoformat()})
+            new_text.append(text)
+
+        if new_text:
+            fresh = embeddings.encode(new_text)
+            vectors = fresh if vectors is None or len(vectors) == 0 else np.vstack([vectors, fresh])
+            meta = meta + new_meta
+
+        if vectors is None or len(vectors) == 0:
+            path.unlink(missing_ok=True)
+            return True
+
+        # Evict oldest TURNS first; curated facts are small and user-owned, so
+        # they should never be pushed out by conversation volume.
+        if len(meta) > RECALL_MAX_VECTORS:
+            over = len(meta) - RECALL_MAX_VECTORS
+            drop = [i for i, m in enumerate(meta) if m.get("kind") == "turn"][:over]
+            if drop:
+                keep = [i for i in range(len(meta)) if i not in set(drop)]
+                meta = [meta[i] for i in keep]
+                vectors = vectors[keep]
+
+        _index_save(path, vectors, meta)
+        return True
+    except Exception as e:
+        print(f"[recall] index_add skipped: {e}", flush=True)
+        return False
+
+
+def index_search(path, query: str, top_k: int = RECALL_TOP_K) -> list[dict]:
+    """Top-k entries related to `query`, or [] if recall isn't applicable.
+
+    Applicability is deliberately conservative — see RECALL_MIN_MARGIN. A block
+    of loosely-related memories injected into every turn would degrade her
+    replies, so the default when unsure is to inject nothing.
+    """
+    try:
+        if not embeddings.available():
+            return []
+        if len((query or "").split()) < RECALL_MIN_QUERY_WORDS:
+            return []
+        vectors, meta = _index_load(path)
+        if vectors is None or len(meta) < RECALL_MIN_INDEX:
+            return []
+
+        qv = embeddings.encode([query], is_query=True)[0]
+        sims = vectors @ qv
+        best = float(sims.max())
+        if best < RECALL_MIN_SCORE or best - float(np.median(sims)) < RECALL_MIN_MARGIN:
+            return []
+
+        order = np.argsort(-sims)[:top_k]
+        return [{"text": meta[i]["text"], "kind": meta[i].get("kind", "turn"),
+                 "score": float(sims[i])} for i in order
+                if float(sims[i]) >= RECALL_MIN_SCORE]
+    except Exception as e:
+        print(f"[recall] index_search skipped: {e}", flush=True)
+        return []
+
+
+def recall_block(hits: list[dict], budget_chars: int, already_shown: str = "") -> str:
+    """Render retrieved memories as a system-prompt block, or "" if nothing fits.
+
+    `already_shown` is the long-term block that will also be injected this turn;
+    anything whose text is already in it is dropped rather than repeated — the
+    curated facts are always present, so without this the same sentence would
+    appear twice in one prompt.
+    """
+    if not hits or budget_chars <= 0:
+        return ""
+    header = "Things from earlier that may be relevant:"
+    budget = budget_chars - len(header)
+    lines = []
+    for h in hits:
+        text = h["text"].strip()
+        if not text or (already_shown and text in already_shown):
+            continue
+        line = f"- {text}"
+        if len(line) + 1 > budget:
+            break
+        lines.append(line)
+        budget -= len(line) + 1
+    return header + "\n" + "\n".join(lines) if lines else ""

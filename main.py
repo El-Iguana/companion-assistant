@@ -224,6 +224,13 @@ def _load_character_memory(cur: Ctx, character_id: str, persona_id: str) -> Char
     return CharacterMemory(character_id=character_id, persona_id=persona_id)
 
 
+def _memory_index_path(cur: Ctx, character_id: str, persona_id: str):
+    """Vector index for a pairing (Phase 4). Sits beside the CharacterMemory
+    JSON with a non-.json suffix on purpose, so any future `glob("*.json")` over
+    this directory can't mistake it for a model file."""
+    return cur.memories / f"{character_id}__{persona_id}.vec.npz"
+
+
 def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
     (cur.memories / f"{mem.character_id}__{mem.persona_id}.json").write_text(
         mem.model_dump_json(indent=2))
@@ -879,6 +886,11 @@ async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
         mem.summary = str(body.get("summary") or "").strip()
     mem.updated_at = datetime.now().isoformat()
     _save_character_memory(cur, mem)
+    # Re-index facts wholesale rather than diffing: they are editable and
+    # deletable, so replace-by-kind is both simpler and correct.
+    await asyncio.to_thread(
+        memory.index_add, _memory_index_path(cur, cid, pid),
+        [{"text": f.text, "kind": "fact"} for f in mem.facts], "fact")
     return mem.model_dump()
 
 
@@ -903,8 +915,9 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
 
     st = _load_settings(cur)
     mem = _load_character_memory(cur, session.character_id, persona.id)
-    changed = await memory.fold_into_longterm(kobold, mem, session, card, persona,
-                                              max_tokens=st.summary_max_tokens)
+    changed = await memory.fold_into_longterm(
+        kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
+        index_path=_memory_index_path(cur, session.character_id, persona.id))
     if changed:
         _save_character_memory(cur, mem)
     return {"ok": True, "swept": changed}
@@ -964,16 +977,37 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # a scenario is a deliberate alternate premise seeded from a preset, so the main
     # timeline's remembered history would contradict the state it was just given.
     char_mem = None if scenario else _load_character_memory(cur, session.character_id, persona.id)
+    settings = _load_settings(cur)
+    lt_note = memory.longterm_block(char_mem, card.name, persona.name) if char_mem else ""
+
+    # Semantic recall (Phase 4): the long-term summary is lossy by design, so pull
+    # back the specifics that relate to what was just said. Retrieval SHARES
+    # longterm_block's character budget rather than adding to it — turning recall
+    # on must not silently double the memory footprint of every prompt.
+    # Offloaded to a thread: onnxruntime is sync and would block the event loop,
+    # stalling every other session's stream for the duration.
+    recall_note = ""
+    if char_mem is not None and settings.recall_enabled:
+        last_user = next((m.content for m in reversed(session.messages)
+                          if m.role == "user" and m.content), "")
+        if last_user:
+            hits = await asyncio.to_thread(
+                memory.index_search,
+                _memory_index_path(cur, session.character_id, persona.id),
+                last_user, settings.recall_top_k)
+            recall_note = memory.recall_block(
+                hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note)
+
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
         boundary_note=relationship.boundary_note(rel, card.name, persona.name),
-        longterm_note=memory.longterm_block(char_mem, card.name, persona.name))
+        longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p))
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
     # ignores it in the system prompt). The model then emits an empty <think></think>
     # (stripped client-side) so the whole token budget goes to the actual reply.
     # Mutates only the transient generation copy, not the stored history.
-    if _load_settings(cur).disable_thinking:
+    if settings.disable_thinking:
         for m in reversed(messages):
             if m["role"] == "user":
                 m["content"] += " /no_think"
@@ -1062,7 +1096,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                 if await memory.fold_into_longterm(
                         kobold, cm, session, card, persona,
                         upto=session.memory.last_summarized_index,
-                        max_tokens=st.summary_max_tokens):
+                        max_tokens=st.summary_max_tokens,
+                        index_path=_memory_index_path(cur, session.character_id, persona.id)):
                     _save_character_memory(cur, cm)
         except Exception:
             pass

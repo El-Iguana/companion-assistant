@@ -94,15 +94,35 @@ Recorded here because each was an open question and each now has a reason, not j
     `chat()` — a scenario is a deliberate alternate premise, and the main timeline's remembered
     history would contradict the state the preset just seeded.
 
-- **Phase 4 — Embedding / vector memory (RAG).** *(Was Phase 3.)* Semantic recall of old turns and
-  facts on demand, layered onto Phase 3's store.
-  - **Embed**: individual turns at fold time, long-term facts on write, summary chunks.
-  - **Backend**: small ONNX embedder on CPU (settled above). KoboldCPP's `/v1/embeddings` remains a
-    fallback if an embeddings model is ever loaded there, but it costs VRAM the chat model needs.
-  - **Store**: vectors beside the Phase 3 JSON (`{cid}__{pid}.vec.npy` + ids), numpy cosine for small N;
-    revisit sqlite/FAISS only if a single pairing gets large enough to measure.
-  - **Retrieve**: top-k by the latest user turn → a "Relevant memories:" block in the same budget as
-    Phase 3's, not additive to it.
+- **Phase 4 — Embedding / vector memory (RAG). ✅ DONE.** *(Was Phase 3.)* Semantic recall of past
+  turns and facts, layered onto Phase 3's store.
+  - **Encoder** (`services/embeddings.py`): int8 BGE-small-en-v1.5, ONNX, CPU, baked at
+    `/app/models/embed` (33 MB). Chosen over fp32 (127 MB) by measurement — both scored 5/5 top-1 on
+    the same probe with cosine within 0.02. Zero VRAM. CLS pooling + L2 norm; BGE's query prefix is
+    applied to queries only. 143 ms cold load, ~2 ms per warm query.
+  - **Index**: `data/u/<uid>/memories/{cid}__{pid}.vec.npz` (vectors + JSON meta in one file, non-
+    `.json` suffix so no future `glob("*.json")` mistakes it for a model). Written inside
+    `fold_into_longterm()` so both triggers stay in sync; facts re-indexed wholesale on
+    `PUT /api/memories` (replace-by-kind). Capped at `RECALL_MAX_VECTORS` (2000), evicting oldest
+    turns first — curated facts are never pushed out by conversation volume.
+  - **USER turns only.** Her replies restate the user wrapped in personality; indexing them
+    duplicated signal *and* dragged the median similarity up, defeating the gate below. Measured on a
+    live index: with her turns in, 2 of 6 deliberately irrelevant queries slipped through; without,
+    0 of 6, with all 5 relevant queries still correct.
+  - **Relevance gate**: BGE cosine scores are not calibrated — "hello" scored 0.541 while the genuinely
+    relevant "what can't I eat?" scored 0.523, so no fixed floor works. Gate is the margin between best
+    and median hit (relevant ≥0.114, irrelevant ≤0.094 → threshold 0.10), plus a loose floor and a
+    3-word minimum query. Calibrated on a small sample; a heuristic, not a validated threshold.
+  - **Budget**: retrieval SHARES `LONGTERM_BUDGET_CHARS` with the Phase 3 block rather than adding to
+    it, and drops any snippet whose text is already in that block.
+  - **Settings**: `recall_enabled` / `recall_top_k` on `AppSettings`, with a toggle + slider in the ⚙
+    Settings MEMORY section.
+  - **Degrades to nothing**: no baked model, an onnxruntime failure, or a corrupt index all yield no
+    recall block and leave the chat turn untouched. Verified for both failure modes.
+  - **Caveat worth knowing**: with the Phase-3 summarizer tightened, a 7-topic conversation still fits
+    in the 10-bullet summary, so recall added nothing at that size. Its value is in pairings that
+    accumulate well past the bullet cap. Verified by emptying the summary and confirming a fresh
+    session could still answer three specifics from the index alone.
 
 - **Phase 5 — Auto-fact extraction.** After a fold or an idle sweep, extract salient durable facts and
   write them with `origin="auto"`. Reduces reliance on lossy summaries. Ships **after** Phase 3 because

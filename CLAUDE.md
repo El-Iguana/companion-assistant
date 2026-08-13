@@ -48,7 +48,8 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note
-  memory.py             # rolling per-session summary + cross-session long-term memory (fold/inject)
+  memory.py             # per-session summary + cross-session long-term memory + semantic recall
+  embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
@@ -61,6 +62,7 @@ models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background remov
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
+models/embed/           # baked: bge-small-en-v1.5 int8 ONNX + tokenizer — semantic recall
 RELATIONSHIP_PLAN.md    # relationship system design + phases
 MEMORY_PLAN.md          # memory enhancement plan (pinned-facts UI, embeddings/RAG, tunable summarizer) — TODO
 ```
@@ -123,7 +125,7 @@ GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   A
 GET  /api/status                           KoboldCPP {online, version, model}
 POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
-GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking)
+GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, memory + recall)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
