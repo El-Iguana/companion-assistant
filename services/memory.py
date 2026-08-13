@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 
 import numpy as np
 
-from models.schema import ChatSession, CharacterCard, CharacterMemory, Persona
+from models.schema import (ChatSession, CharacterCard, CharacterMemory,
+                           MemoryFact, Persona)
 from services import embeddings
 from services.kobold import KoboldClient
 from services.prompt_builder import substitute_macros
@@ -27,6 +29,7 @@ SUMMARY_MAX_TOKENS = 400    # token budget for the summary pass
 
 # Cross-session long-term memory (MEMORY_PLAN Phase 3).
 LONGTERM_MAX_FACTS = 40       # hard cap on stored facts — this store must not grow forever
+LONGTERM_FACT_MAX_CHARS = 200 # one fact must not be able to dominate the block
 LONGTERM_BUDGET_CHARS = 2400  # ceiling on the injected block, at 8192 context
 LONGTERM_SUMMARY_SHARE = 0.6  # of that budget, the share the cumulative history may take
 
@@ -138,11 +141,112 @@ LONGTERM_PROMPT = (
 )
 
 
+# Auto-fact extraction (MEMORY_PLAN Phase 5).
+# A wrong auto-fact is worse than a missing one: the summary gets rewritten every
+# fold, but a fact persists into every future conversation until someone notices
+# and deletes it. So this is deliberately reluctant — NONE is a good answer, the
+# per-fold cap is small, and near-duplicates are dropped in code rather than
+# trusted to the prompt.
+AUTO_FACT_MAX_NEW = 3          # per fold; small on purpose
+AUTO_FACT_DEDUPE_SIM = 0.86    # cosine above this against an existing fact -> drop
+
+# Each Do-NOT below is a failure seen against the 9B fine-tune. The transient
+# rule is emphatic ("even if it sits in the same sentence as a durable fact")
+# because the first version happily extracted "Nadia is visiting at the end of
+# summer" out of a sentence that also carried the durable "Nadia is a paramedic
+# in Leeds". Sharpened, it kept the paramedic and dropped the visit.
+AUTO_FACT_PROMPT = (
+    "Extract durable facts about {user} from the conversation below.\n\n"
+    "A durable fact stays true for months or years: names, relationships, possessions, "
+    "where they live or work, allergies and health constraints, firm preferences and "
+    "dislikes, skills, standing commitments.\n\n"
+    "Do NOT extract:\n"
+    "- anything scheduled, planned, or upcoming. If it has a date, a season, or words "
+    "like next, soon, visiting, coming, or planning, it is NOT durable — skip it, even "
+    "if it sits in the same sentence as a durable fact.\n"
+    "- moods or one-off reactions\n"
+    "- anything {char} said, offered, or promised\n"
+    "- anything you inferred rather than were plainly told\n"
+    "- anything already in Known facts below, in any wording\n\n"
+    "One fact per line. No bullets, no numbering, no commentary. Each fact must stand "
+    "alone without the conversation. Third person, using the name {user}.\n"
+    "At most {max_new}. Fewer is better, and NONE is a good answer — output exactly "
+    "NONE if there are no new durable facts."
+)
+
+
+def _dedupe_facts(candidates: list[str], existing: list[str]) -> list[str]:
+    """Drop candidates that restate something already stored.
+
+    The prompt is TOLD to skip known facts and does not reliably comply — given
+    two known facts and a conversation restating them, it re-emitted both
+    verbatim. Semantic comparison catches that, and also catches the rewordings
+    a string match would miss ("Eli owns a dog named Biscuit" vs "Eli has a dog
+    called Biscuit"). Falls back to normalized string equality when the embedder
+    isn't available.
+    """
+    out: list[str] = []
+    if not candidates:
+        return out
+    norm = lambda t: " ".join(t.lower().replace(".", "").split())
+    seen = {norm(e) for e in existing}
+
+    vectors = None
+    if existing and embeddings.available():
+        try:
+            vectors = embeddings.encode(existing)
+        except Exception:
+            vectors = None
+
+    for c in candidates:
+        if norm(c) in seen:
+            continue
+        if vectors is not None:
+            try:
+                if float((vectors @ embeddings.encode([c])[0]).max()) >= AUTO_FACT_DEDUPE_SIM:
+                    continue
+            except Exception:
+                pass
+        out.append(c)
+        seen.add(norm(c))
+    return out
+
+
+async def extract_auto_facts(kobold: KoboldClient, mem: CharacterMemory,
+                             transcript: str, char_name: str, user_name: str,
+                             max_new: int = AUTO_FACT_MAX_NEW) -> list[str]:
+    """Durable facts stated in `transcript` and not already stored. [] on any
+    problem — extraction failing must never fail the fold that called it."""
+    if not transcript.strip():
+        return []
+    known = [f.text for f in mem.facts if f.text.strip()]
+    prompt = (
+        AUTO_FACT_PROMPT.format(char=char_name, user=user_name, max_new=max_new) + "\n\n"
+        + ("Known facts:\n" + "\n".join(f"- {k}" for k in known) + "\n\n" if known else "")
+        + f"Conversation:\n{transcript}\n\nNew durable facts:"
+    )
+    try:
+        raw = await kobold.generate_answer(prompt, {
+            "max_length": 220, "temperature": 0.2, "top_p": 0.9, "rep_pen": 1.05})
+    except Exception:
+        return []
+
+    candidates = []
+    for line in (raw or "").splitlines():
+        line = line.strip().lstrip("-*•").strip()
+        line = re.sub(r"^\d+[.)]\s*", "", line)
+        if not line or line.upper().startswith("NONE") or len(line) < 8:
+            continue
+        candidates.append(line[:LONGTERM_FACT_MAX_CHARS])
+    return _dedupe_facts(candidates[:max_new], known)
+
+
 async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              session: ChatSession, card: CharacterCard, persona: Persona,
                              upto: int | None = None,
                              max_tokens: int = 500,
-                             index_path=None) -> bool:
+                             index_path=None,
+                             extract_facts: bool = False) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -192,6 +296,26 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     # Index the same turns for semantic recall (Phase 4). Done HERE, inside the
     # fold, so the threshold and idle triggers can't drift apart on what got
     # indexed; best-effort, and index_add() swallows its own failures.
+    # Auto-facts (Phase 5) — promote the stable, atomic things out of the summary,
+    # which is rewritten wholesale on every fold and can quietly drop them. Only
+    # ever ADDS, and only with origin="auto"; user-written facts are never touched.
+    if extract_facts:
+        new_facts = await extract_auto_facts(kobold, mem, transcript, char_name, user_name)
+        for text in new_facts:
+            mem.facts.append(MemoryFact(text=text, origin="auto"))
+        if new_facts:
+            print(f"[auto-facts] +{len(new_facts)} for {mem.character_id[:8]}", flush=True)
+        # Evict oldest AUTO facts if over the cap — a curated fact must never be
+        # pushed out by something the app decided to remember on its own.
+        if len(mem.facts) > LONGTERM_MAX_FACTS:
+            over = len(mem.facts) - LONGTERM_MAX_FACTS
+            drop = {i for i, f in enumerate(mem.facts) if f.origin == "auto"}
+            drop = set(sorted(drop)[:over])
+            mem.facts = ([f for i, f in enumerate(mem.facts) if i not in drop]
+                         if drop else mem.facts[-LONGTERM_MAX_FACTS:])
+        if new_facts and index_path is not None:
+            index_add(index_path, [{"text": t, "kind": "fact"} for t in new_facts])
+
     # USER turns only. Her own replies restate what the user just said, wrapped in
     # personality — indexing them duplicates the signal and, worse, drags the
     # median similarity up, which is exactly what index_search's margin gate is

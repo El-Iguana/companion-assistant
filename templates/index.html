@@ -333,6 +333,10 @@
           <label class="row"><input id="vc-recall" type="checkbox"> Semantic recall
             <span class="muted">Look up related moments from earlier chats and slip the few that match
               into her context. Runs locally on the CPU; uses no VRAM.</span></label>
+          <label class="row"><input id="vc-autofacts" type="checkbox"> Remember facts automatically
+            <span class="muted">Pull durable facts (names, allergies, preferences) out of finished
+              conversations into long-term memory. They appear in 📌 Memory → Long-term with an
+              AUTO badge, and you can edit or delete any of them.</span></label>
           <label>Recall depth: <output id="vc-recallk-val"></output>
             <input id="vc-recallk" type="range" min="1" max="10" step="1">
             <span class="muted">How many remembered snippets may be injected per turn. Shares the

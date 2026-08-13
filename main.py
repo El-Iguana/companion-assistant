@@ -917,7 +917,8 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     mem = _load_character_memory(cur, session.character_id, persona.id)
     changed = await memory.fold_into_longterm(
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
-        index_path=_memory_index_path(cur, session.character_id, persona.id))
+        index_path=_memory_index_path(cur, session.character_id, persona.id),
+        extract_facts=st.auto_facts_enabled)
     if changed:
         _save_character_memory(cur, mem)
     return {"ok": True, "swept": changed}
@@ -1097,7 +1098,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                         kobold, cm, session, card, persona,
                         upto=session.memory.last_summarized_index,
                         max_tokens=st.summary_max_tokens,
-                        index_path=_memory_index_path(cur, session.character_id, persona.id)):
+                        index_path=_memory_index_path(cur, session.character_id, persona.id),
+                        extract_facts=st.auto_facts_enabled):
                     _save_character_memory(cur, cm)
         except Exception:
             pass

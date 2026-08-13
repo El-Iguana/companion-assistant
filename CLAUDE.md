@@ -48,7 +48,7 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note
-  memory.py             # per-session summary + cross-session long-term memory + semantic recall
+  memory.py             # per-session summary + cross-session long-term memory + recall + auto-facts
   embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor

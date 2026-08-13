@@ -124,10 +124,29 @@ Recorded here because each was an open question and each now has a reason, not j
     accumulate well past the bullet cap. Verified by emptying the summary and confirming a fresh
     session could still answer three specifics from the index alone.
 
-- **Phase 5 — Auto-fact extraction.** After a fold or an idle sweep, extract salient durable facts and
-  write them with `origin="auto"`. Reduces reliance on lossy summaries. Ships **after** Phase 3 because
-  it depends on the origin tag and the review/revert UI existing first. Keep extraction conservative —
-  a wrong auto-fact is worse than a missing one, since it persists across every future chat.
+- **Phase 5 — Auto-fact extraction. ✅ DONE.** After a fold or idle sweep, durable facts are pulled
+  out of the conversation and stored with `origin="auto"`, so the stable atoms survive the summary
+  being rewritten wholesale on every fold.
+  - **Reluctant by construction**, because a wrong auto-fact outlives the summary that produced it:
+    at most `AUTO_FACT_MAX_NEW` (3) per fold, "NONE is a good answer" in the prompt, temperature 0.2,
+    and it only ever ADDS — user-written facts are never edited or deleted.
+  - **Transient-vs-durable is the hard part.** The first prompt extracted "Nadia is visiting at the
+    end of summer" out of a sentence that also carried the durable "Nadia is a paramedic in Leeds".
+    The sharpened rule ("if it has a date, a season, or words like next/soon/visiting/coming, it is
+    NOT durable — even in the same sentence as a durable fact") scored 4/4 on the probe set:
+    extracted 3 from a fact-rich exchange, NONE from transient-only, NONE from small talk, NONE from
+    her own offers, and exactly the 2 durable halves of a mixed sentence.
+  - **Dedupe is in code, not the prompt** (`_dedupe_facts`). Told to skip known facts, the model
+    re-emitted two of them verbatim. Cosine against existing facts (>= 0.86) catches that AND the
+    rewordings a string match misses — verified live: restating dog/allergy/sister in fresh wording
+    added nothing, while a genuinely new fact in the same sweep was added. Falls back to normalized
+    string equality without the embedder.
+  - **Eviction protects curation**: over `LONGTERM_MAX_FACTS`, the oldest AUTO facts go first; a
+    user-written fact is never pushed out by one the app invented.
+  - **Settings**: `auto_facts_enabled` (default on) with a toggle in ⚙ Settings → MEMORY. Verified
+    that turning it off stops extraction entirely.
+  - **Review surface**: facts land in 📌 Memory → Long-term with an AUTO badge, individually editable
+    and deletable — the precondition this phase was gated on.
 
 ## Open decisions
 

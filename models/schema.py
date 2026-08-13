@@ -38,6 +38,7 @@ class AppSettings(BaseModel):
     # Semantic recall (services/embeddings.py + memory.index_search).
     recall_enabled: bool = True                             # retrieve related past turns/facts per turn
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
+    auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
 
 
 # ---------------------------------------------------------------------------
