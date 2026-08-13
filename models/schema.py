@@ -153,6 +153,41 @@ class MemoryState(BaseModel):
     last_summarized_index: int = 0       # message index up to which summary covers
 
 
+class MemoryFact(BaseModel):
+    """One durable fact in a pairing's long-term memory.
+
+    `origin` is load-bearing, not decoration: it is what lets the Memory modal
+    show — and let the user revert — anything the app decided to remember on its
+    own. Auto-extraction (MEMORY_PLAN Phase 5) is only shippable on top of this.
+    """
+    id: str = Field(default_factory=_uid)
+    text: str = ""
+    origin: str = "user"                 # "user" (hand-written) | "auto" (written by a sweep)
+    created_at: str = Field(default_factory=_now)
+
+
+class CharacterMemory(BaseModel):
+    """Cross-session memory for one (character, persona) pairing.
+
+    The durable sibling of ChatSession.memory, deliberately NOT folded into it:
+    MemoryState is scoped to one chat and dies with it, this survives across all
+    chats in the pairing. Scoped exactly like Relationship (same {cid}__{pid}
+    file convention) — same character with a different persona is genuinely a
+    different history.
+
+    `swept_sessions` maps session_id -> the message index already folded in, so a
+    sweep is idempotent and a session that keeps growing can be swept repeatedly
+    without re-folding what it already covered.
+    """
+    character_id: str = ""
+    persona_id: str = ""
+    facts: List[MemoryFact] = []
+    summary: str = ""                    # cumulative history across every chat in this pairing
+    swept_sessions: Dict[str, int] = {}  # session_id -> message index folded into `summary`
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
+
+
 class Relationship(BaseModel):
     """Persistent per (character, persona) relationship state. Multi-axis, 0-100 each."""
     character_id: str = ""

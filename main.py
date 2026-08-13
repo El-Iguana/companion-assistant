@@ -15,6 +15,7 @@ import os
 import secrets
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -27,7 +28,7 @@ from fastapi.templating import Jinja2Templates
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
-    AppSettings, User,
+    AppSettings, CharacterMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient
@@ -39,7 +40,8 @@ DATA = BASE / "data"
 AUTH = DATA / "auth"
 USERS = AUTH / "users"
 UROOT = DATA / "u"                       # per-user library roots: data/u/<uid>/<subdir>/
-SUBDIRS = ("characters", "personas", "sessions", "relationships", "presets", "settings")
+SUBDIRS = ("characters", "personas", "sessions", "relationships", "presets", "settings",
+           "memories")
 # Old flat single-user dirs — migrated into the first admin on first run.
 LEGACY = {name: DATA / name for name in SUBDIRS}
 for d in (AUTH, USERS, UROOT):
@@ -122,6 +124,7 @@ class Ctx:
     relationships: Path
     presets: Path
     settings: Path
+    memories: Path
 
 
 def _user_root(uid: str) -> Path:
@@ -134,7 +137,7 @@ def _user_root(uid: str) -> Path:
 def _ctx_for(user: User) -> Ctx:
     r = _user_root(user.id)
     return Ctx(user, r / "characters", r / "personas", r / "sessions",
-               r / "relationships", r / "presets", r / "settings")
+               r / "relationships", r / "presets", r / "settings", r / "memories")
 
 
 async def current_user(request: Request) -> User:
@@ -207,6 +210,23 @@ def _load_relationship(cur: Ctx, character_id: str, persona_id: str) -> Relation
 def _save_relationship(cur: Ctx, rel: Relationship) -> None:
     (cur.relationships / f"{rel.character_id}__{rel.persona_id}.json").write_text(
         rel.model_dump_json(indent=2))
+
+
+def _load_character_memory(cur: Ctx, character_id: str, persona_id: str) -> CharacterMemory:
+    """Cross-session memory for a pairing. Scoped and named exactly like the
+    relationship pair above — same {cid}__{pid}.json convention on purpose."""
+    p = cur.memories / f"{character_id}__{persona_id}.json"
+    if p.exists():
+        try:
+            return CharacterMemory.model_validate_json(p.read_text())
+        except Exception:
+            pass          # unreadable/older shape -> start fresh rather than 500 a chat turn
+    return CharacterMemory(character_id=character_id, persona_id=persona_id)
+
+
+def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
+    (cur.memories / f"{mem.character_id}__{mem.persona_id}.json").write_text(
+        mem.model_dump_json(indent=2))
 
 
 def _clear_other_default_personas(cur: Ctx, keep_id: str) -> None:
@@ -812,6 +832,84 @@ async def set_memory(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
     return s.memory.model_dump()
 
 
+@app.get("/api/memories")
+async def get_character_memory(character_id: str, persona_id: str, cur: Ctx = Depends(get_ctx)):
+    """Cross-session memory for one (character, persona) pairing. Same query-param
+    shape as GET /api/relationship, which is scoped identically."""
+    return _load_character_memory(cur, character_id, persona_id).model_dump()
+
+
+@app.put("/api/memories")
+async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
+    """Edit remembered facts and/or the cross-session history (user-curated).
+
+    Facts round-trip by id so an existing one keeps its `origin` and `created_at`
+    — otherwise every save through the modal would silently relabel auto-written
+    facts as user-written and destroy the audit trail the origin tag exists for.
+    """
+    cid = str(body.get("character_id") or "")
+    pid = str(body.get("persona_id") or "")
+    if not cid or not pid:
+        raise HTTPException(400, "character_id and persona_id are required")
+
+    mem = _load_character_memory(cur, cid, pid)
+    if "facts" in body:
+        raw = body.get("facts") or []
+        if not isinstance(raw, list):
+            raise HTTPException(400, "facts must be a list")
+        known = {f.id: f for f in mem.facts}
+        facts: list[MemoryFact] = []
+        for item in raw:
+            if isinstance(item, str):
+                item = {"text": item}
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            prev = known.get(str(item.get("id") or ""))
+            if prev:
+                prev.text = text
+                facts.append(prev)
+            else:
+                facts.append(MemoryFact(text=text, origin="user"))
+        # Newest-wins if the user blows past the cap — the store must stay bounded.
+        mem.facts = facts[-memory.LONGTERM_MAX_FACTS:]
+    if "summary" in body:
+        mem.summary = str(body.get("summary") or "").strip()
+    mem.updated_at = datetime.now().isoformat()
+    _save_character_memory(cur, mem)
+    return mem.model_dump()
+
+
+@app.post("/api/sessions/{session_id}/sweep")
+async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
+    """Idle trigger: fold a finished conversation into long-term memory.
+
+    The better of the two triggers — it captures a conversation that actually
+    ended, instead of cutting at whatever turn the threshold happened to land on.
+    Idempotent (see fold_into_longterm), so the frontend can fire it whenever a
+    session goes quiet without tracking whether it already did.
+    """
+    session = _load(cur.sessions, session_id, ChatSession)
+    if not session:
+        raise HTTPException(404, "session not found")
+    if session.relationship is not None:
+        return {"ok": True, "swept": False, "reason": "scenario session"}
+    card = _load(cur.cards, session.character_id, CharacterCard)
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    if not card:
+        return {"ok": True, "swept": False, "reason": "session has no character"}
+
+    st = _load_settings(cur)
+    mem = _load_character_memory(cur, session.character_id, persona.id)
+    changed = await memory.fold_into_longterm(kobold, mem, session, card, persona,
+                                              max_tokens=st.summary_max_tokens)
+    if changed:
+        _save_character_memory(cur, mem)
+    return {"ok": True, "swept": changed}
+
+
 @app.delete("/api/sessions/{session_id}/messages")
 async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     s = _load(cur.sessions, session_id, ChatSession)
@@ -862,8 +960,14 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     if not req.regenerate and session.pending_milestone:
         rel_note += " MILESTONE MOMENT — " + session.pending_milestone
         session.pending_milestone = ""
-    messages = prompt_builder.build_messages(card, persona, session, relationship_note=rel_note,
-                                             stage_rank=relationship._stage_rank(rel))
+    # Cross-session memory is skipped for scenario sessions, exactly like `rel` above:
+    # a scenario is a deliberate alternate premise seeded from a preset, so the main
+    # timeline's remembered history would contradict the state it was just given.
+    char_mem = None if scenario else _load_character_memory(cur, session.character_id, persona.id)
+    messages = prompt_builder.build_messages(
+        card, persona, session, relationship_note=rel_note,
+        stage_rank=relationship._stage_rank(rel),
+        longterm_note=memory.longterm_block(char_mem, card.name, persona.name))
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
     # ignores it in the system prompt). The model then emits an empty <think></think>
     # (stripped client-side) so the whole token budget goes to the actual reply.
@@ -947,6 +1051,18 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                                    summarize_after=st.summarize_after,
                                    keep_recent=st.keep_recent,
                                    max_tokens=st.summary_max_tokens)
+            # Threshold trigger: fold forward exactly what summarize() just folded
+            # out of the verbatim window, so nothing leaves the live prompt without
+            # being recorded durably first. Reloaded rather than reusing char_mem
+            # from above — a concurrent sweep may have advanced it mid-turn, and
+            # writing back a stale copy would lose that.
+            if not scenario:
+                cm = _load_character_memory(cur, session.character_id, persona.id)
+                if await memory.fold_into_longterm(
+                        kobold, cm, session, card, persona,
+                        upto=session.memory.last_summarized_index,
+                        max_tokens=st.summary_max_tokens):
+                    _save_character_memory(cur, cm)
         except Exception:
             pass
 

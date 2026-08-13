@@ -118,7 +118,8 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
 
 
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                   relationship_note: str = "", stage_rank: int = 99) -> List[Dict]:
+                   relationship_note: str = "", stage_rank: int = 99,
+                   longterm_note: str = "") -> List[Dict]:
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
 
@@ -148,10 +149,15 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     if card.mes_example:
         sys_parts.append("Example dialogue:\n" + sub(card.mes_example))
 
-    # long-term memory
+    # memory, widest scope first: pinned facts (this chat, always-on) -> cross-session
+    # history for this pairing -> this chat's rolling summary. Session-scoped material
+    # sits closest to the history it precedes; `longterm_note` arrives pre-rendered with
+    # real names (same convention as relationship_note) so it isn't re-substituted here.
     mem = session.memory
     if mem.pinned:
         sys_parts.append("Important facts:\n" + "\n".join(f"- {sub(p)}" for p in mem.pinned))
+    if longterm_note:
+        sys_parts.append(longterm_note)
     if mem.summary:
         sys_parts.append("Story so far:\n" + sub(mem.summary))
 

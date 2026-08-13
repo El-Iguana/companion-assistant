@@ -1,61 +1,147 @@
 # Memory enhancement plan
 
-Ideas for improving the companion's memory. Captured to work out later — not yet built.
-See `services/memory.py`, `models/schema.py` (`MemoryState`), and `prompt_builder.build_messages`.
+Ideas for improving the companion's memory. See `services/memory.py`, `models/schema.py`
+(`MemoryState`), and `prompt_builder.build_messages`.
+
+Revised after reviewing Lumina's memory design (a third-party agentic assistant with a
+"MemPalace" layered store) as a possible alternative. Conclusion: **keep this plan**, take two
+ideas from it, and explicitly reject its centrepiece. See "Evaluated and rejected" at the bottom
+so this doesn't get re-litigated later.
 
 ## Current state (what exists today)
 
 Per-session memory (`ChatSession.memory` = `MemoryState{summary, pinned, last_summarized_index}`),
 assembled into the prompt in three tiers:
 1. **Verbatim recent turns** — `messages[last_summarized_index:]` go in word-for-word.
+   (`session.messages` keeps the *full* history on disk regardless; the index only marks how much
+   the summary covers. Nothing is destroyed by folding.)
 2. **Rolling summary** ("Story so far:") — older turns folded into `memory.summary`.
-   - Trigger: `SUMMARIZE_AFTER = 24` unsummarized turns; keep `KEEP_RECENT = 12` verbatim.
-   - Cumulative (folds new events into the existing summary), best-effort (never blocks chat),
-     ~400 tokens, via raw `/api/v1/generate`.
-3. **Pinned facts** ("Important facts:") — `memory.pinned`, always-on. **Latent: no API/UI to edit yet.**
+   - Trigger: `summarize_after` (default 24) unsummarized turns; keep `keep_recent` (12) verbatim.
+   - Cumulative, best-effort (never blocks chat), ~400 tokens, via `kobold.generate_answer`.
+3. **Pinned facts** ("Important facts:") — `memory.pinned`, always-on, user-curated.
 
 Scope + gaps:
-- **Per-session only** — new chats start empty. (The **relationship** state is separately persistent per
+- **Per-session only** — new chats start empty. (**Relationship** state is separately persistent per
   character×persona; the **lorebook** is authored keyword-triggered memory — both distinct from this.)
 - **No embeddings / RAG** — pure summarization, so precise old details survive only if the summary kept them.
 - Bounded by the 8192-token context; summaries are lossy by design.
 
-## Enhancements (rough phases — reorder as we like)
+## Settled design decisions
 
-- **Phase 1 — Pinned-facts UI (quick win). ✅ DONE.** Scope chosen: **per-session** (`MemoryState.pinned`).
-  `GET/PUT /api/sessions/{id}/memory` (main.py) read/write `pinned[]` + `summary`; frontend `📌 Memory`
-  header button opens a `#memory` modal — add/remove pinned facts + edit the rolling "Story so far" summary.
-  Injection was already wired in `prompt_builder` (Important facts / Story so far). Auto-pin by the model is
-  deferred to the optional auto-fact-extraction item below.
+Recorded here because each was an open question and each now has a reason, not just an answer.
+
+- **Long-term scope = per (character × persona).** Mirrors `Relationship` exactly — same granularity,
+  same `{cid}__{pid}.json` file convention, same "different persona is genuinely a different history"
+  logic. Reuses `_load_relationship`/`_save_relationship` as the pattern to copy.
+- **Cross-session persistence ships before embeddings.** Cross-session is a *missing capability* (she
+  forgets you on a new chat); embeddings are a *retrieval-quality optimization* on top of it. The
+  long-term store can ship with recency + pinned retrieval and gain semantic search later without
+  changing its shape. Lumina is the cautionary case: it built an elaborate layered store first and its
+  recall is still `content LIKE '%query%'`.
+- **Embedder runs on CPU via ONNX — zero VRAM.** `bge-small-en` / `all-MiniLM-L6` are ~90–130 MB and
+  `onnxruntime` is already in the image for rembg, Kokoro, and faster-whisper. Follows the established
+  baked-`models/<name>/` convention. This closes the "share the 4070 with KoboldCPP + ComfyUI" question
+  without a trade-off.
+- **Auto-written memory is tagged and revertible.** Every fact carries its origin (`user` | `auto`) so
+  the 📌 Memory modal can filter and revert what she decided to remember on her own. Auto-extraction
+  without an undo path is not shippable.
+- **Injection is budget-capped and drops oldest — never truncates a block mid-way.** Lumina's injector
+  `break`s on the first oversized entry, silently dropping every later layer with no error. Cap per
+  entry *and* total, and drop from the oldest end.
+
+## Phases
+
+- **Phase 1 — Pinned-facts UI (quick win). ✅ DONE.** Scope: **per-session** (`MemoryState.pinned`).
+  `GET/PUT /api/sessions/{id}/memory` read/write `pinned[]` + `summary`; frontend `📌 Memory` header
+  button opens a `#memory` modal — add/remove pinned facts + edit the rolling "Story so far" summary.
+  Injection was already wired in `prompt_builder` (Important facts / Story so far).
+
 - **Phase 2 — Tunable + hardened summarizer. ✅ DONE.** `summarize_after` / `keep_recent` /
-  `summary_max_tokens` are now on `AppSettings` (bounded `Field`s) and exposed as sliders in the ⚙ Settings
-  modal (MEMORY section). `memory.summarize()`/`needs_summary()` take them as params (module constants remain
-  the fallback); the chat flow passes the per-user settings. Hardening against the runaway thinking model was
-  already in place — `memory.summarize` uses `kobold.generate_answer`, which prefills an empty
-  `<think></think>` (commit e0d74dc), so summaries don't come back as reasoning. `keep_recent` is clamped
-  below `summarize_after` so a fold always covers ≥1 turn. (Chat-completions-based summarizing left as a
-  possible later refinement.)
-- **Phase 3 — Embedding / vector memory (RAG).** Semantic recall of old turns/facts on demand.
-  - **Embed** what: individual turns, summary chunks, and/or pinned facts.
-  - **Backend**: KoboldCPP can serve `/v1/embeddings` (needs an embeddings model loaded) — or a small local
-    embedder. Decide GPU/VRAM cost vs. the chat model.
-  - **Store**: per-user, per (character[, persona]) — JSON + numpy cosine for small N, or sqlite/FAISS if it grows.
-  - **Retrieve**: top-k relevant chunks by the latest user turn, inject as a "Relevant memories:" block
-    (budget-limited), alongside the rolling summary.
-- **Phase 4 — Cross-session / long-term character memory (optional).** A persistent memory store per
-  (character, persona) that carries across chats (like the relationship does), separate from the
-  per-session summary. Ties naturally into Phase 3's store.
-- **Auto-fact extraction (optional).** After replies, extract salient durable facts and auto-pin them
-  (with the user able to review/remove) — reduces reliance on lossy summaries.
+  `summary_max_tokens` are on `AppSettings` (bounded `Field`s) and exposed as sliders in the ⚙ Settings
+  modal (MEMORY section). `memory.summarize()`/`needs_summary()` take them as params (module constants
+  remain the fallback); the chat flow passes the per-user settings. `kobold.generate_answer` prefills an
+  empty `<think></think>` so summaries don't come back as reasoning. `keep_recent` is clamped below
+  `summarize_after` so a fold always covers ≥1 turn.
+
+- **Phase 3 — Cross-session long-term memory. ✅ DONE.** *(Was Phase 4; promoted — see settled
+  decisions.)* A persistent store per (character × persona) carried across chats, alongside the
+  per-session summary rather than replacing it.
+  - **Models** (`models/schema.py`): `MemoryFact{id, text, origin: "user"|"auto", created_at}` and
+    `CharacterMemory{character_id, persona_id, facts[], summary, swept_sessions, created_at, updated_at}`.
+    `swept_sessions` (session_id → message index already folded) replaced the planned
+    `last_swept_session_id`: a single id can't express "this session grew, fold the new part," which
+    both triggers need in order to be idempotent *and* re-runnable.
+  - **Store**: `data/u/<uid>/memories/{cid}__{pid}.json`, `memories` in `SUBDIRS` + `Ctx`.
+    `_load_character_memory`/`_save_character_memory` mirror the relationship pair. `_user_root()`
+    creates the dir for existing users on their next request — no migration needed.
+  - **Write triggers** — both via `memory.fold_into_longterm()`:
+    - *threshold* — the chat flow folds forward exactly what `summarize()` just folded out of the
+      verbatim window (`upto=session.memory.last_summarized_index`), so nothing leaves the live prompt
+      without being recorded durably first;
+    - *idle* — `POST /api/sessions/{id}/sweep`, armed by the frontend `SWEEP_IDLE_MS` (5 min) timer
+      after each completed turn. **Borrowed from Lumina's dream-sweep** and the better of the two: it
+      captures a *finished* conversation instead of cutting mid-scene.
+  - **Inject**: `memory.longterm_block()` → `build_messages(longterm_note=…)`, placed after pinned
+    facts and before "Story so far". Budget-capped (`LONGTERM_BUDGET_CHARS`, header counted): the
+    history is truncated to its share and facts drop oldest-first, so an oversized entry costs only
+    itself. Facts are capped at `LONGTERM_MAX_FACTS` (40) on write so the store stays bounded.
+  - **API**: `GET/PUT /api/memories?character_id=&persona_id=`, same shape as `/api/relationship`.
+    Facts round-trip by `id` so editing through the modal can't relabel an `auto` fact as `user`.
+  - **UI**: Memory modal gained a tab bar (This chat / Long-term); long-term facts carry an `auto`
+    badge and are individually editable/removable. The tab is hidden for character-less and scenario
+    sessions.
+  - **Scenario sessions are excluded** from both injection and sweeping, exactly like `rel` in
+    `chat()` — a scenario is a deliberate alternate premise, and the main timeline's remembered
+    history would contradict the state the preset just seeded.
+
+- **Phase 4 — Embedding / vector memory (RAG).** *(Was Phase 3.)* Semantic recall of old turns and
+  facts on demand, layered onto Phase 3's store.
+  - **Embed**: individual turns at fold time, long-term facts on write, summary chunks.
+  - **Backend**: small ONNX embedder on CPU (settled above). KoboldCPP's `/v1/embeddings` remains a
+    fallback if an embeddings model is ever loaded there, but it costs VRAM the chat model needs.
+  - **Store**: vectors beside the Phase 3 JSON (`{cid}__{pid}.vec.npy` + ids), numpy cosine for small N;
+    revisit sqlite/FAISS only if a single pairing gets large enough to measure.
+  - **Retrieve**: top-k by the latest user turn → a "Relevant memories:" block in the same budget as
+    Phase 3's, not additive to it.
+
+- **Phase 5 — Auto-fact extraction.** After a fold or an idle sweep, extract salient durable facts and
+  write them with `origin="auto"`. Reduces reliance on lossy summaries. Ships **after** Phase 3 because
+  it depends on the origin tag and the review/revert UI existing first. Keep extraction conservative —
+  a wrong auto-fact is worse than a missing one, since it persists across every future chat.
 
 ## Open decisions
-- Pinned/long-term scope: **per-session** vs **per-character** vs **per (character×persona)**.
-- Embedding backend + VRAM budget (share the 4070 with KoboldCPP + ComfyUI).
-- Store format/tech as it scales (flat JSON → sqlite/FAISS).
-- How aggressively to auto-extract vs. keep memory user-curated.
+
+- Idle threshold for the sweep trigger (minutes) and whether it's user-tunable in ⚙ Settings.
+- Token budget split between the long-term block and the session summary at 8192 context.
+- Whether long-term `facts` should ever expire/decay, or stay until the user removes them.
+  (Lumina has no decay and its store grows unbounded — a caution, not a model to copy.)
+- How aggressively Phase 5 extracts vs. keeping memory user-curated.
 
 ## Integration points (reuse, don't rebuild)
+
 - `MemoryState` already has `pinned` + `summary` + `last_summarized_index` — extend, don't replace.
-- `build_messages` already injects pinned/summary into the system block — add a "Relevant memories:" part.
-- `memory.summarize()` is the place to also update embeddings / extract facts.
+  Phase 3 adds a *sibling* model for cross-session state; it does not fold into `MemoryState`.
+- `build_messages` already injects pinned/summary into the system block — add parts, keep the order.
+- `memory.summarize()` is the place to also update long-term memory / embeddings / extract facts.
+- `_load_relationship`/`_save_relationship` + `GET/PUT /api/relationship` are the template for the
+  per-pairing load/save/route trio.
+- `Ctx` + `SUBDIRS` is how a new per-user data folder gets created and isolated.
 - Keep it **local-first** (no cloud), consistent with the rest of the stack.
+
+## Evaluated and rejected
+
+From Lumina's MemPalace design, after reading the source:
+
+- **Lexical "AAAK" compression** (abbreviation map + filler-word stripping before storage). Measured on
+  ordinary sentences: **29% size reduction**, against a claimed "~30x". It is also lossy in ways that
+  change meaning — the abbreviation pass isn't word-bounded (`Sanders` → `S+ers`, `command` → `comm+`)
+  and the filler strip removes `is/are/was/the/a/an/that`, which strands negation: *"she was not
+  comfortable"* → *"she not comfortable"*. For this app that is disqualifying: the relationship system's
+  whole thesis is that boundary phrasing is load-bearing and small models comply with anything vague.
+  An LLM writing clean prose (`memory.summarize`) compresses harder *and* preserves meaning.
+- **A deep storage taxonomy** (Wings → Rooms → Closets → Drawers, plus parallel "Halls", with the model
+  choosing placement per write). Bought nothing there, because retrieval is substring `LIKE`. Structure
+  should follow retrieval, not precede it — hence Phase 4 defining how recall works before any
+  hierarchy gets added.
+- **A second parallel store** (Lumina keeps a flat table *and* the palace, with write-through and a
+  fallback search path). One store.

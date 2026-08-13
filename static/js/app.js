@@ -415,6 +415,7 @@ async function send(text, regenerate) {
     } catch { /* keep the live bubble if reload fails */ }
     loadSessions();
     feedSpeech(acc, true);            // flush any trailing sentence
+    scheduleSweep();                  // arm the idle fold into long-term memory
   }
 }
 
@@ -1272,7 +1273,12 @@ $("#vc-sumcap").addEventListener("input", (e) => { $("#vc-sumcap-val").textConte
 $("#vc-close").addEventListener("click", () => { $("#voice-cfg").hidden = true; });
 $("#voice-cfg").addEventListener("click", (e) => { if (e.target.id === "voice-cfg") $("#voice-cfg").hidden = true; });
 
-// ---- Memory (pinned facts + rolling summary) ------------------------------
+// ---- Memory (this chat: pinned + rolling summary; long-term: per char x persona)
+// Long-term memory is scoped per (character, persona) like the relationship, so the
+// tab is hidden for sessions that have no character, and for scenario sessions —
+// those run on a session-scoped premise the main timeline would contradict.
+let ltMem = null;                                             // loaded CharacterMemory, or null
+
 function addPinnedRow(text = "") {
   const li = document.createElement("li");
   li.innerHTML = `<input class="field mem-fact" type="text" value="" placeholder="e.g. Lives on the starship Meridian; afraid of deep water">` +
@@ -1281,20 +1287,64 @@ function addPinnedRow(text = "") {
   li.querySelector(".mem-del").onclick = () => li.remove();
   $("#mem-pinned").appendChild(li);
 }
+function addLtFactRow(fact = {}) {
+  const li = document.createElement("li");
+  const auto = fact.origin === "auto";
+  li.innerHTML = `<input class="field mem-fact" type="text" value="" placeholder="e.g. Her sister's name is Nadia; she hates being called 'kid'">` +
+    (auto ? `<span class="mem-origin" title="Written automatically from a chat — edit or remove it">auto</span>` : "") +
+    `<button class="btn-mini danger mem-del" title="Remove">✕</button>`;
+  const input = li.querySelector(".mem-fact");
+  input.value = fact.text || "";
+  input.dataset.factId = fact.id || "";                       // round-trips origin/created_at server-side
+  li.querySelector(".mem-del").onclick = () => li.remove();
+  $("#mem-lt-facts").appendChild(li);
+}
 function renderMemory() {
   const mem = (state.session && state.session.memory) || { pinned: [], summary: "" };
   $("#mem-pinned").innerHTML = "";
   (mem.pinned || []).forEach(addPinnedRow);
   $("#mem-summary").value = mem.summary || "";
 }
-$("#mem-btn").addEventListener("click", () => {
+function renderLongterm() {
+  $("#mem-lt-facts").innerHTML = "";
+  ((ltMem && ltMem.facts) || []).forEach(addLtFactRow);
+  $("#mem-lt-summary").value = (ltMem && ltMem.summary) || "";
+}
+function memTab(which) {
+  const long = which === "long";
+  $("#mem-pane-session").hidden = long;
+  $("#mem-pane-long").hidden = !long;
+  $("#mem-tab-session").classList.toggle("active", !long);
+  $("#mem-tab-long").classList.toggle("active", long);
+}
+function ltPairing() {                                        // {cid, pid} or null if not applicable
+  const s = state.session;
+  if (!s || !s.character_id || s.relationship) return null;   // no card, or a scenario session
+  const pid = s.persona_id || (state.persona && state.persona.id) || "";
+  return pid ? { cid: s.character_id, pid } : null;
+}
+$("#mem-btn").addEventListener("click", async () => {
   if (!state.session) return;
   renderMemory();
+  memTab("session");
+  ltMem = null;
+  const pair = ltPairing();
+  $("#mem-tab-long").hidden = !pair;
   $("#memory").hidden = false;
+  if (!pair) return;
+  try {
+    ltMem = await api(`/memories?character_id=${encodeURIComponent(pair.cid)}&persona_id=${encodeURIComponent(pair.pid)}`);
+    renderLongterm();
+  } catch (e) {
+    $("#mem-tab-long").hidden = true;                         // couldn't load it -> don't offer to save over it
+  }
 });
+$("#mem-tab-session").addEventListener("click", () => memTab("session"));
+$("#mem-tab-long").addEventListener("click", () => memTab("long"));
 $("#mem-close").addEventListener("click", () => { $("#memory").hidden = true; });
 $("#memory").addEventListener("click", (e) => { if (e.target.id === "memory") $("#memory").hidden = true; });
 $("#mem-add").addEventListener("click", () => addPinnedRow(""));
+$("#mem-lt-add").addEventListener("click", () => addLtFactRow({}));
 $("#mem-save").addEventListener("click", async () => {
   if (!state.session) return;
   const pinned = [...document.querySelectorAll("#mem-pinned .mem-fact")]
@@ -1305,8 +1355,36 @@ $("#mem-save").addEventListener("click", async () => {
     body: JSON.stringify({ pinned, summary }),
   });
   state.session.memory = mem;                                 // keep local state in sync
+  // Only write long-term if it actually loaded — otherwise a failed GET would
+  // let an empty form overwrite real remembered history.
+  const pair = ltPairing();
+  if (ltMem && pair) {
+    const facts = [...document.querySelectorAll("#mem-lt-facts .mem-fact")]
+      .map(i => ({ id: i.dataset.factId || "", text: i.value.trim() }))
+      .filter(f => f.text);
+    ltMem = await api("/memories", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ character_id: pair.cid, persona_id: pair.pid,
+                             facts, summary: $("#mem-lt-summary").value.trim() }),
+    });
+  }
   $("#memory").hidden = true;
 });
+
+// ---- Idle sweep: fold a finished conversation into long-term memory --------
+// Fires once per quiet period, not per message. The endpoint is idempotent, so a
+// redundant call is harmless; the timer only exists to avoid firing mid-scene.
+const SWEEP_IDLE_MS = 5 * 60 * 1000;
+let sweepTimer = null;
+function scheduleSweep() {
+  clearTimeout(sweepTimer);
+  const s = state.session;
+  if (!s || !s.character_id || s.relationship) return;        // same scoping as the Long-term tab
+  const id = s.id;
+  sweepTimer = setTimeout(() => {
+    api(`/sessions/${id}/sweep`, { method: "POST" }).catch(() => {});
+  }, SWEEP_IDLE_MS);
+}
 $("#vc-thresh").addEventListener("input", (e) => { $("#vc-thresh-val").textContent = Number(e.target.value).toFixed(3); });
 $("#vc-silence").addEventListener("input", (e) => { $("#vc-silence-val").textContent = e.target.value + " ms"; });
 $("#vc-echo").addEventListener("input", (e) => { $("#vc-echo-val").textContent = Number(e.target.value).toFixed(1); });

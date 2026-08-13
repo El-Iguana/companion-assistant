@@ -265,15 +265,31 @@
       <div class="modal-box" style="width:min(520px,94vw)">
         <header class="modal-head"><span>Memory</span>
           <button id="mem-close" class="btn-icon-sm" title="Close">✕</button></header>
+        <div class="modal-tabs">
+          <button id="mem-tab-session" class="btn-mini active">This chat</button>
+          <button id="mem-tab-long" class="btn-mini" hidden>Long-term</button>
+        </div>
         <div class="modal-body">
-          <label>Pinned facts
-            <span class="muted">— always kept in context, never summarized away</span></label>
-          <ul id="mem-pinned" class="list"></ul>
-          <button id="mem-add" class="btn-mini">+ Add fact</button>
-          <label style="margin-top:.9rem">Story so far
-            <span class="muted">— rolling auto-summary of older turns; edit to correct it</span></label>
-          <textarea id="mem-summary" rows="8" class="field"
-            placeholder="No summary yet — this builds up automatically as the chat grows."></textarea>
+          <div id="mem-pane-session">
+            <label>Pinned facts
+              <span class="muted">— always kept in context, never summarized away</span></label>
+            <ul id="mem-pinned" class="list"></ul>
+            <button id="mem-add" class="btn-mini">+ Add fact</button>
+            <label style="margin-top:.9rem">Story so far
+              <span class="muted">— rolling auto-summary of older turns; edit to correct it</span></label>
+            <textarea id="mem-summary" rows="8" class="field"
+              placeholder="No summary yet — this builds up automatically as the chat grows."></textarea>
+          </div>
+          <div id="mem-pane-long" hidden>
+            <label>Remembered facts
+              <span class="muted">— carried into every chat with this character</span></label>
+            <ul id="mem-lt-facts" class="list"></ul>
+            <button id="mem-lt-add" class="btn-mini">+ Add fact</button>
+            <label style="margin-top:.9rem">History across chats
+              <span class="muted">— written when a chat is swept; edit to correct it</span></label>
+            <textarea id="mem-lt-summary" rows="8" class="field"
+              placeholder="Nothing remembered yet — this builds up as you finish conversations."></textarea>
+          </div>
         </div>
         <footer class="modal-foot">
           <span class="spacer"></span>

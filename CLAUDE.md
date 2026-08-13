@@ -45,7 +45,7 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note
-  memory.py             # rolling summarization of older turns
+  memory.py             # rolling per-session summary + cross-session long-term memory (fold/inject)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local Kokoro TTS (ONNX/CPU) — text -> WAV, strips *action* narration
@@ -53,7 +53,7 @@ services/
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
-data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/   # per-user isolated library
+data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
@@ -101,6 +101,10 @@ Login-gated, role-based, per-user isolated libraries.
   (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
   (scenario mode), `character_id`, `persona_id`.
   (Lorebook entries carry `min_stage` for stage-gating.)
+- **CharacterMemory** — persistent per (character, persona), like Relationship: `facts[]`
+  (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
+  `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
+  "What {{char}} remembers about {{user}}"; **not** used in scenario sessions.
 
 ## API endpoints (main.py)
 
@@ -138,6 +142,8 @@ GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
+GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
+POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
 ```
 
 ## How it works
@@ -175,7 +181,13 @@ POST /api/chat                             SSE stream; done carries {expression,
   beat injected next turn (`session.pending_milestone`), recorded so it never repeats. Lorebook entries can
   be **stage-gated** (`LorebookEntry.min_stage`, filtered by `stage_rank`); context is **overridable per
   relationship** (⚙ on rel-strip → `PUT /api/relationship`).
-- **Memory:** older turns fold into a rolling summary once ~24 accumulate.
+- **Memory:** three scopes. Per-session pinned facts + a rolling summary (older turns fold in once
+  ~24 accumulate, tunable in ⚙ Settings). Across sessions, `CharacterMemory` per (character, persona):
+  written by two triggers — the chat flow folds forward whatever the session summary just absorbed, and
+  `POST /sessions/{id}/sweep` (frontend 5-min idle timer) folds a finished chat. Injected between the
+  pinned facts and "Story so far", budget-capped (history truncated to its share, facts dropped
+  oldest-first — an oversized entry costs only itself). Facts capped at 40. Both scopes are editable in
+  the 📌 Memory modal's two tabs; auto-written facts carry an `auto` badge and can be reverted.
 - **Storage:** plain JSON under `data/`, UUID ids.
 
 ## Frontend map (static/js/app.js)
@@ -194,7 +206,8 @@ renderMessages→updatePortrait/updateMood`, `renderRelationship/loadRelationshi
 ## Feature set (all built + verified)
 
 ✅ Card V2/V3 import/export · ✅ streaming chat (single-beat, non-repetitive) · ✅ swipes + per-swipe
-emotions · ✅ rolling memory · ✅ persona · ✅ character editor (fields, portrait, **lorebook**, Duplicate,
+emotions · ✅ rolling memory · ✅ **cross-session long-term memory** (per char+persona, idle sweep,
+curated + revertible facts) · ✅ persona · ✅ character editor (fields, portrait, **lorebook**, Duplicate,
 power/social) · ✅ ComfyUI expression sprites (img2img same-character, transparent via rembg, Core-8/Full-28,
 **gallery** w/ per-sprite regen/delete) · ✅ live portrait swap · ✅ running **mood/valence** · ✅ empty-greeting
 fallback · ✅ delete chats/characters · ✅ **relationship system** (multi-axis, per char+persona, behavior
