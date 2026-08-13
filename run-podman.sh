@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# Companion — Podman run script
+# La Cantina — Podman run script
 # ============================================================
 set -euo pipefail
 
@@ -55,7 +55,7 @@ podman run -d \
   "$IMAGE"
 
 echo ""
-echo "✓  Companion is running."
+echo "✓  La Cantina is running."
 echo "   Open: http://localhost:${PORT}"
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

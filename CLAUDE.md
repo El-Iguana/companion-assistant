@@ -1,4 +1,7 @@
-# Companion — Project Context
+# La Cantina — Project Context
+
+The product name is **La Cantina**; the project directory, image, container, and `stack` command all
+remain `companion` (renaming them was deliberately deferred).
 
 A self-hosted **character-card AI companion**. FastAPI + uvicorn, runs as a Podman container,
 talks to **KoboldCPP** (text) and **ComfyUI** (portraits/expressions) on the shared
@@ -97,15 +100,15 @@ Login-gated, role-based, per-user isolated libraries.
 - **Relationship** — persistent per (character, persona): axes `affection/trust/attraction/tension`,
   `emotional_intimacy`, `physical_willingness`, optional `power_dynamic`/`social_acceptance` overrides,
   `milestones`.
-- **ChatSession** — `messages`, `memory` (MemoryState), `mood` (MoodState), `generation`
-  (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
-  (scenario mode), `character_id`, `persona_id`.
-  (Lorebook entries carry `min_stage` for stage-gating.)
 - **CharacterMemory** — persistent per (character, persona), like Relationship: `facts[]`
   (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
   `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
   "What {{char}} remembers about {{user}}"; **not** used in scenario sessions.
 
+- **ChatSession** — `messages`, `memory` (MemoryState), `mood` (MoodState), `generation`
+  (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
+  (scenario mode), `character_id`, `persona_id`.
+  (Lorebook entries carry `min_stage` for stage-gating.)
 ## API endpoints (main.py)
 
 All `/api/*` except `login`/`me` require auth (401 otherwise); user-mgmt requires admin (403).
@@ -139,11 +142,11 @@ GET  /api/relationship?character_id=&persona_id=     summary (axes, stage, intim
 PUT  /api/relationship                     override context {power_dynamic, social_acceptance} (null clears -> card default)
 # sessions + chat
 GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
+GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
+POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
-GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
-POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
 ```
 
 ## How it works
