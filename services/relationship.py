@@ -180,6 +180,72 @@ def _level(x: float) -> str:
             else "low" if x >= 15 else "minimal")
 
 
+# Concrete acts named per rung, so the boundary is never stated only as an abstract
+# label. A 9B model given `willing up to "none"` has nothing to act on; given "no
+# kissing, no sexual touch" it does. Index matches PHYSICAL_TIERS.
+_TIER_ACTS = [
+    "no kissing and no sexual touch",
+    "standing close, hugging, hand-holding, affectionate touch",
+    "kissing and making out",
+    "sensual touch over clothing",
+    "manual stimulation",
+    "oral intimacy",
+    "intercourse",
+    "uninhibited intimacy",
+]
+
+
+def _label_with_acts(idx: int) -> str:
+    '''Rung as `"label" (concrete acts)`, dropping the parenthetical where it would just
+    restate the label (only rungs 0 and 1 carry extra detail).'''
+    label, acts = PHYSICAL_TIERS[idx], _TIER_ACTS[idx]
+    norm = lambda s: s.lower().replace(" & ", " and ")
+    return f'"{label}"' if norm(label) == norm(acts) else f'"{label}" ({acts})'
+
+
+def _physical_clause(rel: Relationship, char: str, user: str) -> str:
+    """State the physical boundary concretely: what she is open to, and the FIRST rung
+    she refuses. The old wording (`willing up to "none" … at or below this`) was a null
+    instruction at tier 0 and never named the act being declined at any tier."""
+    idx, _ = physical_tier(rel)
+
+    if idx == 0:
+        return (f"Physical boundary right now: {char} is NOT physically intimate with {user} at "
+                f"all — {_TIER_ACTS[0]}. If {user} initiates or asks for any of that, {char} does "
+                f"not go along with it: she deflects, redirects, or turns it down in her own voice "
+                f"and in character.")
+
+    clause = (f"Physical comfort right now: {char} is willing up to and including "
+              f"{_label_with_acts(idx)}, and engages warmly with that or anything less than it.")
+    if idx + 1 < len(PHYSICAL_TIERS):
+        clause += (f" She is NOT willing to go further: anything beyond that rung — starting with "
+                   f"{_label_with_acts(idx + 1)} — she turns down or slows, in character.")
+    else:
+        clause += f" She has no remaining physical limits with {user}."
+    return clause
+
+
+def boundary_note(rel: Relationship, char: str, user: str) -> str:
+    """Compact restatement of the physical boundary, injected AFTER the chat history.
+
+    The full descriptor sits in the system message, which small models weight far less
+    than recent tokens once a conversation has some length. This is the same limit,
+    placed where it competes on equal footing with the last user turn."""
+    idx, _ = physical_tier(rel)
+    if idx == 0:
+        limit = (f"{char} is not physically intimate with {user} right now ({_TIER_ACTS[0]}). If "
+                 f"{user} initiates kissing or sexual touch, she does NOT reciprocate — she declines "
+                 f"or redirects, in character.")
+    else:
+        limit = (f"{char}'s physical limit right now is {_label_with_acts(idx)}. She does not "
+                 f"go beyond it")
+        limit += (f' — anything from "{PHYSICAL_TIERS[idx + 1]}" upward she declines or slows, in '
+                  f"character." if idx + 1 < len(PHYSICAL_TIERS) else ".")
+    return ("[Boundary reminder] " + limit +
+            " Turning something down, hesitating, or changing the subject IS a valid way to move "
+            "the scene forward — it does not count as repeating yourself or stalling.")
+
+
 def descriptor(rel: Relationship, char: str, user: str,
                power: float = 0.0, social: float = 50.0) -> str:
     """Relationship summary + behavior/consent guidance, for the system prompt."""
@@ -192,11 +258,10 @@ def descriptor(rel: Relationship, char: str, user: str,
         parts.append(f"tension {_level(rel.tension)}")
     strained = " There is real friction between you right now." if "(Strained)" in stage else ""
 
-    _, tier = physical_tier(rel)
-    intimacy = (f' Emotional openness: {emotional_level(rel)}. Physical comfort right now: she is '
-                f'willing up to "{tier}" and no further — she engages warmly at or below this and '
-                "gently declines or slows anything beyond it. Her consent is genuine, enthusiastic, "
-                "and revocable at any time; her boundaries reflect her real feelings, never obligation.")
+    intimacy = (f" Emotional openness: {emotional_level(rel)}. "
+                + _physical_clause(rel, char, user)
+                + " Her consent is genuine, enthusiastic, and revocable at any time; her boundaries "
+                  "reflect her real feelings, never obligation.")
     ctx = ""
     if social < 40:
         ctx += (" This relationship carries social stigma and she is aware of it — she stays more "

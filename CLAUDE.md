@@ -105,11 +105,11 @@ Login-gated, role-based, per-user isolated libraries.
   (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
   `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
   "What {{char}} remembers about {{user}}"; **not** used in scenario sessions.
-
 - **ChatSession** — `messages`, `memory` (MemoryState), `mood` (MoodState), `generation`
   (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
   (scenario mode), `character_id`, `persona_id`.
   (Lorebook entries carry `min_stage` for stage-gating.)
+
 ## API endpoints (main.py)
 
 All `/api/*` except `login`/`me` require auth (401 otherwise); user-mgmt requires admin (403).
@@ -142,9 +142,9 @@ GET/POST /api/presets ; GET/PUT/DELETE /api/presets/{id}   relationship presets 
 GET  /api/relationship?character_id=&persona_id=     summary (axes, stage, intimacy) + effective power/social + context_overridden
 PUT  /api/relationship                     override context {power_dynamic, social_acceptance} (null clears -> card default)
 # sessions + chat
-GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
 GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
 POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
+GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
@@ -178,6 +178,14 @@ POST /api/chat                             SSE stream; done carries {expression,
   a **7-rung clinical ladder** (`PHYSICAL_TIERS`, cumulative, no cap). **Context** (`power_dynamic`,
   `social_acceptance`; card default + per-relationship override) **slows pace & adds caution — never
   compliance**; agency-preserving, consent enthusiastic/revocable. `descriptor()` injects all this into her prompt.
+  **Boundary phrasing is load-bearing** — `_physical_clause()`/`boundary_note()` name the concrete acts
+  (`_TIER_ACTS`) and the FIRST refused rung, never just the abstract label. The old wording (`willing up
+  to "none" … engages at or below this`) was a null instruction at tier 0 and small models complied with
+  anything. `boundary_note()` is also re-injected as a **trailing system message after the history**
+  (`build_messages(boundary_note=…)`, placed after `post_history_instructions` so a card's UJB can't bury
+  it), and `kobold.chat_generate_stream` re-appends that trailing system turn on each auto-continue round
+  so `"Continue."` can't demote it. This is prompt steering, not a hard gate — an anti-refusal fine-tune
+  (the default `…-Uncensored-…-Aggressive` GGUF) still complies sometimes.
   **Escalation:** once intimacy has begun and she's positively engaged, `classify_activity()` reads the act
   depicted and `escalate()` nudges willingness toward the next rung (`ESC_RATE`; social acceptance modulates
   pace, tension blocks it) — so doing acts gradually opens her further.
@@ -222,14 +230,6 @@ per-relationship **context override** (⚙).
 ## Conventions & gotchas
 
 - Rebuild after code/template/static edits (`./run-podman.sh --rebuild`); `podman exec -i` for heredocs.
-- **Disable-thinking** (`AppSettings.disable_thinking`, ⚙ Settings modal): `chat()` appends `/no_think` to
-  the **last user turn** (this Qwen3 fine-tune ignores it in the system prompt). The model then emits an
-  empty `<think></think>` which `kobold._strip_think` removes — so the full token budget goes to the reply.
-  Mutates only the transient generation copy, not stored history.
-- CSS: `[hidden] { display:none !important }` at top of style.css so the HTML `hidden` attr wins over
-  element display rules; toggle via `.hidden`.
-- Starlette: `TemplateResponse(request, "index.html")` (request first).
-- `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
 - **TTS backends** (`services/tts.py`): voice ids prefixed **`piper:`** route to Piper (one ONNX per voice,
   loaded from `PIPER_DIR`, cached; its espeak-ng data ships in the `piper-tts` wheel), everything else to
   Kokoro. Piper voices are **mounted, not baked** (`../jarvis` → `/app/models/piper:ro,z`) — dropping a new
@@ -240,6 +240,14 @@ per-relationship **context override** (⚙).
   per-chunk normalisation — normalising would pin every *sentence* to full scale, which pumps the level in
   the frontend's chunked streaming queue and skews the amplitude lip-sync. 3.5 was measured to match
   Kokoro (rms 0.104 on both) without clipping; retune it per voice via the `PIPER_GAIN` env var.
+- **Disable-thinking** (`AppSettings.disable_thinking`, ⚙ Settings modal): `chat()` appends `/no_think` to
+  the **last user turn** (this Qwen3 fine-tune ignores it in the system prompt). The model then emits an
+  empty `<think></think>` which `kobold._strip_think` removes — so the full token budget goes to the reply.
+  Mutates only the transient generation copy, not stored history.
+- CSS: `[hidden] { display:none !important }` at top of style.css so the HTML `hidden` attr wins over
+  element display rules; toggle via `.hidden`.
+- Starlette: `TemplateResponse(request, "index.html")` (request first).
+- `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
 - Relationship/mood update on generation only (not re-rolls). Sprites are same-character via img2img from a
   reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
 - All characters adult; intimacy code is abstract state (tiers/thresholds) — the local model writes prose.

@@ -119,7 +119,7 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
 
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
-                   longterm_note: str = "") -> List[Dict]:
+                   boundary_note: str = "", longterm_note: str = "") -> List[Dict]:
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
 
@@ -171,9 +171,16 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         content = m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
         messages.append({"role": role, "content": sub(content)})
 
-    # --- post-history instructions (jailbreak / UJB) go LAST ---
+    # --- post-history instructions (jailbreak / UJB) go after the history ---
     if card.post_history_instructions:
         messages.append({"role": "system", "content": sub(card.post_history_instructions)})
+
+    # --- physical boundary goes LAST, after any UJB ---
+    # The full relationship descriptor is in the system message, but by mid-conversation
+    # that is many turns back and small models weight recent tokens far more heavily.
+    # Deliberately placed after post_history_instructions so a card's UJB cannot bury it.
+    if boundary_note:
+        messages.append({"role": "system", "content": sub(boundary_note)})
 
     return messages
 

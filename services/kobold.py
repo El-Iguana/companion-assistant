@@ -107,6 +107,10 @@ class KoboldClient:
         in_think = False
         full_text = ""
         current_messages = list(messages)
+        # A trailing system message (the relationship boundary reminder) is placed last
+        # deliberately. The continuation round below appends turns after it, which would
+        # demote it out of that position — so re-append it to keep it last every round.
+        tail_system = (messages[-1] if messages and messages[-1].get("role") == "system" else None)
 
         for _round in range(2):  # initial + up to 1 continuation (avoids rambling/repetition)
             finish_reason = None
@@ -189,6 +193,8 @@ class KoboldClient:
                 {"role": "assistant", "content": full_text},
                 {"role": "user", "content": "Continue."},
             ]
+            if tail_system:
+                current_messages.append(tail_system)
 
         else:
             # Exhausted all continuation rounds — flush whatever we have

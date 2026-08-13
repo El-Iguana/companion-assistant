@@ -967,6 +967,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
+        boundary_note=relationship.boundary_note(rel, card.name, persona.name),
         longterm_note=memory.longterm_block(char_mem, card.name, persona.name))
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
     # ignores it in the system prompt). The model then emits an empty <think></think>
