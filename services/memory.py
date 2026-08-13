@@ -98,14 +98,38 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
 #     rather than cutting at an arbitrary turn boundary mid-scene.
 # Both are best-effort and must never block or fail a chat turn.
 
+# Bullets, not prose, and every rule below is here because the model broke that
+# way in testing against the 9B fine-tune:
+#   - "a few paragraphs at most" produced 1800 characters of florid essay about a
+#     dog and a bass ("immutable pillars", "a symbol of stability"), so the format
+#     is now terse bullets and interpretation is banned outright;
+#   - a bullet cap alone got padded to exactly the cap with invented traits
+#     ("Testy prefers to conclude interactions with a casual 'talk later'"), so
+#     the brevity instruction sits above the rule list, states that a short memory
+#     is a GOOD memory, and inferring traits is forbidden;
+#   - the model recorded its own replies as memories ("MemTest confirms retention
+#     of all noted personal facts"), hence the explicit carve-out;
+#   - folding a cancellation kept BOTH "plans to sail next month" and "trip is
+#     off", i.e. a self-contradicting memory, hence the REPLACE rule.
+# Measured across three successive folds: 113 -> 228 -> 322 chars, growing only
+# with genuinely new content. Retune here rather than by lowering
+# LONGTERM_BUDGET_CHARS — truncating mid-sentence is worse than generating short.
+LONGTERM_MAX_BULLETS = 10
+
 LONGTERM_PROMPT = (
-    "You maintain a durable memory of the relationship between {char} and {user} "
-    "across all of their conversations.\n\n"
-    "Update it with the new events below. Keep concrete, lasting things: facts about "
-    "{user}, decisions, promises, shared history, how they feel about each other, "
-    "unresolved threads. Drop small talk and moment-to-moment scene detail — this is "
-    "what {char} would still remember weeks later, not a transcript.\n"
-    "Write in third person, present tense, a few paragraphs at most."
+    "You maintain {char}'s durable memory of {user} across all their conversations.\n\n"
+    "Rewrite the memory below so it also covers the new events.\n\n"
+    "Keep it SHORT. Most conversations add only one or two bullets. Never pad to reach "
+    "the limit of {max_bullets}; a four-bullet memory is a good memory.\n\n"
+    "- Terse bullets, one line each. No preamble, no closing sentence, no headings.\n"
+    "- Record only what was explicitly said, decided, or promised, and only if it stays "
+    "true after the conversation ends. Do not infer traits, preferences, or patterns.\n"
+    "- Do NOT record {char}'s own replies, acknowledgements, or offers — that {char} "
+    "noted, stored, remembered, agreed, or offered something is not a memory.\n"
+    "- If the new events change, resolve, or contradict an existing bullet, REPLACE that "
+    "bullet. Never keep both versions; drop anything finished or no longer true.\n"
+    "- No interpretation, no significance, no scene description, no small talk.\n"
+    "- Third person, present tense."
 )
 
 
@@ -140,7 +164,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
         return True
 
     prompt = (
-        LONGTERM_PROMPT.format(char=char_name, user=user_name) + "\n\n"
+        LONGTERM_PROMPT.format(char=char_name, user=user_name,
+                               max_bullets=LONGTERM_MAX_BULLETS) + "\n\n"
         + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
         + f"New events:\n{transcript}\n\nUpdated memory:"
     )
