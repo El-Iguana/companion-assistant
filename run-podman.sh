@@ -34,13 +34,19 @@ fi
 
 mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions,settings}
 
+# Both backend URLs have to move together. They used to not: only KOBOLD_URL was set
+# here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite
+# generation died on DNS while chat worked — on exactly the path someone without the
+# full ai-stack takes.
 if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
   KOBOLD_URL="http://koboldcpp:5001"
-  echo "==> Joining network: $NETWORK (KoboldCPP reachable by container name)"
+  COMFYUI_URL="http://comfyui:8188"
+  echo "==> Joining network: $NETWORK (backends reachable by container name)"
 else
   NET_ARG="--network=host"
   KOBOLD_URL="http://localhost:5001"
+  COMFYUI_URL="http://localhost:8188"
   echo "==> Network '$NETWORK' not found; falling back to host networking"
 fi
 
@@ -59,6 +65,7 @@ podman run -d \
   $NET_ARG \
   -p "${PORT}:7861" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
+  -e "COMFYUI_URL=${COMFYUI_URL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${PIPER_ARG[@]}" \
   "$IMAGE"

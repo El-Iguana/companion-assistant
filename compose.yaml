@@ -17,6 +17,7 @@ services:
       - "7861:7861"
     environment:
       - KOBOLD_URL=http://koboldcpp:5001
+      - COMFYUI_URL=http://comfyui:8188
     volumes:
       - ./data:/app/data:z
       - ../jarvis:/app/models/piper:ro,z   # Piper TTS voices (shared, read-only)
