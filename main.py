@@ -159,14 +159,54 @@ async def get_ctx(user: User = Depends(current_user)) -> Ctx:
     return _ctx_for(user)
 
 
+def _seed_password() -> tuple[str, bool]:
+    """The first-run admin password: given, or minted. Never a constant.
+
+    A literal here would be the known default admin credential of every install of
+    a shared repo — and the container publishes 7861 on all interfaces, so that is
+    not only a local concern. Returns (password, generated).
+    """
+    given = os.environ.get("COMPANION_ADMIN_PASSWORD", "").strip()
+    if given:
+        return given, False
+    return secrets.token_urlsafe(12), True
+
+
+def _announce_seed_password(password: str) -> None:
+    """Put a generated password where a first run can actually find it.
+
+    The container starts detached, so stdout alone means `podman logs`; write it
+    to a file too, owner-only, so it survives log rotation and a scrolled console.
+    """
+    f = AUTH / "INITIAL_PASSWORD"
+    try:
+        f.write_text(
+            f"{password}\n\n"
+            "First-run password for the ADMIN account, generated because\n"
+            "COMPANION_ADMIN_PASSWORD was not set. Change it in the app\n"
+            "(userbar -> your account), then delete this file.\n"
+        )
+        os.chmod(f, 0o600)
+        where = f" (also written to {f})"
+    except OSError:
+        where = ""
+    banner = "=" * 62
+    print(f"\n{banner}\n  First run: created admin account ADMIN\n"
+          f"  password: {password}\n"
+          f"  Change it after logging in{where}.\n{banner}\n", flush=True)
+
+
 def _seed_and_migrate() -> None:
     """First run: create the ADMIN account and move any legacy flat data into it."""
     if _all_users():
         return
+    password, generated = _seed_password()
     salt = auth.new_salt()
     admin = User(username="ADMIN", role="admin", salt=salt,
-                 password_hash=auth.hash_password("***REMOVED***", salt))
+                 password_hash=auth.hash_password(password, salt))
     _save_user(admin)
+    if generated:
+        _announce_seed_password(password)
     root = _user_root(admin.id)
     for name, src in LEGACY.items():
         if not src.exists():

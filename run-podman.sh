@@ -50,6 +50,14 @@ else
   echo "==> Network '$NETWORK' not found; falling back to host networking"
 fi
 
+# First-run admin password. Forwarded only if you set it; otherwise the app mints a
+# random one and prints it (podman logs companion) + writes data/auth/INITIAL_PASSWORD.
+SEED_ARG=()
+if [[ -n "${COMPANION_ADMIN_PASSWORD:-}" ]]; then
+  SEED_ARG=(-e "COMPANION_ADMIN_PASSWORD=${COMPANION_ADMIN_PASSWORD}")
+  echo "==> Seeding the admin password from COMPANION_ADMIN_PASSWORD (first run only)"
+fi
+
 # Piper TTS voices (shared, read-only) — skipped if the dir isn't there.
 PIPER_SRC="$(dirname "$SCRIPT_DIR")/jarvis"
 PIPER_ARG=()
@@ -67,6 +75,7 @@ podman run -d \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
+  "${SEED_ARG[@]}" \
   "${PIPER_ARG[@]}" \
   "$IMAGE"
 

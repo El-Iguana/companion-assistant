@@ -79,9 +79,13 @@ Login-gated, role-based, per-user isolated libraries.
   the Ctx's folder; relationship/settings/persona helpers take `cur`.)
 - **Admin-only**: `/api/users` CRUD + password reset; guards against deleting yourself or the last admin
   (deleting a user removes their whole `data/u/<uid>` library). Normal users manage only their own libraries.
-- **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** (password `***REMOVED***`) and moves
-  any legacy flat `data/<subdir>/*` into the admin's library so nothing is orphaned. Change the seed
-  password after first login (userbar → your account, or admin reset).
+- **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** and moves any legacy flat
+  `data/<subdir>/*` into the admin's library so nothing is orphaned. The password comes from
+  `COMPANION_ADMIN_PASSWORD` if set, else `_seed_password()` mints a random one and
+  `_announce_seed_password()` prints a startup banner + writes `data/auth/INITIAL_PASSWORD` (0600) —
+  the container runs detached, so stdout alone isn't findable enough. **Never reintroduce a constant
+  here:** this repo is shared, and the app publishes 7861 on all interfaces, so a literal would be
+  the known default admin credential of every install. Seeding only runs when no users exist.
 - **Frontend**: full-screen `#login` overlay; `boot()` checks `/api/me` and gates `init()`; `api()` shows
   login on any 401; sidebar `#userbar` (name·role, Logout, admin-only **Users** modal).
 - **Volume**: the whole `data/` is now a single bind mount (`run-podman.sh`/`compose.yaml`) so `data/u`,

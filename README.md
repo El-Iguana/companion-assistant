@@ -61,17 +61,24 @@ from its environment, so set them with `-e` on a manual `podman run` (or in `com
 
 ### First login
 
-The first run seeds a single admin account:
+The first run creates a single admin account, **ADMIN**, with a randomly generated password. It's
+printed once at startup and written to a file, since the container starts detached:
 
-```
-username: ADMIN
-password: ***REMOVED***
+```bash
+podman logs companion | head -20      # the startup banner
+cat data/auth/INITIAL_PASSWORD        # or read it here (owner-only)
 ```
 
-**Change it immediately** (userbar → your account), then add users from the admin-only **Users**
-panel. The seed password is a constant in the source, so it's the same on every install — treat any
-instance you haven't changed it on as open, especially since the container publishes port 7861 on
-all interfaces, not just localhost.
+Log in, **change the password** (userbar → your account), delete that file, then add users from the
+admin-only **Users** panel. To choose the password yourself instead, set it before the first run —
+it's read only when seeding, so it does nothing on an existing install:
+
+```bash
+COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh
+```
+
+Worth knowing: the container publishes port 7861 on **all interfaces**, not just localhost, so
+anyone on your network can reach the login page.
 
 The in-app **?** button documents custom system prompts and curation.
 
