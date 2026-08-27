@@ -59,7 +59,15 @@ ENV KOBOLD_URL=http://koboldcpp:5001
 
 EXPOSE 7861
 
+# HEALTHCHECK is a docker-format field with no OCI slot, so podman drops it unless the build
+# passes --format docker (run-podman.sh does). Without that flag this block is silently inert.
+#
+# Probes `/`, not `/api/status`. Two reasons, both of which would have made this container
+# report unhealthy while working fine: /api/status is behind `current_user`, so unauthenticated
+# it answers 401 and `curl -f` treats that as failure; and it proxies KoboldCPP, so it would
+# also fail whenever the *backend* is down. `/` renders the login page — it exercises uvicorn
+# and Jinja without depending on either.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:7861/api/status || exit 1
+    CMD curl -fs http://localhost:7861/ || exit 1
 
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7861"]
