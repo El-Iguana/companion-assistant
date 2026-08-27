@@ -27,13 +27,13 @@ export losslessly.
 - **KoboldCPP** reachable — required; without it there's no text generation.
 - **ComfyUI** reachable — optional; only expression sprites need it. Everything else works without.
 
-Both backends come from the [`ai-stack`](https://github.com/El-Iguana/ai-stack) launcher, which
+Both backends come from the [`ai-stack`](https://github.com/JotunheimPress/ai-stack) launcher, which
 installs and runs them. This app itself needs no GPU: its own models (TTS, STT, embeddings,
 background removal) are CPU/ONNX, so the GPU stays free for KoboldCPP and ComfyUI.
 
 ## Running
 
-With [`ai-stack`](https://github.com/El-Iguana/ai-stack):
+With [`ai-stack`](https://github.com/JotunheimPress/ai-stack):
 
 ```bash
 stack up            # start the backends (KoboldCPP + ComfyUI)
