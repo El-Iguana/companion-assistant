@@ -1,152 +1,119 @@
-# Memory enhancement plan
+# Memory system — plan and decision log
 
-Ideas for improving the companion's memory. See `services/memory.py`, `models/schema.py`
-(`MemoryState`), and `prompt_builder.build_messages`.
+Ideas and decisions for what the companion remembers. Revised after reviewing Lumina's memory design
+(a third-party agentic assistant with a "MemPalace" layered store) as a possible alternative:
+**keep this plan**, take two ideas from it, reject its centrepiece. See "Evaluated and rejected" at
+the bottom so that doesn't get re-litigated later.
 
-Revised after reviewing Lumina's memory design (a third-party agentic assistant with a
-"MemPalace" layered store) as a possible alternative. Conclusion: **keep this plan**, take two
-ideas from it, and explicitly reject its centrepiece. See "Evaluated and rejected" at the bottom
-so this doesn't get re-litigated later.
+**Mechanics are not in this file.** The scopes, the fold triggers, the recall gate, auto-fact
+extraction, the budgets and every constant live in `MEMORY.md`, which is the file to edit when
+behavior changes. This one records the *reasons* — what was open, what was decided, and what shipped.
 
-## Current state (what exists today)
+Code: `services/memory.py`, `services/embeddings.py`, `models/schema.py` (`MemoryState`,
+`CharacterMemory`), `prompt_builder.build_messages`, and the chat flow in `main.py`.
 
-Per-session memory (`ChatSession.memory` = `MemoryState{summary, pinned, last_summarized_index}`),
-assembled into the prompt in three tiers:
-1. **Verbatim recent turns** — `messages[last_summarized_index:]` go in word-for-word.
-   (`session.messages` keeps the *full* history on disk regardless; the index only marks how much
-   the summary covers. Nothing is destroyed by folding.)
-2. **Rolling summary** ("Story so far:") — older turns folded into `memory.summary`.
-   - Trigger: `summarize_after` (default 24) unsummarized turns; keep `keep_recent` (12) verbatim.
-   - Cumulative, best-effort (never blocks chat), ~400 tokens, via `kobold.generate_answer`.
-3. **Pinned facts** ("Important facts:") — `memory.pinned`, always-on, user-curated.
-
-Scope + gaps:
-- **Per-session only** — new chats start empty. (**Relationship** state is separately persistent per
-  character×persona; the **lorebook** is authored keyword-triggered memory — both distinct from this.)
-- **No embeddings / RAG** — pure summarization, so precise old details survive only if the summary kept them.
-- Bounded by the 8192-token context; summaries are lossy by design.
+Phases 1–5 have all shipped.
 
 ## Settled design decisions
 
 Recorded here because each was an open question and each now has a reason, not just an answer.
 
 - **Long-term scope = per (character × persona).** Mirrors `Relationship` exactly — same granularity,
-  same `{cid}__{pid}.json` file convention, same "different persona is genuinely a different history"
-  logic. Reuses `_load_relationship`/`_save_relationship` as the pattern to copy.
-- **Cross-session persistence ships before embeddings.** Cross-session is a *missing capability* (she
-  forgets you on a new chat); embeddings are a *retrieval-quality optimization* on top of it. The
-  long-term store can ship with recency + pinned retrieval and gain semantic search later without
-  changing its shape. Lumina is the cautionary case: it built an elaborate layered store first and its
+  same `{cid}__{pid}.json` convention, same "a different persona is genuinely a different history"
+  logic, reusing `_load_relationship`/`_save_relationship` as the pattern to copy.
+- **Cross-session persistence shipped before embeddings.** Cross-session is a *missing capability*
+  (she forgets you on a new chat); embeddings are a *retrieval-quality optimization* on top of it.
+  The store could ship with recency + pinned retrieval and gain semantic search later without
+  changing shape. Lumina is the cautionary case: it built an elaborate layered store first and its
   recall is still `content LIKE '%query%'`.
-- **Embedder runs on CPU via ONNX — zero VRAM.** `bge-small-en` / `all-MiniLM-L6` are ~90–130 MB and
-  `onnxruntime` is already in the image for rembg, Kokoro, and faster-whisper. Follows the established
-  baked-`models/<name>/` convention. This closes the "share the 4070 with KoboldCPP + ComfyUI" question
-  without a trade-off.
-- **Auto-written memory is tagged and revertible.** Every fact carries its origin (`user` | `auto`) so
-  the 📌 Memory modal can filter and revert what she decided to remember on her own. Auto-extraction
-  without an undo path is not shippable.
-- **Injection is budget-capped and drops oldest — never truncates a block mid-way.** Lumina's injector
-  `break`s on the first oversized entry, silently dropping every later layer with no error. Cap per
-  entry *and* total, and drop from the oldest end.
+- **The embedder runs on CPU via ONNX — zero VRAM.** `onnxruntime` was already in the image for
+  rembg, Kokoro and faster-whisper, and the baked-`models/<name>/` convention was already
+  established. That closes the "share the 4070 with KoboldCPP + ComfyUI" question without a
+  trade-off. int8 over fp32 was decided by measurement, not size preference.
+- **Auto-written memory is tagged and revertible.** Every fact carries its origin (`user` | `auto`)
+  so the 📌 Memory modal can filter and revert what she decided to remember on her own.
+  Auto-extraction without an undo path is not shippable — Phase 5 was gated on that review surface.
+- **Auto-extraction is reluctant by construction.** A wrong auto-fact outlives the summary that
+  produced it: the summary is rewritten on every fold, but a fact persists into every future
+  conversation until someone notices. Hence a small per-fold cap, a low temperature, "NONE is a good
+  answer", and add-only behavior that never edits or deletes a user-written fact.
+- **Dedupe belongs in code, not the prompt.** Told to skip known facts, the model re-emitted them
+  verbatim. Semantic comparison also catches the rewordings a string match misses.
+- **The index holds user turns only.** Her replies restate the user wrapped in personality: indexing
+  them duplicated the signal *and* dragged the median similarity up, which is what the relevance gate
+  is measured against. Measured both ways before deciding.
+- **Recall is gated on a margin, not a floor.** BGE's absolute cosines are not calibrated — a
+  greeting outscored a genuinely relevant question — so any fixed floor either lets greetings through
+  or drops real hits. The gate is the distance between the best hit and the median. Calibrated on a
+  small sample: a heuristic, not a validated threshold.
+- **Retrieval shares the long-term block's budget rather than adding to it**, so turning recall on
+  can't silently double the memory footprint of every prompt.
+- **Injection is budget-capped and drops oldest — never truncates a block mid-way.** Lumina's
+  injector `break`s on the first oversized entry, silently dropping every later layer with no error.
+  Cap per entry *and* total, and drop from the oldest end, so an oversized entry costs only itself.
+- **Eviction protects curation.** Over the caps, the oldest *auto* facts and the oldest *turns* go
+  first; a user-written fact is never pushed out by one the app invented or by conversation volume.
+- **Scenario sessions are excluded** from both injection and sweeping, exactly like `rel` in
+  `chat()` — a scenario is a deliberate alternate premise, and the main timeline's remembered
+  history would contradict the state the preset just seeded.
+- **Everything is best-effort.** A missing model, an onnxruntime failure, a corrupt index or a failed
+  summarization degrade to "no block" and leave the chat turn untouched. Nothing in the memory path
+  may raise into the hot path.
+
+## The fold prompt is tuned against observed failures
+
+Every rule in `LONGTERM_PROMPT` is there because the 9B fine-tune broke that way in testing: "a few
+paragraphs" produced florid essays; a bare bullet cap got padded to exactly the cap with invented
+traits; the model recorded its own replies as memories; and folding a cancellation kept both "plans
+to sail next month" and "trip is off" in one self-contradicting memory.
+
+The same applies to auto-facts, where transient-vs-durable was the hard part: the first prompt pulled
+"visiting at the end of summer" out of a sentence that also carried a durable fact, and only an
+emphatic rule about dates and seasons separated them.
+
+**Retune the prompts rather than lowering the budgets** — truncating mid-sentence is worse than
+generating short.
 
 ## Phases
 
-- **Phase 1 — Pinned-facts UI (quick win). ✅ DONE.** Scope: **per-session** (`MemoryState.pinned`).
-  `GET/PUT /api/sessions/{id}/memory` read/write `pinned[]` + `summary`; frontend `📌 Memory` header
-  button opens a `#memory` modal — add/remove pinned facts + edit the rolling "Story so far" summary.
-  Injection was already wired in `prompt_builder` (Important facts / Story so far).
+- **Phase 1 — Pinned-facts UI (quick win). ✅ DONE.** Per-session `MemoryState.pinned`, read/written
+  through `GET/PUT /api/sessions/{id}/memory` and edited in the 📌 Memory modal. Injection was
+  already wired in `prompt_builder`.
 
-- **Phase 2 — Tunable + hardened summarizer. ✅ DONE.** `summarize_after` / `keep_recent` /
-  `summary_max_tokens` are on `AppSettings` (bounded `Field`s) and exposed as sliders in the ⚙ Settings
-  modal (MEMORY section). `memory.summarize()`/`needs_summary()` take them as params (module constants
-  remain the fallback); the chat flow passes the per-user settings. `kobold.generate_answer` prefills an
-  empty `<think></think>` so summaries don't come back as reasoning. `keep_recent` is clamped below
-  `summarize_after` so a fold always covers ≥1 turn.
+- **Phase 2 — Tunable + hardened summarizer. ✅ DONE.** The rolling summarizer's thresholds moved
+  onto `AppSettings` as bounded fields with sliders in ⚙ Settings; the module constants remain the
+  fallback. `kobold.generate_answer` prefills an empty `<think></think>` so summaries don't come back
+  as reasoning, and `keep_recent` is clamped below `summarize_after` so a fold always covers ≥1 turn.
 
 - **Phase 3 — Cross-session long-term memory. ✅ DONE.** *(Was Phase 4; promoted — see settled
-  decisions.)* A persistent store per (character × persona) carried across chats, alongside the
-  per-session summary rather than replacing it.
-  - **Models** (`models/schema.py`): `MemoryFact{id, text, origin: "user"|"auto", created_at}` and
-    `CharacterMemory{character_id, persona_id, facts[], summary, swept_sessions, created_at, updated_at}`.
-    `swept_sessions` (session_id → message index already folded) replaced the planned
-    `last_swept_session_id`: a single id can't express "this session grew, fold the new part," which
-    both triggers need in order to be idempotent *and* re-runnable.
-  - **Store**: `data/u/<uid>/memories/{cid}__{pid}.json`, `memories` in `SUBDIRS` + `Ctx`.
-    `_load_character_memory`/`_save_character_memory` mirror the relationship pair. `_user_root()`
-    creates the dir for existing users on their next request — no migration needed.
-  - **Write triggers** — both via `memory.fold_into_longterm()`:
-    - *threshold* — the chat flow folds forward exactly what `summarize()` just folded out of the
-      verbatim window (`upto=session.memory.last_summarized_index`), so nothing leaves the live prompt
-      without being recorded durably first;
-    - *idle* — `POST /api/sessions/{id}/sweep`, armed by the frontend `SWEEP_IDLE_MS` (5 min) timer
-      after each completed turn. **Borrowed from Lumina's dream-sweep** and the better of the two: it
-      captures a *finished* conversation instead of cutting mid-scene.
-  - **Inject**: `memory.longterm_block()` → `build_messages(longterm_note=…)`, placed after pinned
-    facts and before "Story so far". Budget-capped (`LONGTERM_BUDGET_CHARS`, header counted): the
-    history is truncated to its share and facts drop oldest-first, so an oversized entry costs only
-    itself. Facts are capped at `LONGTERM_MAX_FACTS` (40) on write so the store stays bounded.
-  - **API**: `GET/PUT /api/memories?character_id=&persona_id=`, same shape as `/api/relationship`.
-    Facts round-trip by `id` so editing through the modal can't relabel an `auto` fact as `user`.
-  - **UI**: Memory modal gained a tab bar (This chat / Long-term); long-term facts carry an `auto`
-    badge and are individually editable/removable. The tab is hidden for character-less and scenario
-    sessions.
-  - **Scenario sessions are excluded** from both injection and sweeping, exactly like `rel` in
-    `chat()` — a scenario is a deliberate alternate premise, and the main timeline's remembered
-    history would contradict the state the preset just seeded.
+  decisions.)* `CharacterMemory` per (character × persona), alongside the per-session summary rather
+  than replacing it, with two write triggers and a budget-capped injected block.
+  - `swept_sessions` (session_id → index already folded) replaced the planned `last_swept_session_id`:
+    a single id can't express "this session grew, fold the new part", which both triggers need in
+    order to be idempotent *and* re-runnable.
+  - The **idle sweep** is **borrowed from Lumina's dream-sweep** and is the better of the two
+    triggers: it captures a *finished* conversation instead of cutting mid-scene.
+  - Facts round-trip **by id** through the API so editing in the modal can't relabel an `auto` fact
+    as `user`.
+  - `_user_root()` creates the new `memories/` dir for existing users on their next request, so no
+    migration was needed.
 
-- **Phase 4 — Embedding / vector memory (RAG). ✅ DONE.** *(Was Phase 3.)* Semantic recall of past
-  turns and facts, layered onto Phase 3's store.
-  - **Encoder** (`services/embeddings.py`): int8 BGE-small-en-v1.5, ONNX, CPU, baked at
-    `/app/models/embed` (33 MB). Chosen over fp32 (127 MB) by measurement — both scored 5/5 top-1 on
-    the same probe with cosine within 0.02. Zero VRAM. CLS pooling + L2 norm; BGE's query prefix is
-    applied to queries only. 143 ms cold load, ~2 ms per warm query.
-  - **Index**: `data/u/<uid>/memories/{cid}__{pid}.vec.npz` (vectors + JSON meta in one file, non-
-    `.json` suffix so no future `glob("*.json")` mistakes it for a model). Written inside
-    `fold_into_longterm()` so both triggers stay in sync; facts re-indexed wholesale on
-    `PUT /api/memories` (replace-by-kind). Capped at `RECALL_MAX_VECTORS` (2000), evicting oldest
-    turns first — curated facts are never pushed out by conversation volume.
-  - **USER turns only.** Her replies restate the user wrapped in personality; indexing them
-    duplicated signal *and* dragged the median similarity up, defeating the gate below. Measured on a
-    live index: with her turns in, 2 of 6 deliberately irrelevant queries slipped through; without,
-    0 of 6, with all 5 relevant queries still correct.
-  - **Relevance gate**: BGE cosine scores are not calibrated — "hello" scored 0.541 while the genuinely
-    relevant "what can't I eat?" scored 0.523, so no fixed floor works. Gate is the margin between best
-    and median hit (relevant ≥0.114, irrelevant ≤0.094 → threshold 0.10), plus a loose floor and a
-    3-word minimum query. Calibrated on a small sample; a heuristic, not a validated threshold.
-  - **Budget**: retrieval SHARES `LONGTERM_BUDGET_CHARS` with the Phase 3 block rather than adding to
-    it, and drops any snippet whose text is already in that block.
-  - **Settings**: `recall_enabled` / `recall_top_k` on `AppSettings`, with a toggle + slider in the ⚙
-    Settings MEMORY section.
-  - **Degrades to nothing**: no baked model, an onnxruntime failure, or a corrupt index all yield no
-    recall block and leave the chat turn untouched. Verified for both failure modes.
-  - **Caveat worth knowing**: with the Phase-3 summarizer tightened, a 7-topic conversation still fits
-    in the 10-bullet summary, so recall added nothing at that size. Its value is in pairings that
-    accumulate well past the bullet cap. Verified by emptying the summary and confirming a fresh
-    session could still answer three specifics from the index alone.
+- **Phase 4 — Embedding / vector memory (RAG). ✅ DONE.** *(Was Phase 3.)* Semantic recall layered
+  onto Phase 3's store: int8 BGE-small-en-v1.5 on CPU, an index written inside the fold so both
+  triggers stay in sync, and a margin-gated search.
+  - The index file is `.vec.npz`, deliberately not `.json`, so no future `glob("*.json")` mistakes it
+    for a model.
+  - Facts are re-indexed **wholesale** on save (replace-by-kind) — they're editable and deletable, so
+    that is both simpler and more correct than diffing.
+  - **Caveat worth knowing:** with the Phase-3 summarizer tightened, a 7-topic conversation still
+    fits in the bullet cap, so recall added nothing at that size. Its value is in pairings that
+    accumulate well past it — verified by emptying the summary and confirming a fresh session could
+    still answer three specifics from the index alone.
 
-- **Phase 5 — Auto-fact extraction. ✅ DONE.** After a fold or idle sweep, durable facts are pulled
-  out of the conversation and stored with `origin="auto"`, so the stable atoms survive the summary
-  being rewritten wholesale on every fold.
-  - **Reluctant by construction**, because a wrong auto-fact outlives the summary that produced it:
-    at most `AUTO_FACT_MAX_NEW` (3) per fold, "NONE is a good answer" in the prompt, temperature 0.2,
-    and it only ever ADDS — user-written facts are never edited or deleted.
-  - **Transient-vs-durable is the hard part.** The first prompt extracted "Nadia is visiting at the
-    end of summer" out of a sentence that also carried the durable "Nadia is a paramedic in Leeds".
-    The sharpened rule ("if it has a date, a season, or words like next/soon/visiting/coming, it is
-    NOT durable — even in the same sentence as a durable fact") scored 4/4 on the probe set:
-    extracted 3 from a fact-rich exchange, NONE from transient-only, NONE from small talk, NONE from
-    her own offers, and exactly the 2 durable halves of a mixed sentence.
-  - **Dedupe is in code, not the prompt** (`_dedupe_facts`). Told to skip known facts, the model
-    re-emitted two of them verbatim. Cosine against existing facts (>= 0.86) catches that AND the
-    rewordings a string match misses — verified live: restating dog/allergy/sister in fresh wording
-    added nothing, while a genuinely new fact in the same sweep was added. Falls back to normalized
-    string equality without the embedder.
-  - **Eviction protects curation**: over `LONGTERM_MAX_FACTS`, the oldest AUTO facts go first; a
-    user-written fact is never pushed out by one the app invented.
-  - **Settings**: `auto_facts_enabled` (default on) with a toggle in ⚙ Settings → MEMORY. Verified
-    that turning it off stops extraction entirely.
-  - **Review surface**: facts land in 📌 Memory → Long-term with an AUTO badge, individually editable
-    and deletable — the precondition this phase was gated on.
+- **Phase 5 — Auto-fact extraction. ✅ DONE.** Durable facts pulled out after a fold or sweep and
+  stored with `origin="auto"`, so the stable atoms survive the summary being rewritten wholesale on
+  every fold. Reluctant by construction, deduped in code, evicted auto-first, tunable and switchable
+  off in ⚙ Settings, and reviewable in the Memory modal — all as decided above.
 
 ## Open decisions
 
@@ -161,17 +128,17 @@ Recorded here because each was an open question and each now has a reason, not j
 - ~~Idle threshold for the sweep trigger~~ — shipped as `SWEEP_IDLE_MS` = 5 min (`app.js`),
   deliberately **not** user-tunable: it's a safety net behind the threshold trigger, not a
   preference, and a wrong value degrades quietly rather than visibly.
-- ~~Token budget split between the long-term block and the session summary~~ — `LONGTERM_BUDGET_CHARS`
-  = 2400 ch, and Phase 4 recall **shares** that budget rather than adding to it. The session summary
-  is bounded separately by `summary_max_tokens` (400). The remaining gap is the *total*, above.
-- ~~How aggressively Phase 5 extracts~~ — at most `AUTO_FACT_MAX_NEW` = 3 per fold, and since
-  `157ae8d` it's user-tunable as `AppSettings.auto_facts_max_new` (1–10) with a slider in
-  ⚙ Settings → MEMORY.
+- ~~Token budget split between the long-term block and the session summary~~ — the long-term block
+  has its own character budget, Phase 4 recall **shares** it, and the session summary is bounded
+  separately by `summary_max_tokens`. The remaining gap is the *total*, above.
+- ~~How aggressively Phase 5 extracts~~ — capped per fold, and since `157ae8d` user-tunable as
+  `AppSettings.auto_facts_max_new` with a slider in ⚙ Settings → MEMORY. The right value is a
+  judgement call: low over-selects, high risks storing marginal facts that then persist forever.
 
 ## Integration points (reuse, don't rebuild)
 
 - `MemoryState` already has `pinned` + `summary` + `last_summarized_index` — extend, don't replace.
-  Phase 3 adds a *sibling* model for cross-session state; it does not fold into `MemoryState`.
+  Phase 3 added a *sibling* model for cross-session state; it does not fold into `MemoryState`.
 - `build_messages` already injects pinned/summary into the system block — add parts, keep the order.
 - `memory.summarize()` is the place to also update long-term memory / embeddings / extract facts.
 - `_load_relationship`/`_save_relationship` + `GET/PUT /api/relationship` are the template for the
@@ -183,16 +150,16 @@ Recorded here because each was an open question and each now has a reason, not j
 
 From Lumina's MemPalace design, after reading the source:
 
-- **Lexical "AAAK" compression** (abbreviation map + filler-word stripping before storage). Measured on
-  ordinary sentences: **29% size reduction**, against a claimed "~30x". It is also lossy in ways that
-  change meaning — the abbreviation pass isn't word-bounded (`Sanders` → `S+ers`, `command` → `comm+`)
-  and the filler strip removes `is/are/was/the/a/an/that`, which strands negation: *"she was not
-  comfortable"* → *"she not comfortable"*. For this app that is disqualifying: the relationship system's
-  whole thesis is that boundary phrasing is load-bearing and small models comply with anything vague.
-  An LLM writing clean prose (`memory.summarize`) compresses harder *and* preserves meaning.
-- **A deep storage taxonomy** (Wings → Rooms → Closets → Drawers, plus parallel "Halls", with the model
-  choosing placement per write). Bought nothing there, because retrieval is substring `LIKE`. Structure
-  should follow retrieval, not precede it — hence Phase 4 defining how recall works before any
-  hierarchy gets added.
+- **Lexical "AAAK" compression** (abbreviation map + filler-word stripping before storage). Measured
+  on ordinary sentences: **29% size reduction**, against a claimed "~30x". It is also lossy in ways
+  that change meaning — the abbreviation pass isn't word-bounded (`Sanders` → `S+ers`, `command` →
+  `comm+`) and the filler strip removes `is/are/was/the/a/an/that`, which strands negation: *"she was
+  not comfortable"* → *"she not comfortable"*. For this app that is disqualifying: the relationship
+  system's whole thesis is that boundary phrasing is load-bearing and small models comply with
+  anything vague. An LLM writing clean prose compresses harder *and* preserves meaning.
+- **A deep storage taxonomy** (Wings → Rooms → Closets → Drawers, plus parallel "Halls", with the
+  model choosing placement per write). Bought nothing there, because retrieval is substring `LIKE`.
+  Structure should follow retrieval, not precede it — hence Phase 4 defining how recall works before
+  any hierarchy gets added.
 - **A second parallel store** (Lumina keeps a flat table *and* the palace, with write-through and a
   fallback search path). One store.

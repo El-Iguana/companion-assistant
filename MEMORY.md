@@ -69,7 +69,10 @@ contradict the state the preset just seeded.
 running on the onnxruntime already present for rembg/Kokoro/whisper — **zero VRAM**, so the 4070
 stays entirely for KoboldCPP and ComfyUI. CLS pooling (not mean — BGE pools CLS), L2-normalized so a
 dot product *is* cosine, and BGE's query prefix applied to queries only. int8 was picked over fp32
-(127 MB) by measurement: both scored 5/5 top-1 on the same probe, cosines within 0.02.
+(127 MB) by measurement: both scored 5/5 top-1 on the same probe, cosines within 0.02. 143 ms cold
+load, ~2 ms per warm query — cheap enough to run on every turn, and the search is offloaded with
+`asyncio.to_thread` because onnxruntime is sync and would otherwise block the event loop, stalling
+every other session's stream for the duration.
 
 The index is written inside `fold_into_longterm()` so the two triggers cannot drift apart on what got
 indexed; facts are re-indexed wholesale on `PUT /api/memories` (replace-by-kind, since facts are
@@ -138,8 +141,9 @@ tab is hidden for character-less and scenario sessions.
 
 - Long-term `facts` never expire; they stay until the user removes them. Whether they should decay is
   still open.
-- **The prompt as a whole is not budgeted.** The memory blocks are individually capped, but on total
-  overflow KoboldCPP truncates from the front and silently deletes them — measured and written up in
+- **The prompt as a whole is not budgeted.** Everything here has to fit the 8192-token context
+  alongside the card, persona and relationship blocks. The memory blocks are individually capped, but
+  on total overflow KoboldCPP truncates from the front and silently deletes them — measured and written up in
   `PROMPT_BUDGET.md`, where the fix is proposed but not built.
 - With the fold prompt tightened, a 7-topic conversation still fits inside the 10-bullet summary, so
   recall added nothing at that size. Its value is in pairings that accumulate well past the bullet cap
