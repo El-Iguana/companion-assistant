@@ -186,6 +186,9 @@
           <div class="ce-grid">
             <label>Voice<select id="ce-voice" class="field"></select></label>
             <label>&nbsp;<button id="ce-voice-test" type="button" class="btn-mini">▶ Test voice</button></label>
+            <label>Speaking pace: <output id="ce-speed-val"></output>
+              <input id="ce-speed" type="range" min="0.5" max="1.5" step="0.05">
+              <span class="muted">1.00 = the voice's own tempo · lower is slower. Test voice uses this.</span></label>
           </div>
           <label class="ce-full">First message (greeting)<textarea id="ce-first_mes" class="field" rows="3"></textarea></label>
           <label class="ce-full">Alternate greetings (one per line)

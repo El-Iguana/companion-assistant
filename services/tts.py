@@ -87,9 +87,16 @@ def _piper_wav(text: str, name: str, speed: float) -> bytes:
     return buf.getvalue()
 
 
+# Bounds for the speaking pace, matching CharacterCard.tts_speed. Clamped here as well
+# because /api/tts takes a raw dict, not a validated model — a 0 or a negative divides
+# through in _piper_wav and is meaningless to Kokoro.
+SPEED_MIN, SPEED_MAX = 0.5, 1.5
+
+
 def synth_wav(text: str, voice: str = "af_sarah", speed: float = 1.0) -> bytes:
     """Synthesize `text` to WAV bytes, routed by voice id (`piper:<name>` -> Piper)."""
     clean = _clean(text)
+    speed = min(max(speed, SPEED_MIN), SPEED_MAX)
     if voice.startswith(PIPER_PREFIX):
         return _piper_wav(clean, voice[len(PIPER_PREFIX):], speed)
     import soundfile as sf

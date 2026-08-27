@@ -102,7 +102,9 @@ Login-gated, role-based, per-user isolated libraries.
   `mes_example`, `alternate_greetings`, `system_prompt`, `post_history_instructions`,
   `character_book`, `tags`, `nickname`, …). Local: `image` (base64 portrait), `appearance` (sprite
   prompt), `expressions` (emotion→base64), **`power_dynamic`** (−100…100), **`social_acceptance`** (0…100),
-  **`tts_voice`** (per-character voice — Kokoro id or `piper:<name>`), **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
+  **`tts_voice`** (per-character voice — Kokoro id or `piper:<name>`), **`tts_speed`** (0.5–1.5 speaking
+  pace, 1.0 = the voice's own tempo; Kokoro multiplier / inverse Piper `length_scale`),
+  **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
   system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
   invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);

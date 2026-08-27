@@ -704,6 +704,8 @@ async function openCardEditor(card) {
   $("#ce-social").value = ceBase.social_acceptance ?? 50;
   $("#ce-power-val").textContent = powerLabel($("#ce-power").value);
   $("#ce-social-val").textContent = $("#ce-social").value;
+  $("#ce-speed").value = ceBase.tts_speed ?? 1;
+  $("#ce-speed-val").textContent = Number($("#ce-speed").value).toFixed(2);
   await loadVoices();
   fillVoiceSelect($("#ce-voice"), ceBase.tts_voice);
   // Deep-copy so edits don't mutate ceBase until saved.
@@ -739,6 +741,7 @@ function buildCardPayload() {
     power_dynamic: Number($("#ce-power").value),
     social_acceptance: Number($("#ce-social").value),
     tts_voice: $("#ce-voice").value,
+    tts_speed: Number($("#ce-speed").value),
     image: ceImage !== undefined ? ceImage : (ceBase.image || null),
     character_book: ceEntries.length
       ? { ...(ceBase.character_book || {}),
@@ -831,7 +834,9 @@ $("#ce-save").addEventListener("click", saveCard);
 $("#ce-delete").addEventListener("click", deleteCard);
 $("#ce-duplicate").addEventListener("click", duplicateCard);
 $("#card-editor").addEventListener("click", (e) => { if (e.target.id === "card-editor") closeCardEditor(); });
-$("#ce-voice-test").addEventListener("click", () => playSample($("#ce-voice").value));
+$("#ce-speed").addEventListener("input", (e) => { $("#ce-speed-val").textContent = Number(e.target.value).toFixed(2); });
+// Test with the pace being edited, not the saved one — the point is to hear the change.
+$("#ce-voice-test").addEventListener("click", () => playSample($("#ce-voice").value, Number($("#ce-speed").value)));
 $("#ce-power").addEventListener("input", (e) => { $("#ce-power-val").textContent = powerLabel(e.target.value); });
 $("#ce-social").addEventListener("input", (e) => { $("#ce-social-val").textContent = e.target.value; });
 $("#ce-image").addEventListener("change", (e) => {
@@ -954,6 +959,9 @@ function fillVoiceSelect(sel, current) {
 }
 
 function currentVoice() { return (currentCard() && currentCard().tts_voice) || "af_sarah"; }
+// Per-character speaking pace. Kokoro takes it as a speed multiplier, Piper inverts it onto
+// length_scale (services/tts.py) — either way 1.0 is the voice's own tempo.
+function currentSpeed() { const c = currentCard(); return (c && c.tts_speed) || 1; }
 
 function ensureAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -970,10 +978,11 @@ function stopSpeaking() {
   const img = $("#portrait"); if (img) img.style.transform = "";
 }
 
-async function fetchTTS(sentence, voice) {
+async function fetchTTS(sentence, voice, speed) {
   try {
     const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: sentence, voice: voice || currentVoice() }) });
+      body: JSON.stringify({ text: sentence, voice: voice || currentVoice(),
+                             speed: speed || currentSpeed() }) });
     return r.ok ? await r.arrayBuffer() : null;
   } catch { return null; }
 }
@@ -1089,11 +1098,11 @@ $("#tts-btn").addEventListener("click", async () => {
   $("#voice-test").hidden = !ttsEnabled;
   if (ttsEnabled) { ensureAudioCtx(); await loadVoices(); } else stopSpeaking();
 });
-async function playSample(voice) {
+async function playSample(voice, speed) {
   const ctx = ensureAudioCtx();
   stopSpeaking();                       // cut anything playing; new run id
   const run = ttsRun;
-  const buf = await fetchTTS("Hi there. This is how I sound to you.", voice);
+  const buf = await fetchTTS("Hi there. This is how I sound to you.", voice, speed);
   if (buf && run === ttsRun) await playBuffer(ctx, buf, () => run === ttsRun);
 }
 $("#voice-test").addEventListener("click", () => playSample(currentVoice()));
