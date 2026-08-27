@@ -107,6 +107,8 @@ Login-gated, role-based, per-user isolated libraries.
   **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
   system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
   invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
+  **`DEFAULT_ASSISTANT` composes for the ear** — spoken prose, no markdown/tables/lists, numbers as
+  words — because assistant replies are spoken. A custom `system_prompt` drops that too; say it there.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);
   role+background injected as "About {{user}}". Sidebar has a personas list + editor; one active (default) at a time.
 - **ChatMessage** — `role`, `content`, `expression`, `swipes[]`, `swipe_index`, `swipe_expressions[]`.
@@ -254,7 +256,9 @@ per-relationship **context override** (⚙).
   skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
   **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no
   scene, so quotes there mark a term or a citation, and feeding only the quoted spans spoke the
-  citations and dropped the answer.
+  citations and dropped the answer. `cleanForTTS` then unwraps any markdown that got through —
+  table rows become their cells, heading/list markers go while their text stays, fenced code is
+  dropped, `~150` becomes "about 150" — since the prompt rule above is steering, not a gate.
   **Loudness:** Piper runs with `normalize_audio=False` + a fixed `PIPER_GAIN` (3.5) instead of its default
   per-chunk normalisation — normalising would pin every *sentence* to full scale, which pumps the level in
   the frontend's chunked streaming queue and skews the amplitude lip-sync. 3.5 was measured to match

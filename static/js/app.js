@@ -1017,8 +1017,27 @@ function playBuffer(ctx, arrayBuf, valid) {
   });
 }
 
+// Prose the synthesizer can actually say. DEFAULT_ASSISTANT tells assistant characters not
+// to emit markdown at all, but that is steering, not a gate — the 9B fine-tune answered a
+// question about Dunbar's number with a table, which reads aloud as a hedge of pipes and
+// dashes. So the layout is unwrapped here as well: table rows become their cells, list and
+// heading markers are dropped while their text survives, and fenced code — which has no
+// sensible spoken form — goes entirely.
 function cleanForTTS(t) {
-  return t.replace(/\*[^*]*\*/g, " ").replace(/["_]/g, "").replace(/\s+/g, " ").trim();
+  return t
+    .replace(/```[\s\S]*?```/g, " ")            // fenced code: nothing to say
+    .replace(/^[ \t]*\|[\s|:-]*\|[ \t]*$/gm, " ")  // table rule row (|---|:--|)
+    .replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_, row) => {   // table row -> "cell, cell, cell."
+      const line = row.split("|").map(c => c.trim()).filter(Boolean).join(", ");
+      return /[.!?]$/.test(line) ? line : line + ".";     // cells often end in one already
+    })
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")   // heading marker, keep the heading
+    .replace(/^[ \t]*[-*+][ \t]+/gm, "")        // bullet marker, keep the item
+    .replace(/^[ \t]*\d+[.)][ \t]+/gm, "")      // numbered marker, keep the item
+    .replace(/~(?=\d)/g, "about ")              // "~150" -> "about 150"
+    .replace(/\*[^*]*\*/g, " ")                 // *action* narration
+    .replace(/[`"_]/g, "")
+    .replace(/\s+/g, " ").trim();
 }
 
 function enqueueSpeech(segment) {
