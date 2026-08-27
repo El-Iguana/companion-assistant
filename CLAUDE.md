@@ -1,6 +1,7 @@
-# La Cantina — Project Context
+# Pantheon — Project Context
 
-The product name is **La Cantina**; the project directory, image, container, and `stack` command all
+The product name is **Pantheon** (formerly *La Cantina* — renamed 2026-08-27; the old name may still
+appear in older commits and notes). The project directory, image, container, and `stack` command all
 remain `companion` (renaming them was deliberately deferred).
 
 A self-hosted **character-card AI companion**. FastAPI + uvicorn, runs as a Podman container,

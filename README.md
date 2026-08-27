@@ -1,4 +1,4 @@
-# La Cantina
+# Pantheon
 
 A self-hosted, fully-local **character-card AI companion**. FastAPI backend + a no-build vanilla-JS
 single-page frontend. All inference runs on your own machine — no cloud, no external services, no

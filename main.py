@@ -1,4 +1,4 @@
-"""La Cantina — FastAPI app.
+"""Pantheon — FastAPI app.
 
 A character-card AI companion. Talks to KoboldCPP (text) and optionally ComfyUI
 (portraits/expressions) on the shared `ai-net` Podman network.
@@ -52,7 +52,7 @@ COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://comfyui:8188")
 kobold = KoboldClient(KOBOLD_URL)
 comfy = ComfyUIClient(COMFYUI_URL)
 
-app = FastAPI(title="La Cantina")
+app = FastAPI(title="Pantheon")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 

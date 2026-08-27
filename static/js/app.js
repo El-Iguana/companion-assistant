@@ -1,4 +1,4 @@
-// La Cantina — vanilla JS frontend. No framework, no build step.
+// Pantheon — vanilla JS frontend. No framework, no build step.
 const $ = (s) => document.querySelector(s);
 const api = (p, o) => fetch("/api" + p, o).then(r => {
   if (r.status === 401) { showLogin(); return Promise.reject({ detail: "not authenticated" }); }

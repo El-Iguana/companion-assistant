@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.title="La Cantina"
+LABEL org.opencontainers.image.title="Pantheon"
 LABEL org.opencontainers.image.description="Character-card AI companion (FastAPI + KoboldCPP)"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
