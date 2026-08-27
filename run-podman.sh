@@ -58,6 +58,15 @@ if [[ -n "${COMPANION_ADMIN_PASSWORD:-}" ]]; then
   echo "==> Seeding the admin password from COMPANION_ADMIN_PASSWORD (first run only)"
 fi
 
+# Timezone. The container clock is NOT wrong — it shares the host kernel, so the instant
+# is identical. But the image ships no TZ and /etc/localtime -> Etc/UTC, so everything the
+# app renders as local time came out in UTC: `created_at` on cards/sessions/memories, log
+# lines, and what an assistant character answers when asked the time (5pm EDT -> "9pm").
+# Derived from the host rather than hardcoded, so it follows the machine; override by
+# exporting TZ. tzdata is present in the image, so the zone name resolves.
+TZ_VAL="${TZ:-$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo UTC)}"
+echo "==> Timezone: $TZ_VAL"
+
 # Piper TTS voices (shared, read-only) — skipped if the dir isn't there.
 PIPER_SRC="$(dirname "$SCRIPT_DIR")/jarvis"
 PIPER_ARG=()
@@ -74,6 +83,7 @@ podman run -d \
   -p "${PORT}:7861" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
+  -e "TZ=${TZ_VAL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \
   "${PIPER_ARG[@]}" \

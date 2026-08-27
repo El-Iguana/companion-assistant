@@ -18,6 +18,10 @@ services:
     environment:
       - KOBOLD_URL=http://koboldcpp:5001
       - COMFYUI_URL=http://comfyui:8188
+      # Without this the image is Etc/UTC and every local time the app renders is wrong
+      # (see run-podman.sh, which derives it from the host). Compose can't shell out —
+      # export TZ, or edit the default.
+      - TZ=${TZ:-America/New_York}
     volumes:
       - ./data:/app/data:z
       - ../jarvis:/app/models/piper:ro,z   # Piper TTS voices (shared, read-only)

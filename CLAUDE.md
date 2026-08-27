@@ -48,7 +48,7 @@ services/
   kobold.py             # KoboldCPP client. chat_generate_stream() = OpenAI SSE + auto-continue (2 rounds)
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
-  prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note
+  prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note + date/time
   memory.py             # per-session summary + cross-session long-term memory + recall + auto-facts
   embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
@@ -64,8 +64,10 @@ models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 models/embed/           # baked: bge-small-en-v1.5 int8 ONNX + tokenizer — semantic recall
-RELATIONSHIP_PLAN.md    # relationship system design + phases
-MEMORY_PLAN.md          # memory enhancement plan (pinned-facts UI, embeddings/RAG, tunable summarizer) — TODO
+RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 done)
+MEMORY_PLAN.md          # memory design + decision log (phases 1-5 done)
+PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (NOT built)
+SKILLS_PLAN.md          # assistant skills via tool calling: System Info + DJ/NAS music (Phase 0 done)
 ```
 
 ## Auth / multi-user (privacy)
@@ -160,7 +162,8 @@ POST /api/chat                             SSE stream; done carries {expression,
 ## How it works
 
 - **Chat:** `build_messages()` assembles system (default/card system prompt + persona + **relationship
-  descriptor** + lorebook + memory) → history → `post_history_instructions`; streams via
+  descriptor** + lorebook + memory) → history → `post_history_instructions` → date/time (assistant
+  mode only) → **boundary note** (always last); streams via
   `kobold.chat_generate_stream()`. System prompt enforces a **single concrete beat**, no repetition, no
   writing for {{user}}; a stop-sequence on the user's turn is added. After the reply: classify emotion,
   update mood + relationship (skipped on re-rolls), save.
@@ -251,6 +254,19 @@ per-relationship **context override** (⚙).
   the **last user turn** (this Qwen3 fine-tune ignores it in the system prompt). The model then emits an
   empty `<think></think>` which `kobold._strip_think` removes — so the full token budget goes to the reply.
   Mutates only the transient generation copy, not stored history.
+- **Container TZ + the model knowing the time are two separate things.** The container clock is
+  correct (it shares the host kernel); only the *zone* was wrong, so `run-podman.sh` derives `TZ`
+  from the host (`compose.yaml` defaults it — compose can't shell out). That alone does NOT make her
+  know the time: nothing put the date in the prompt, so asked the time she invented one. Fixed by a
+  trailing `Current date and time: …` system message in `build_messages`, **assistant-mode only**
+  (roleplay cards must not announce the real date) and placed **after the history** — it changes
+  every minute, and in the system block that would invalidate KoboldCPP's cached prefix and
+  re-process the whole history every turn. It sits just before `boundary_note`, which stays last.
+- **Prompt overflow is silent and truncates from the FRONT** (measured — `PROMPT_BUDGET.md`). Context
+  is KoboldCPP's default 8192 (`start.sh` sets no `--contextsize`; the app never reads it). Nothing
+  budgets the total prompt, and history is bounded by turn *count*, not tokens — so on overflow the
+  system block goes first: persona, relationship descriptor, and memory vanish with no error. The
+  `boundary_note` trailing placement makes it the most overflow-resistant part; don't move it.
 - CSS: `[hidden] { display:none !important }` at top of style.css so the HTML `hidden` attr wins over
   element display rules; toggle via `.hidden`.
 - Starlette: `TemplateResponse(request, "index.html")` (request first).
@@ -306,6 +322,16 @@ per-relationship **context override** (⚙).
   ONNX/CPU) + **Silero-VAD** for accuracy; wake-word-gated barge-in.
   Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 VRM
   (`@pixiv/three-vrm`). Local-first voice throughout.
+- **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
+  `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
+  the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).
+  **Verified live:** KoboldCPP + this Qwen3.5 fine-tune support OpenAI `tools` **including over
+  streaming SSE**, with correct arguments, no spurious calls, and no loss of character voice — so
+  skills use real tool calling, not `[tag]` scraping. Then ◻ System Info (`get_system_status`:
+  uptime/disk/**GPU VRAM**/services) and ◻ **DJ** (NAS music). NAS identified: UGREEN NASync DH2300
+  @ `192.168.1.219` (UGOS Pro `:9999`, SMB 445) — **no music API is listening yet**; plan starts by
+  standing up Navidrome (Subsonic API) there. Hard part is audio coexistence: music breaks the
+  half-duplex mic gate in both directions.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - Group chats · persona editor modal · embedding memory · TTS · faster inference backend.
 - Tuning knobs: `relationship.RATE/WRATE/ESC_RATE/_TIER_THRESHOLDS`, `expressions` img2img denoise, `GenerationConfig`.

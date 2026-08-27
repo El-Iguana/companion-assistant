@@ -150,11 +150,23 @@ Recorded here because each was an open question and each now has a reason, not j
 
 ## Open decisions
 
-- Idle threshold for the sweep trigger (minutes) and whether it's user-tunable in ⚙ Settings.
-- Token budget split between the long-term block and the session summary at 8192 context.
 - Whether long-term `facts` should ever expire/decay, or stay until the user removes them.
   (Lumina has no decay and its store grows unbounded — a caution, not a model to copy.)
-- How aggressively Phase 5 extracts vs. keeping memory user-curated.
+- **Total prompt budget** — the long-term block is capped, but the prompt as a whole is not, and on
+  overflow KoboldCPP truncates from the front, silently deleting the memory blocks. Measured and
+  written up in `PROMPT_BUDGET.md`; the fix is proposed, not built.
+
+### Closed since (recorded here so they don't re-open)
+
+- ~~Idle threshold for the sweep trigger~~ — shipped as `SWEEP_IDLE_MS` = 5 min (`app.js`),
+  deliberately **not** user-tunable: it's a safety net behind the threshold trigger, not a
+  preference, and a wrong value degrades quietly rather than visibly.
+- ~~Token budget split between the long-term block and the session summary~~ — `LONGTERM_BUDGET_CHARS`
+  = 2400 ch, and Phase 4 recall **shares** that budget rather than adding to it. The session summary
+  is bounded separately by `summary_max_tokens` (400). The remaining gap is the *total*, above.
+- ~~How aggressively Phase 5 extracts~~ — at most `AUTO_FACT_MAX_NEW` = 3 per fold, and since
+  `157ae8d` it's user-tunable as `AppSettings.auto_facts_max_new` (1–10) with a slider in
+  ⚙ Settings → MEMORY.
 
 ## Integration points (reuse, don't rebuild)
 

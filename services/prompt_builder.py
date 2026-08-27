@@ -10,6 +10,7 @@ KoboldClient.chat_generate_stream(). Handles:
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import List, Dict
 
 from models.schema import CharacterCard, Persona, ChatSession, CharacterBook
@@ -174,6 +175,23 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # --- post-history instructions (jailbreak / UJB) go after the history ---
     if card.post_history_instructions:
         messages.append({"role": "system", "content": sub(card.post_history_instructions)})
+
+    # --- current date/time, for assistant-mode characters only ---
+    # Nothing else in the prompt carries the date, so asked the time the model simply
+    # invented one ("Monday, October 24 ... 9:15 AM"). Gated on assistant mode: a roleplay
+    # character announcing the real-world date breaks the scene.
+    # Placed AFTER the history, not in the system block, for two reasons: this string
+    # changes every minute, and KoboldCPP only reuses its cached prefix up to the first
+    # changed token — in the system block that would re-process the entire history every
+    # turn. Trailing also puts it where small models weight it most, the same finding that
+    # drove boundary_note's placement.
+    if getattr(card, "chat_mode", "roleplay") == "assistant":
+        now = datetime.now().astimezone()
+        hour = now.strftime("%I").lstrip("0") or "12"
+        messages.append({"role": "system", "content": (
+            f"Current date and time: {now.strftime('%A, %B')} {now.day}, {now.year}, "
+            f"{hour}:{now.strftime('%M %p')} {now.strftime('%Z')}. "
+            f"This is authoritative — use it when asked about the date or time, never guess.")})
 
     # --- physical boundary goes LAST, after any UJB ---
     # The full relationship descriptor is in the system message, but by mid-conversation
