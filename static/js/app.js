@@ -1039,8 +1039,14 @@ async function consumeSpeech() {
 
 // Feed the growing reply; enqueue only the QUOTED dialogue (skip narration + *actions*).
 // Fallback: if a whole reply has no quotes at all, speak it all (actions stripped).
+//
+// Assistant-mode cards are the exception: they have no scene, so the whole reply IS her
+// speaking and quotes mark a term, a title, or something being cited — not dialogue.
+// Feeding only the quoted spans there speaks the citations and drops the answer.
 function feedSpeech(fullText, final) {
   if (!ttsEnabled) return;
+  if (((currentCard() || {}).chat_mode || "roleplay") === "assistant")
+    return feedSpeechWhole(fullText, final);
   const norm = fullText.replace(/[“”]/g, '"');   // normalize smart double-quotes
   while (true) {
     const open = norm.indexOf('"', speechFedLen);
@@ -1053,6 +1059,26 @@ function feedSpeech(fullText, final) {
   }
   if (final) {
     if (!anyQuote) enqueueSpeech(cleanForTTS(fullText));    // no dialogue quotes -> speak the whole reply
+    speechFedLen = fullText.length;
+  }
+}
+
+// Assistant mode: speak everything, flushed a sentence at a time so playback starts
+// while the reply is still streaming instead of waiting for the whole thing. The
+// terminator must be followed by real whitespace, not end-of-buffer — mid-stream the
+// text ends wherever the last token landed, and "$" there would cut "3." out of "3.14"
+// and speak it as its own sentence.
+function feedSpeechWhole(fullText, final) {
+  const SENT = /[.!?…]["')\]]*\s/g;
+  SENT.lastIndex = speechFedLen;
+  let end = -1, m;
+  while ((m = SENT.exec(fullText))) end = m.index + m[0].length;
+  if (end > speechFedLen) {
+    enqueueSpeech(fullText.slice(speechFedLen, end));
+    speechFedLen = end;
+  }
+  if (final) {
+    if (speechFedLen < fullText.length) enqueueSpeech(fullText.slice(speechFedLen));
     speechFedLen = fullText.length;
   }
 }

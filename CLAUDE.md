@@ -248,6 +248,11 @@ per-relationship **context override** (⚙).
   `<name>.onnx` + `<name>.onnx.json` pair in there needs only a container restart, no rebuild. Piper honours
   each voice's own `inference` block; `speed` scales its `length_scale` inversely. Note Piper voices carry
   their own sample rate (jarvis = 22.05 kHz vs Kokoro's 24 kHz).
+- **What gets spoken** (`feedSpeech` in `app.js`): roleplay cards speak only the **quoted dialogue**,
+  skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
+  **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no
+  scene, so quotes there mark a term or a citation, and feeding only the quoted spans spoke the
+  citations and dropped the answer.
   **Loudness:** Piper runs with `normalize_audio=False` + a fixed `PIPER_GAIN` (3.5) instead of its default
   per-chunk normalisation — normalising would pin every *sentence* to full scale, which pumps the level in
   the frontend's chunked streaming queue and skews the amplitude lip-sync. 3.5 was measured to match
