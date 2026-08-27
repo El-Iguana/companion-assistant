@@ -64,6 +64,7 @@ models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 models/embed/           # baked: bge-small-en-v1.5 int8 ONNX + tokenizer — semantic recall
+RELATIONSHIP.md         # relationship system reference — axes, ladder, boundary injection
 RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 done)
 MEMORY.md               # memory system reference — the four scopes, recall gate, auto-facts
 MEMORY_PLAN.md          # memory design + decision log (phases 1-5 done)
