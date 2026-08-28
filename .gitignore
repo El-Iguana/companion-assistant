@@ -22,3 +22,6 @@ models/rembg/
 *.wav
 .env
 *.log
+.aider*
+.idea
+.obsidian
