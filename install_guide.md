@@ -1,6 +1,6 @@
 # Pantheon Installation Guide
 
-This guide walks you through installing and running **Pantheon**, a self-hosted, fully-local character-card AI companion, on your own workstation. All inference runs on your machine — no cloud services, no external accounts, and no database. State is stored as plain JSON files under a local `data/` directory.
+This guide walks you through installing and running **Pantheon**, a self-hosted, fully-local character-card AI companion, on your own Linux workstation. All inference runs on your machine — no cloud services, no external accounts, and no database. State is stored as plain JSON files under a local `data/` directory.
 
 ## What Pantheon needs
 
@@ -17,7 +17,8 @@ Without KoboldCPP, Pantheon cannot chat. Without ComfyUI, everything except expr
 
 ### Software
 
-- **Podman** installed and working on your workstation.
+- **Podman** installed and working on your Linux workstation.
+- **Git** and standard build tools.
 - **KoboldCPP** installed and reachable over the network.
 - **ComfyUI** installed and reachable, if you want expression sprites.
 - A web browser for the frontend.
@@ -71,6 +72,264 @@ stack up
 ```
 
 Otherwise start your backends however you normally start them, on the ports above.
+
+## Backend setup: KoboldCPP
+
+KoboldCPP is the LLM inference backend Pantheon uses for character replies. It must be running before Pantheon starts, or on the same `ai-net` Podman network if containerized.
+
+### Installing KoboldCPP
+
+1. Install system dependencies. On Fedora/RHEL:
+
+   ```bash
+   sudo dnf install git cmake ninja-build gcc g++ python3 python3-pip
+   ```
+
+   On Debian/Ubuntu:
+
+   ```bash
+   sudo apt update
+   sudo apt install git cmake ninja-build build-essential python3 python3-pip
+   ```
+
+2. Clone KoboldCPP:
+
+   ```bash
+   git clone https://github.com/LostRuins/koboldcpp.git
+   cd koboldcpp
+   ```
+
+3. Build the project. This compiles the Llama/ggml inference engine:
+
+   ```bash
+   make
+   ```
+
+   For CUDA acceleration, ensure you have the NVIDIA toolkit installed and use:
+
+   ```bash
+   make LLAMA_CUDA=1
+   ```
+
+   For Vulkan/ROCm builds, refer to KoboldCPP's repository README for the exact flags.
+
+4. (Optional) Create a Python virtual environment for KoboldCPP and install its dependencies:
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+### Obtaining models
+
+KoboldCPP runs GGUF models. Download one or more compatible GGUF files, for example from:
+
+- Hugging Face: `https://huggingface.co/models?sort=trending&search=gguf`
+- TheBloke / lmstudio-community / bartowski quantized models
+
+Recommended formats for consumer GPUs:
+
+- `Q4_K_M` — best balance of quality and VRAM use
+- `Q5_K_M` — slightly better quality, requires more VRAM
+- `Q6_K` or `Q8_0` — if you have ample VRAM
+
+Place models in a directory you will pass to KoboldCPP, for example:
+
+```bash
+mkdir -p ~/models
+mv your-model-Q4_K_M.gguf ~/models/
+```
+
+### Running KoboldCPP
+
+Start KoboldCPP from the project directory:
+
+```bash
+./koboldcpp.py --model ~/models/your-model-Q4_K_M.gguf \
+  --port 5001 \
+  --contextsize 4096 \
+  --usemlock \
+  --highpriority \
+  --flashattention \
+  --gpulayers 35
+```
+
+Key flags:
+
+- `--model` — path to the GGUF file.
+- `--port` — the API port. Use `5001` to match Pantheon defaults.
+- `--contextsize` — max context length in tokens.
+- `--gpulayers` — number of layers to offload to GPU; increase until you run out of VRAM, then lower.
+- `--usemlock` — keeps weights in RAM, useful for CPU inference.
+- `--highpriority` — raises process priority.
+- `--flashattention` — faster attention on supported GPUs.
+
+If running inside a container, bind to all interfaces:
+
+```bash
+--host 0.0.0.0
+```
+
+Verify it is serving:
+
+```bash
+curl http://localhost:5001/api/v1/model
+```
+
+You should see a JSON response describing the loaded model.
+
+## Backend setup: ComfyUI
+
+ComfyUI is optional. Pantheon uses it to generate character expression sprites and portraits. If you do not need generated images, you can skip ComfyUI.
+
+### Installing ComfyUI
+
+1. Install Python 3.10+ and a virtual environment tool.
+
+2. Clone ComfyUI:
+
+   ```bash
+   git clone https://github.com/comfyanonymous/ComfyUI.git
+   cd ComfyUI
+   ```
+
+3. Create and activate a virtual environment:
+
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+4. Install PyTorch. For NVIDIA:
+
+   ```bash
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+   ```
+
+   For CPU-only:
+
+   ```bash
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+   ```
+
+5. Install ComfyUI dependencies:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Obtaining checkpoints and support files
+
+Place model files under the corresponding directories inside `ComfyUI/models/`:
+
+- `checkpoints/` — SD 1.5, SDXL, or Flux `.safetensors` checkpoints
+- `vae/` — VAE files if not bundled in the checkpoint
+- `clip/` — CLIP models required by Flux
+- `unet/` — UNet/diffusion models for Flux or other non-standard pipelines
+- `loras/`, `controlnet/`, etc. — optional enhancements
+
+Example:
+
+```bash
+mkdir -p models/checkpoints
+mv my-checkpoint.safetensors models/checkpoints/
+```
+
+For Flux-based workflows, you will typically need:
+
+- A Flux checkpoint or UNET in `models/unet/` or `models/checkpoints/`
+- A matching CLIP model in `models/clip/`
+- A VAE in `models/vae/`
+
+### Running ComfyUI
+
+Start ComfyUI from its directory:
+
+```bash
+python main.py --listen 0.0.0.0 --port 8188
+```
+
+Verify it is serving:
+
+```bash
+curl http://localhost:8188/system_stats
+```
+
+You should see a JSON response.
+
+## Networking Pantheon with the backends
+
+Pantheon discovers KoboldCPP and ComfyUI using `KOBOLD_URL` and `COMFYUI_URL`. The `run-podman.sh` launcher auto-detects based on whether the `ai-net` network exists.
+
+### Option A: Containerized backends on a shared network
+
+Create the Podman network once:
+
+```bash
+podman network create ai-net
+```
+
+Run KoboldCPP on `ai-net`:
+
+```bash
+podman run -d --name koboldcpp --network ai-net \
+  -p 5001:5001 \
+  -v ~/models:/models:ro,z \
+  localhost/koboldcpp:latest \
+  --model /models/your-model-Q4_K_M.gguf --port 5001 --host 0.0.0.0
+```
+
+Run ComfyUI on `ai-net`:
+
+```bash
+podman run -d --name comfyui --network ai-net \
+  -p 8188:8188 \
+  -v ~/ComfyUI/models:/app/models:ro,z \
+  localhost/comfyui:latest \
+  python main.py --listen 0.0.0.0 --port 8188
+```
+
+Then run Pantheon:
+
+```bash
+./run-podman.sh
+```
+
+`run-podman.sh` will detect `ai-net` and use:
+
+```bash
+KOBOLD_URL=http://koboldcpp:5001
+COMFYUI_URL=http://comfyui:8188
+```
+
+### Option B: Host-networked or bare-metal backends
+
+If KoboldCPP and ComfyUI are running directly on the host without `ai-net`, start Pantheon with host defaults:
+
+```bash
+./run-podman.sh
+```
+
+It will fall back to:
+
+```bash
+KOBOLD_URL=http://localhost:5001
+COMFYUI_URL=http://localhost:8188
+```
+
+### Option C: Manual override
+
+When launching Pantheon with `podman run` directly:
+
+```bash
+podman run -d --name companion --network ai-net -p 7861:7861 \
+  -e KOBOLD_URL=http://koboldcpp:5001 \
+  -e COMFYUI_URL=http://comfyui:8188 \
+  -v ./data:/app/data:z \
+  localhost/companion:latest
+```
 
 ### 3. Build and run Pantheon
 
@@ -232,18 +491,50 @@ After logging in:
 3. Type a message and send it.
 4. The header dot should show KoboldCPP as online; if it shows offline, check that KoboldCPP is reachable from the container.
 
+## Backend verification
+
+Before relying on Pantheon, confirm each backend is reachable:
+
+1. KoboldCPP:
+
+   ```bash
+   curl http://localhost:5001/api/v1/model
+   ```
+
+   or, if on `ai-net`, test from inside the Pantheon container:
+
+   ```bash
+   podman exec -it companion curl -s http://koboldcpp:5001/api/v1/model
+   ```
+
+2. ComfyUI:
+
+   ```bash
+   curl http://localhost:8188/system_stats
+   ```
+
+3. Pantheon:
+
+   ```bash
+   curl http://localhost:7861/
+   ```
+
 ## Troubleshooting
 
 ### `KoboldCPP offline` status dot
 
 - Check that KoboldCPP is running and reachable from inside the Pantheon container:
+
   ```bash
   podman exec -it companion curl -s http://localhost:5001/api/v1/model
   ```
+
   or, if on `ai-net`:
+
   ```bash
   podman exec -it companion curl -s http://koboldcpp:5001/api/v1/model
   ```
+
 - Verify `KOBOLD_URL` is set correctly if you overrode it.
 
 ### ComfyUI unreachable when generating sprites
@@ -268,9 +559,24 @@ After logging in:
 
 1. Pull or apply the code changes.
 2. Rebuild the image:
+
    ```bash
    ./run-podman.sh --rebuild
    ```
+
 3. Your `data/` persists automatically.
 
 Do not edit code inside the running container expecting it to take effect — code is baked into the image.
+
+## Quick command reference
+
+| Task | Command |
+|---|---|
+| Build KoboldCPP | `make` or `make LLAMA_CUDA=1` |
+| Run KoboldCPP | `./koboldcpp.py --model MODEL.gguf --port 5001 --gpulayers N` |
+| Install ComfyUI deps | `pip install -r requirements.txt` |
+| Run ComfyUI | `python main.py --listen 0.0.0.0 --port 8188` |
+| Create shared network | `podman network create ai-net` |
+| Run Pantheon | `./run-podman.sh` or `./run-podman.sh --rebuild` |
+| View logs | `podman logs -f companion` |
+| Stop Pantheon | `podman stop companion` |
