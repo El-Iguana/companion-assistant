@@ -131,9 +131,32 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
     return "\n\n".join(p for p in parts if p.strip())
 
 
+# Inline expression beats. Kept short and shown by example — small models copy a
+# demonstrated shape far more reliably than they follow a described one. Static per
+# card, so it lives in the system block where KoboldCPP can keep it in the cached
+# prefix; a per-turn string here would invalidate the cache every turn.
+def expression_note(labels: List[str]) -> str:
+    if not labels:
+        return ""
+    # The example must use a label the card actually has. Demonstrating one that is
+    # not in the valid list invites the model to copy it, and we would drop the beat.
+    ok = sorted(labels)
+    eg = next((l for l in ("embarrassment", "embarrassed", "surprise", "surprised",
+                           "sad", "sadness", "happy", "joy") if l in labels), ok[0])
+    return (
+        "Expression beats: when your feeling visibly changes mid-reply, emit a tag "
+        "[expr:LABEL] at that exact point, then carry on writing normally.\n"
+        f"Valid labels (use these only): {', '.join(ok)}.\n"
+        f'Example: She looked away. [expr:{eg}] "That is not what I meant."\n'
+        "Use at most a few per reply, only on a real change. The tags are stripped "
+        "before the reader sees them, so never mention or explain them."
+    )
+
+
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
-                   boundary_note: str = "", longterm_note: str = "") -> List[Dict]:
+                   boundary_note: str = "", longterm_note: str = "",
+                   expr_labels: List[str] | None = None) -> List[Dict]:
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
 
@@ -162,6 +185,9 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         sys_parts.append("\n".join(sub(b) for b in lb_after))
     if card.mes_example:
         sys_parts.append("Example dialogue:\n" + sub(card.mes_example))
+    expr_hint = expression_note(expr_labels or [])
+    if expr_hint:
+        sys_parts.append(expr_hint)
 
     # memory, widest scope first: pinned facts (this chat, always-on) -> cross-session
     # history for this pairing -> this chat's rolling summary. Session-scoped material

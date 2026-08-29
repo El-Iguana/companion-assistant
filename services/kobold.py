@@ -53,6 +53,92 @@ def _strip_think(buf: str, in_think: bool) -> tuple[str, str, bool]:
     return output, buf, in_think
 
 
+# ---------------------------------------------------------------------------
+# Inline [expr:label] tag parser
+#
+# A sibling of _strip_think, not a reuse of it. Two differences drive the split:
+#   * the body is variable-length, so we scan to a delimiter instead of matching
+#     a second fixed literal;
+#   * the body is *emitted* as an event rather than discarded.
+# What does carry over is the partial-tail trick: a tag can be split across
+# tokens, so we keep any suffix that could still become one.
+#
+# Yields text and events interleaved, in order, so the caller can preserve the
+# tag's position in the stream — the frontend needs it to fire the expression at
+# the right point in the reply rather than at the end of the chunk.
+# ---------------------------------------------------------------------------
+_EXPR_OPEN = "[expr:"
+_EXPR_CLOSE = "]"
+# A real label is one short word. If we pass this without finding a close bracket
+# it was never a tag, so give the text back verbatim instead of eating the reply.
+_EXPR_MAX_LABEL = 32
+
+
+class ExprEvent(str):
+    """An expression beat parsed out of the stream.
+
+    Subclasses str so a caller that only cares about text stays correct, while
+    `isinstance(item, ExprEvent)` distinguishes an event from a token.
+    """
+    __slots__ = ()
+
+
+def _strip_expr(buf: str, in_expr: bool) -> tuple[list, str, bool]:
+    """Process one chunk of accumulated (already think-stripped) text.
+
+    Returns (items, remaining_buffer, updated_in_expr) where items is an ordered
+    mix of plain `str` text runs and `ExprEvent` labels.
+    """
+    items: list = []
+
+    def emit(text: str) -> None:
+        if not text:
+            return
+        if items and type(items[-1]) is str:
+            items[-1] += text          # coalesce adjacent text runs
+        else:
+            items.append(text)
+
+    while buf:
+        if in_expr:
+            end = buf.find(_EXPR_CLOSE)
+            if end != -1:
+                label = buf[:end].strip()
+                buf = buf[end + len(_EXPR_CLOSE):]
+                in_expr = False
+                if label:
+                    items.append(ExprEvent(label))
+            elif len(buf) > _EXPR_MAX_LABEL:
+                emit(_EXPR_OPEN + buf)  # never a tag — restore it as literal text
+                buf = ""
+                in_expr = False
+            else:
+                # Label may still be completed by a later token.
+                return items, buf, in_expr
+        else:
+            start = buf.find(_EXPR_OPEN)
+            if start != -1:
+                emit(buf[:start])
+                buf = buf[start + len(_EXPR_OPEN):]
+                in_expr = True
+            else:
+                # Opening tag may be split across future tokens.
+                for i in range(len(_EXPR_OPEN) - 1, 0, -1):
+                    if buf.endswith(_EXPR_OPEN[:i]):
+                        emit(buf[:-i])
+                        return items, buf[-i:], in_expr
+                emit(buf)
+                return items, "", in_expr
+    return items, buf, in_expr
+
+
+def _flush_expr(buf: str, in_expr: bool) -> list:
+    """End of stream: give back any half-parsed tag as the literal text it was."""
+    if not buf:
+        return []
+    return [(_EXPR_OPEN + buf) if in_expr else buf]
+
+
 class KoboldClient:
     def __init__(self, base_url: str = "http://localhost:5001"):
         self.base_url = base_url.rstrip("/")
@@ -105,6 +191,8 @@ class KoboldClient:
         """
         buf = ""
         in_think = False
+        ebuf = ""            # expr-parser buffer: text that may end mid-tag
+        in_expr = False
         full_text = ""
         current_messages = list(messages)
         # A trailing system message (the relationship boundary reminder) is placed last
@@ -144,7 +232,9 @@ class KoboldClient:
                                 buf += token
                                 out, buf, in_think = _strip_think(buf, in_think)
                                 if out:
-                                    yield out
+                                    items, ebuf, in_expr = _strip_expr(ebuf + out, in_expr)
+                                    for it in items:
+                                        yield it
                             fr = choices[0].get("finish_reason")
                             if fr and fr not in (None, "null", ""):
                                 finish_reason = fr
@@ -166,7 +256,9 @@ class KoboldClient:
                     buf += text
                     out, buf, in_think = _strip_think(buf, in_think)
                     if out:
-                        yield out
+                        items, ebuf, in_expr = _strip_expr(ebuf + out, in_expr)
+                        for it in items:
+                            yield it
                     finish_reason = "stop"
                 except Exception as e:
                     raise RuntimeError(f"Chat generation failed: {e}") from e
@@ -176,7 +268,9 @@ class KoboldClient:
             # Natural stop — flush buffer and we're done
             if finish_reason != "length":
                 if buf and not in_think:
-                    yield buf
+                    items, ebuf, in_expr = _strip_expr(ebuf + buf, in_expr)
+                    for it in items:
+                        yield it
                     buf = ""
                 break
 
@@ -184,7 +278,9 @@ class KoboldClient:
             stripped = full_text.strip()
             if re.search(r'[.!?]["\u201d\u2019]?\s*$', stripped):
                 if buf and not in_think:
-                    yield buf
+                    items, ebuf, in_expr = _strip_expr(ebuf + buf, in_expr)
+                    for it in items:
+                        yield it
                     buf = ""
                 break
 
@@ -199,7 +295,13 @@ class KoboldClient:
         else:
             # Exhausted all continuation rounds — flush whatever we have
             if buf and not in_think:
-                yield buf
+                items, ebuf, in_expr = _strip_expr(ebuf + buf, in_expr)
+                for it in items:
+                    yield it
+
+        # A tag left half-parsed at end of stream was never a tag — emit it as text.
+        for it in _flush_expr(ebuf, in_expr):
+            yield it
 
     async def generate_stream(self, prompt: str, params: dict) -> AsyncGenerator[str, None]:
         payload = {"prompt": prompt, **params}

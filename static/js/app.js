@@ -394,6 +394,7 @@ async function send(text, regenerate) {
         if (!line) continue;
         const evt = JSON.parse(line.slice(5).trim());
         if (evt.token) { acc += evt.token; bubble.innerHTML = md(acc); scrollDown(); feedSpeech(acc, false); }
+        else if (evt.expr) { pendingExpr(evt.expr); }
         else if (evt.error) { bubble.innerHTML = `<em>⚠ ${evt.error}</em>`; }
         else if (evt.done) {
           if (evt.relationship) renderRelationship(evt.relationship);
@@ -415,6 +416,7 @@ async function send(text, regenerate) {
     } catch { /* keep the live bubble if reload fails */ }
     loadSessions();
     feedSpeech(acc, true);            // flush any trailing sentence
+    flushExpr();                      // a beat tagged after the last spoken line
     scheduleSweep();                  // arm the idle fold into long-term memory
   }
 }
@@ -588,6 +590,7 @@ $("#expr-generate").addEventListener("click", async () => {
     });
     $("#expr-status").textContent = `Done — ${res.generated.length} sprites.`;
     card.has_expressions = true;
+    card.expression_labels = res.generated.slice();
     card.appearance = $("#expr-appearance").value;
     card.expr_from_upload = $("#expr-from-upload").checked;
     card.expr_denoise = Number($("#expr-denoise").value);
@@ -631,6 +634,7 @@ async function refreshGallery() {
   const isFull = present.emotions.some(e => !sets.core.includes(e));
   const target = isFull ? sets.full : sets.core;
   card.has_expressions = present.emotions.length > 0;   // keep portrait state in sync
+  card.expression_labels = present.emotions.slice();
   $("#gal-count").textContent =
     `${present.emotions.length} generated · showing ${isFull ? "Full 28" : "Core 8"}`;
   const grid = $("#gal-grid"); grid.innerHTML = "";
@@ -944,6 +948,10 @@ $("#preset-editor").addEventListener("click", (e) => { if (e.target.id === "pres
 let ttsEnabled = false, audioCtx = null, ttsRun = 0, ttsSource = null, mouthRAF = null;
 let ttsLevel = 0, ttsHangoverUntil = 0;   // her live output RMS + a short tail — used to ignore herself
 let speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
+// Inline [expr:x] beat state. Declared here, beside the speech queue it rides on, so it
+// is initialised before stopSpeaking() (below) can touch it.
+let exprPending = null;      // beat waiting for a segment to attach to
+let exprLive = null;         // beat currently shown, so we don't re-fetch the same sprite
 let ttsVoicesList = [];
 
 async function loadVoices() {
@@ -972,6 +980,9 @@ function ensureAudioCtx() {
 function stopSpeaking() {
   ttsRun++;                                   // invalidate any in-flight queue
   speechQueue = []; speechConsuming = false; speechFedLen = 0; anyQuote = false;
+  // Beats belong to the reply that was speaking. Called at the top of every reply too,
+  // so this is also the per-reply reset: a repeated label still re-applies next time.
+  exprPending = null; exprLive = null;
   try { if (ttsSource) ttsSource.stop(); } catch {}
   ttsSource = null; ttsLevel = 0;
   if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
@@ -1036,15 +1047,44 @@ function cleanForTTS(t) {
     .replace(/^[ \t]*\d+[.)][ \t]+/gm, "")      // numbered marker, keep the item
     .replace(/~(?=\d)/g, "about ")              // "~150" -> "about 150"
     .replace(/\*[^*]*\*/g, " ")                 // *action* narration
+    .replace(/\[expr:[^\]]*\]/gi, " ")          // stray [expr:x] beat — never say it aloud
     .replace(/[`"_]/g, "")
     .replace(/\s+/g, " ").trim();
+}
+
+// ---- live expression beats ([expr:x] from the stream) ----------------------
+// The model tags beats mid-reply, but tokens run well ahead of sound: consumeSpeech()
+// queues AND prefetches audio, so applying a beat when its event arrives would change
+// the face seconds before the matching line is heard. Instead a beat waits here, rides
+// the next speech segment, and is applied when that segment actually starts playing.
+function applyExpr(label) {
+  const card = currentCard();
+  if (!card || !card.has_expressions || !label || label === exprLive) return;
+  // /api/cards trims the sprite blobs, so labels come from expression_labels.
+  const have = card.expression_labels || Object.keys(card.expressions || {});
+  if (have.length && !have.includes(label)) return;        // no sprite for it — leave the portrait
+  exprLive = label;
+  const img = $("#portrait");
+  if (img) { img.src = `/api/cards/${card.id}/expression/${label}?t=${Date.now()}`; img.hidden = false; }
+}
+
+function pendingExpr(label) {
+  // Voice off (or nothing will be spoken): no playback clock to sync to, so show it now.
+  if (!ttsEnabled) { applyExpr(label); return; }
+  exprPending = label;
+}
+
+// End of reply: a beat tagged after the last spoken segment never got attached.
+function flushExpr() {
+  if (exprPending) { applyExpr(exprPending); exprPending = null; }
 }
 
 function enqueueSpeech(segment) {
   if (!ttsEnabled) return;
   const clean = cleanForTTS(segment);
   if (!clean) return;
-  speechQueue.push({ text: clean, run: ttsRun });
+  speechQueue.push({ text: clean, run: ttsRun, expr: exprPending });
+  exprPending = null;                      // consumed by this segment
   consumeSpeech();
 }
 
@@ -1059,6 +1099,7 @@ async function consumeSpeech() {
     const buf = (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchTTS(item.text);
     const nxt = speechQueue[0];                 // prefetch next while this one plays
     prefetch = nxt ? { item: nxt, promise: fetchTTS(nxt.text) } : null;
+    if (item.expr && item.run === ttsRun) applyExpr(item.expr);   // in sync with the audio
     if (buf && item.run === ttsRun) await playBuffer(ctx, buf, () => item.run === ttsRun);
   }
   speechConsuming = false;

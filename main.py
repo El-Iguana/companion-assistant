@@ -30,7 +30,7 @@ from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
     AppSettings, CharacterMemory, MemoryFact, User,
 )
-from services.kobold import KoboldClient
+from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
 from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt, auth
 
@@ -476,6 +476,9 @@ async def list_cards(cur: Ctx = Depends(get_ctx)):
     for c in _list(cur.cards, CharacterCard):
         d = c.model_dump(exclude={"expressions"})
         d["has_expressions"] = bool(c.expressions)
+        # Labels only — the sprite blobs stay trimmed. The client needs these to know
+        # which inline [expr:x] beats it actually has a sprite for.
+        d["expression_labels"] = sorted(c.expressions.keys())
         out.append(d)
     return out
 
@@ -1043,7 +1046,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
         boundary_note=relationship.boundary_note(rel, card.name, persona.name),
-        longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p))
+        longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
+        # Only ask for beats we can actually render a sprite for.
+        expr_labels=sorted(card.expressions.keys()) if card.expressions else [])
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
     # ignores it in the system prompt). The model then emits an empty <think></think>
     # (stripped client-side) so the whole token budget goes to the actual reply.
@@ -1057,10 +1062,21 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # Stop if the model starts writing {{user}}'s turn (prevents multi-turn / speaking for the user).
     params["stop"] = list(params.get("stop") or []) + [f"\n{persona.name}:", f"\n{persona.name} —"]
 
+    # Inline [expr:x] beats the model emitted, in order. The last valid one wins for
+    # the stored message; the classifier below is the fallback when there were none.
+    tagged: list[str] = []
+    known = set(expressions.CORE_EMOTIONS) | set(expressions.FULL_EMOTIONS)
+
     async def gen():
         acc = ""
         try:
             async for tok in kobold.chat_generate_stream(messages, params):
+                if isinstance(tok, ExprEvent):
+                    label = str(tok).strip().lower()
+                    if label in known:
+                        tagged.append(label)
+                        yield _sse({"expr": label})
+                    continue          # never reaches the transcript or the TTS text
                 acc += tok
                 yield _sse({"token": tok})
         except Exception as e:
@@ -1075,10 +1091,17 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # Classify emotion for the expression sprite — only if this card has sprites.
         new_expr = ""
         if card.expressions:
-            try:
-                new_expr = await expressions.classify(kobold, reply, labels=list(card.expressions))
-            except Exception:
-                new_expr = "neutral"
+            # Prefer what the model tagged inline — it is free and beat-accurate.
+            # Only fall back to the classifier round-trip when it tagged nothing usable.
+            for label in reversed(tagged):
+                if label in card.expressions:
+                    new_expr = label
+                    break
+            if not new_expr:
+                try:
+                    new_expr = await expressions.classify(kobold, reply, labels=list(card.expressions))
+                except Exception:
+                    new_expr = "neutral"
         msg.expression = new_expr or None
 
         # Update the running valence/mood (inertia): neutral holds; a clear emotion
