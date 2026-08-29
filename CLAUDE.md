@@ -333,7 +333,10 @@ per-relationship **context override** (⚙).
   **`GET/PUT /api/settings`** store (`AppSettings` → `data/settings/app.json`); plus `getUserMedia`
   `echoCancellation`. ◻ **Upgrades:** true wake-word engine (**openWakeWord**,
   ONNX/CPU) + **Silero-VAD** for accuracy; wake-word-gated barge-in.
-  Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 **animated
+  🔨 **Phase 2 code complete** — inline `[expr:x]` beats: streaming parser (`_strip_expr`, sibling of
+  the `<think>` stripper), `{"expr":...}` SSE events, beats fire at TTS *playback* not parse, tag wins
+  over the classifier. Unverified against a live model — confirm the 9B actually emits tags on cue.
+  Next phases: ◻ Phase 3 **animated
   VRM avatar** (`@pixiv/three-vrm`), split 3a renderer / 3b idle life / 3c speech / 3d emotion+gesture ·
   ◻ Phase 5 interruption. Runs alongside **Track B**, the VRM/animation content pipeline. Local-first
   voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.

@@ -155,7 +155,11 @@ and has the longest lead time, so it starts **now**, alongside Phase 2.
 > `WHISPER_*` / `services/stt.py` at the container.
 
 
-**Phase 2 — Expression channel (hybrid)**
+🔨 **Phase 2 — Expression channel (hybrid)** — *code complete, unverified against a live model.*
+> Parser, transport, playback-time firing and prompt all shipped and tested against a mocked
+> stream. What is **not** yet proven is the part only a real model can show: whether the 9B
+> fine-tune actually emits `[expr:x]` on cue, at useful frequency, in the right places. Run a
+> real chat with sprites on and check the beats land — the classifier fallback covers it if not.
 - System-prompt the model to emit inline `[expr:x]` tags.
 - **Parse and strip server-side**, in `services/kobold.py`, and emit expression events on the existing
   SSE envelope as `{"expr": "..."}` alongside `{"token": ...}` (`main.py:984`) — no protocol change needed.
@@ -169,6 +173,11 @@ and has the longest lead time, so it starts **now**, alongside Phase 2.
   strips code fences, tables, headings, bullets, `*actions*` and backticks but has **no bracket rule** —
   a tag that ever reaches it gets synthesized and spoken aloud as "expr happy".
 - Map tags to the existing emotion vocabulary; blend with mood/relationship resting affect; classifier fallback.
+- ✅ Shipped: `_strip_expr`/`_flush_expr` + `ExprEvent` (`services/kobold.py`), `{"expr":...}` SSE and
+  tag-wins-over-classifier (`main.py`), `pendingExpr`/`applyExpr`/`flushExpr` + playback-time firing
+  and the `cleanForTTS` bracket rule (`static/js/app.js`), `expression_note()` (`services/prompt_builder.py`),
+  and `expression_labels` on `/api/cards` — the client could not otherwise tell which beats it has a
+  sprite for. ◻ Remaining: confirm real-model tagging behaviour.
 
 ### Phase 3 — The animated avatar
 
@@ -261,7 +270,7 @@ retarget, per-model blendshapes. There is no img2img equivalent. A "fully animat
 character" is achievable; a fully animated avatar for *every card a user makes* is not, without a
 generative 3D pipeline that does not exist here.
 
-**Proposed resolution — three tiers, chosen per card:**
+**✅ DECIDED (2026-08-29) — three tiers, chosen per card:**
 
 | Tier | Content cost | What the card gets |
 |---|---|---|
@@ -273,8 +282,9 @@ Add an optional `CharacterCard.vrm` (path/asset ref, null = sprite tier). The re
 from that field. Sprite tier is the default and stays exactly as it works today, so nothing regresses
 and the multi-character system keeps its zero-cost scaling.
 
-**Decide this before 3a**, because it determines whether the avatar view is a per-card feature or a
-single-character mode.
+**Decided**: the avatar is a per-card feature. `CharacterCard.vrm` (null = sprite tier) is the
+switch; sprite tier stays the default so nothing regresses. 3a is unblocked on this question and now
+waits only on a loadable `.vrm` from Track B.
 
 ## Component choices (local-first)
 - **TTS**: **Kokoro** shipped (fast, 54 voices) and **Piper** shipped as a second backend (voice ids
@@ -316,7 +326,6 @@ render loop — unlike sprites, it never idles.
 *(Resolved and removed: TTS engine — Kokoro **and** Piper shipped, only XTTS open. STT trigger — PTT
 **and** hands-free VAD both shipped.)*
 
-- **Model tiering — hero / standard / sprite per card?** (see Track B; blocks 3a)
 - **Emotion mapping** — collapse Core-8/Full-28 to the ~5 VRM presets, or author custom blendshapes?
   (cost lands in Track B)
 - **Framing** — bust or full body? Determines whether the gesture track is worth building at all.
