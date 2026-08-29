@@ -333,8 +333,10 @@ per-relationship **context override** (⚙).
   **`GET/PUT /api/settings`** store (`AppSettings` → `data/settings/app.json`); plus `getUserMedia`
   `echoCancellation`. ◻ **Upgrades:** true wake-word engine (**openWakeWord**,
   ONNX/CPU) + **Silero-VAD** for accuracy; wake-word-gated barge-in.
-  Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 VRM
-  (`@pixiv/three-vrm`). Local-first voice throughout.
+  Next phases: ◻ Phase 2 inline `[expr]` tags (hybrid w/ mood/relationship) · ◻ Phase 3 **animated
+  VRM avatar** (`@pixiv/three-vrm`), split 3a renderer / 3b idle life / 3c speech / 3d emotion+gesture ·
+  ◻ Phase 5 interruption. Runs alongside **Track B**, the VRM/animation content pipeline. Local-first
+  voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
 - **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).
