@@ -143,10 +143,13 @@ def expression_note(labels: List[str]) -> str:
     ok = sorted(labels)
     eg = next((l for l in ("embarrassment", "embarrassed", "surprise", "surprised",
                            "sad", "sadness", "happy", "joy") if l in labels), ok[0])
+    # Never spell out a placeholder tag here. An earlier wording said 'emit a tag
+    # [expr:LABEL]' and the model copied it verbatim — it read LABEL as the label.
+    # The shape is taught by example only; the list is the sole source of labels.
     return (
-        "Expression beats: when your feeling visibly changes mid-reply, emit a tag "
-        "[expr:LABEL] at that exact point, then carry on writing normally.\n"
-        f"Valid labels (use these only): {', '.join(ok)}.\n"
+        "Expression beats: when your feeling visibly changes mid-reply, mark it inline "
+        "at that exact point, then carry on writing normally.\n"
+        f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
         f'Example: She looked away. [expr:{eg}] "That is not what I meant."\n'
         "Use at most a few per reply, only on a real change. The tags are stripped "
         "before the reader sees them, so never mention or explain them."
@@ -185,9 +188,6 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         sys_parts.append("\n".join(sub(b) for b in lb_after))
     if card.mes_example:
         sys_parts.append("Example dialogue:\n" + sub(card.mes_example))
-    expr_hint = expression_note(expr_labels or [])
-    if expr_hint:
-        sys_parts.append(expr_hint)
 
     # memory, widest scope first: pinned facts (this chat, always-on) -> cross-session
     # history for this pairing -> this chat's rolling summary. Session-scoped material
@@ -231,6 +231,15 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
             f"Current date and time: {now.strftime('%A, %B')} {now.day}, {now.year}, "
             f"{hour}:{now.strftime('%M %p')} {now.strftime('%Z')}. "
             f"This is authoritative — use it when asked about the date or time, never guess.")})
+
+    # --- expression beats: trailing, for the same recency reason as boundary_note ---
+    # Measured, not assumed. With the instruction in the system block the 9B tagged 1 of
+    # 6 replies (and invented a label); moved here it tagged 3 of 6 with none invalid.
+    # The system block is many turns back by mid-conversation and the trailing boundary
+    # reminder was out-weighting it. Placed before boundary_note so that still goes last.
+    expr_hint = expression_note(expr_labels or [])
+    if expr_hint:
+        messages.append({"role": "system", "content": expr_hint})
 
     # --- physical boundary goes LAST, after any UJB ---
     # The full relationship descriptor is in the system message, but by mid-conversation
