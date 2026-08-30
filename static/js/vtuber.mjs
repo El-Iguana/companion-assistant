@@ -43,6 +43,7 @@ const stats = { frames: 0, lastRender: 0,
   mouth: 0,
   get mouthGain() { return mouthGain; },
   set mouthGain(v) { mouthGain = Math.max(0, Number(v) || 0); },
+  armSign: 0,
   get armDeg() { return armRestDeg; },
   set armDeg(v) {
     armRestDeg = Number(v) || 0;
@@ -166,31 +167,51 @@ function buildPlaceholder() {
 // so nothing brings the arms down unless we do it. This is part of idle life, not
 // polish — breathing on a T-posed mannequin still reads as a mannequin.
 //
-// Signs are MEASURED against the test model, not derived. Deriving them from the
-// VRM axis convention (+Z forward, character's left along +X, so a negative z
-// swings the left arm down) gave the opposite and put the arms in the air. The
-// likely reason is the 180-degree Y rotation rotateVRM0 applies to a VRM 0.x
-// model, which flips the sense of a local-Z rotation.
+// Which way a positive Z rotation swings the arm is NOT reliably derivable. Working
+// it out from the VRM axis convention gave the wrong answer on the first test model
+// and put the arms in the air, most likely because of the 180-degree Y rotation
+// rotateVRM0 applies to VRM 0.x — which would also mean 1.0 models want the opposite
+// sign from 0.x ones.
 //
-// Caveat that follows from that: a VRM 1.0 model, which rotateVRM0 leaves alone,
-// may well want the opposite sign. That is exactly why armDeg is tunable rather
-// than a constant -- flip it and re-check when the first 1.0 model turns up.
-// Positive armDeg = arms down.
+// So ask the model instead of assuming: nudge the arm and see which way the hand
+// actually moved. One probe at load time, and the whole question goes away for any
+// model and either spec version.
+function detectArmSign(vrm) {
+  const b = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
+  const ua = b("leftUpperArm");
+  const tip = b("leftHand") || b("leftLowerArm");
+  if (!ua || !tip) return 1;
+  const y = () => {
+    vrm.scene.updateWorldMatrix(true, true);       // normalized rig is parented here
+    return tip.getWorldPosition(new THREE.Vector3()).y;
+  };
+  const keep = ua.rotation.z;
+  const y0 = y();
+  ua.rotation.z = keep + 0.3;
+  const yUp = y();
+  ua.rotation.z = keep; y();                        // restore before anything renders
+  const sign = yUp < y0 ? 1 : -1;                   // +z lowered the hand => + is down
+  stats.armSign = sign;
+  return sign;
+}
+
+// Positive armDeg = arms down, on any model.
 function applyRestPose(vrm, armDeg) {
   const b = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
-  const a = (armDeg ?? 72) * Math.PI / 180;
+  const sgn = detectArmSign(vrm);
+  const a = ((armDeg ?? 72) * Math.PI / 180) * sgn;
   const set = (node, x, y, z) => { if (node) node.rotation.set(x, y, z); };
   set(b("leftUpperArm"),  0,  0,  a);
   set(b("rightUpperArm"), 0,  0, -a);
   // A little elbow bend and inward roll, so the arms hang rather than hinge.
-  set(b("leftLowerArm"),  0,  0.18,  0.06);
-  set(b("rightLowerArm"), 0, -0.18, -0.06);
-  set(b("leftHand"),  0, 0,  0.05);
-  set(b("rightHand"), 0, 0, -0.05);
+  set(b("leftLowerArm"),  0,  0.18 * sgn,  0.06 * sgn);
+  set(b("rightLowerArm"), 0, -0.18 * sgn, -0.06 * sgn);
+  set(b("leftHand"),  0, 0,  0.05 * sgn);
+  set(b("rightHand"), 0, 0, -0.05 * sgn);
   // Shoulders settle very slightly down from the T.
   const ls = b("leftShoulder"), rs = b("rightShoulder");
-  if (ls) ls.rotation.z =  0.04;
-  if (rs) rs.rotation.z = -0.04;
+  if (ls) ls.rotation.z =  0.04 * sgn;
+  if (rs) rs.rotation.z = -0.04 * sgn;
 }
 
 // Rest pose is captured per model: breath and sway are applied as offsets FROM it,

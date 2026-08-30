@@ -92,7 +92,7 @@ try {
       `<br><span class="dim">idle: ${st.idle || "?"}` +
       ` · chest ${(st.chestDeg || 0).toFixed(2)}°` +
       ` · gain ${(st.gain || 0).toFixed(1)}` +
-      ` · arms ${(st.armDeg ?? 0)}°` +
+      ` · arms ${(st.armDeg ?? 0)}° (sign ${st.armSign > 0 ? "+" : st.armSign < 0 ? "-" : "?"})` +
       ` · mouth ${((st.mouth || 0) * 100).toFixed(0)}%` +
       ` · pauses ${pauses}</span>`;
     panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
