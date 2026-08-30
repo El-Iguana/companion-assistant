@@ -352,7 +352,8 @@ per-relationship **context override** (⚙).
   spring bones now reacting to that motion. Arm signs are measured not derived; `armDeg` stays tunable
   because a VRM 1.0 model may want them flipped. ✅ **3c speech motion done (jaw only)** — Phase 0's RMS
   amplitude drives `aa`+`ih` with asymmetric attack/release and a silence timeout, plus prosody head
-  motion off a slow energy envelope; visemes stay blocked on phoneme timings no TTS backend exposes.
+  motion off a slow energy envelope; verified against live Kokoro audio. Visemes stay blocked on phoneme
+  timings no TTS backend exposes.
   Tuning lives in `static/js/vtuber.mjs` (`idleGain` 2, `armRestDeg` 72, `mouthGain` 6) and is
   adjustable live from `/static/avatar-test.html`. ✅ **3d emotion+gesture done** — the Phase 2
   `avatar:expr` beats now drive the face: Core-8/Full-28 → VRM presets with weight as intensity,

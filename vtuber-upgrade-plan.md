@@ -224,8 +224,8 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
 > Shipped: jaw driven by the Phase 0 RMS amplitude (`aa` 85% + `ih` 15%; pure `aa` reads as a gape),
 > asymmetric attack/release so it neither chatters on consonants nor hangs open, a 150 ms timeout
 > because silence is the *absence* of events rather than a zero, and prosody head motion keyed to a
-> slow energy envelope so the head moves with phrasing not syllables. Verified with the harness's
-> speech simulator. ◻ Still open: the real test with live TTS audio in a chat.
+> slow energy envelope so the head moves with phrasing not syllables. **Verified with live Kokoro
+> audio in a chat**, not just the harness simulator — the jaw tracks real speech.
 > ◻ **Visemes remain blocked** — one scalar cannot say which mouth shape belongs to which instant.
 - **Jaw from amplitude** — port the working Phase 0 analyser path (`static/js/app.js:996`) onto the
   jaw bone / `aa` blendshape. Works today with no new data.
