@@ -27,6 +27,39 @@ let renderer = null, scene = null, camera = null, clock = null;
 let currentVrm = null, placeholder = null, rafId = null;
 let cardId = null, lastFrame = 0, running = false;
 
+// ---- Phase 3b: idle life -------------------------------------------------
+// Four channels, all always-on once a model is loaded. Spring bones come free
+// with vrm.update(dt) but only react to motion, so without breath and sway they
+// never move — the three channels are load-bearing for each other.
+// Rendered-frame counter. A static avatar is ambiguous — loop running with nothing
+// animated, or loop stalled after one frame — and this tells the two apart.
+const stats = { frames: 0, lastRender: 0,
+  get model() { return currentVrm ? "vrm" : (placeholder ? "placeholder" : "none"); },
+  get running() { return running; },
+  get idle() { return idleFailed ? "FAILED" : (idle ? "on" : "off"); },
+  chestDeg: 0,
+  get gain() { return idleGain; },
+  set gain(v) { idleGain = Math.max(0, Number(v) || 0); },
+  get armDeg() { return armRestDeg; },
+  set armDeg(v) {
+    armRestDeg = Number(v) || 0;
+    if (currentVrm) { applyRestPose(currentVrm, armRestDeg); initIdle(currentVrm); }
+  } };
+if (typeof window !== "undefined") window.__avatarStats = stats;
+
+let idle = null;                 // per-model idle state, rebuilt on load
+let idleFailed = false;
+// Amplitude multiplier. 1 = shipping values; the harness raises it to make the
+// channels unmistakable when you are checking whether the rig is being driven
+// at all, which is a different question from whether the motion reads well.
+// Both picked by eye against the test model. At gain 1 the motion was technically
+// running but too small to read at bust framing.
+let idleGain = 2;
+// How far the upper arms swing down out of T-pose. Exposed for tuning: if it ever
+// reads inverted (arms raised), this is the one number to flip.
+let armRestDeg = 72;
+let lookTarget = null;           // Object3D the VRM's gaze tracks
+
 // --------------------------------------------------------------------------
 // Capability check. A machine without WebGL keeps the sprite portrait rather
 // than showing a dead black rectangle.
@@ -117,6 +150,147 @@ function buildPlaceholder() {
 // --------------------------------------------------------------------------
 // Loading
 // --------------------------------------------------------------------------
+// A VRM ships in T-pose: the format carries a rig and blendshapes but no animation,
+// so nothing brings the arms down unless we do it. This is part of idle life, not
+// polish — breathing on a T-posed mannequin still reads as a mannequin.
+//
+// Signs are MEASURED against the test model, not derived. Deriving them from the
+// VRM axis convention (+Z forward, character's left along +X, so a negative z
+// swings the left arm down) gave the opposite and put the arms in the air. The
+// likely reason is the 180-degree Y rotation rotateVRM0 applies to a VRM 0.x
+// model, which flips the sense of a local-Z rotation.
+//
+// Caveat that follows from that: a VRM 1.0 model, which rotateVRM0 leaves alone,
+// may well want the opposite sign. That is exactly why armDeg is tunable rather
+// than a constant -- flip it and re-check when the first 1.0 model turns up.
+// Positive armDeg = arms down.
+function applyRestPose(vrm, armDeg) {
+  const b = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
+  const a = (armDeg ?? 72) * Math.PI / 180;
+  const set = (node, x, y, z) => { if (node) node.rotation.set(x, y, z); };
+  set(b("leftUpperArm"),  0,  0,  a);
+  set(b("rightUpperArm"), 0,  0, -a);
+  // A little elbow bend and inward roll, so the arms hang rather than hinge.
+  set(b("leftLowerArm"),  0,  0.18,  0.06);
+  set(b("rightLowerArm"), 0, -0.18, -0.06);
+  set(b("leftHand"),  0, 0,  0.05);
+  set(b("rightHand"), 0, 0, -0.05);
+  // Shoulders settle very slightly down from the T.
+  const ls = b("leftShoulder"), rs = b("rightShoulder");
+  if (ls) ls.rotation.z =  0.04;
+  if (rs) rs.rotation.z = -0.04;
+}
+
+// Rest pose is captured per model: breath and sway are applied as offsets FROM it,
+// never as absolute rotations, so a model that does not stand in a neutral T/A-pose
+// is not yanked into one.
+function initIdle(vrm) {
+  applyRestPose(vrm, armRestDeg);        // out of T first — rest is captured after
+  const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
+  const rest = (b) => (b ? { x: b.rotation.x, y: b.rotation.y, z: b.rotation.z } : null);
+  const spine = bone("spine"), chest = bone("chest") || bone("upperChest");
+  const neck = bone("neck"), head = bone("head"), hips = bone("hips");
+  idle = {
+    spine, chest, neck, head, hips,
+    rest: { spine: rest(spine), chest: rest(chest), neck: rest(neck),
+            head: rest(head), hips: rest(hips) },
+    t: 0,
+    // Blink: a random interval, and sometimes a double-blink, because a perfectly
+    // periodic blink reads as a machine.
+    nextBlink: 1 + Math.random() * 3,
+    blinkT: -1, blinkDur: 0.12, pendingDouble: false,
+    // Gaze drift: hold the viewer, then glance away, the way people actually do.
+    gazeT: 0, nextGaze: 2 + Math.random() * 4, gaze: { x: 0, y: 0 },
+    gazeTo: { x: 0, y: 0 },
+    // Sway: two incommensurable periods so the loop never visibly repeats.
+    swayPhase: Math.random() * Math.PI * 2,
+  };
+  if (vrm.lookAt) {
+    lookTarget = new THREE.Object3D();
+    scene.add(lookTarget);
+    vrm.lookAt.target = lookTarget;
+  }
+}
+
+function updateIdle(vrm, dt) {
+  if (!idle) return;
+  idle.t += dt;
+  const t = idle.t;
+
+  const G = idleGain;
+
+  // --- breathing: chest rises, spine counter-rotates a touch -----------------
+  const breath = Math.sin(t * 1.05);                   // ~17 breaths/min
+  if (idle.chest && idle.rest.chest)
+    idle.chest.rotation.x = idle.rest.chest.x - breath * 0.045 * G;
+  if (idle.spine && idle.rest.spine)
+    idle.spine.rotation.x = idle.rest.spine.x + breath * 0.022 * G;
+
+  // --- weight shift: slow lateral sway, hips lead and the head trails --------
+  const sway = Math.sin(t * 0.31 + idle.swayPhase);
+  const sway2 = Math.sin(t * 0.19 + idle.swayPhase * 1.7);
+  if (idle.hips && idle.rest.hips) {
+    idle.hips.rotation.z = idle.rest.hips.z + sway * 0.026 * G;
+    idle.hips.rotation.y = idle.rest.hips.y + sway2 * 0.038 * G;
+  }
+  if (idle.neck && idle.rest.neck)
+    idle.neck.rotation.z = idle.rest.neck.z - sway * 0.030 * G;
+  if (idle.head && idle.rest.head) {
+    idle.head.rotation.z = idle.rest.head.z - sway * 0.020 * G;
+    idle.head.rotation.x = idle.rest.head.x + Math.sin(t * 0.23) * 0.018 * G;
+  }
+  // What actually reached the rig this frame — so "is the bone moving?" is a
+  // number, not a squint.
+  if (idle.chest && idle.rest.chest)
+    stats.chestDeg = (idle.chest.rotation.x - idle.rest.chest.x) * 57.2958;
+
+  // --- blink ----------------------------------------------------------------
+  const em = vrm.expressionManager;
+  if (em) {
+    if (idle.blinkT >= 0) {
+      idle.blinkT += dt;
+      const half = idle.blinkDur / 2;
+      // up then down, so the lid actually travels rather than popping
+      const v = idle.blinkT < half ? idle.blinkT / half
+                                   : 1 - (idle.blinkT - half) / half;
+      em.setValue("blink", Math.max(0, Math.min(1, v)));
+      if (idle.blinkT >= idle.blinkDur) {
+        em.setValue("blink", 0);
+        idle.blinkT = -1;
+        if (idle.pendingDouble) { idle.pendingDouble = false; idle.nextBlink = 0.16; }
+        else { idle.nextBlink = 1.6 + Math.random() * 4.5; }
+      }
+    } else {
+      idle.nextBlink -= dt;
+      if (idle.nextBlink <= 0) {
+        idle.blinkT = 0;
+        idle.pendingDouble = Math.random() < 0.22;
+      }
+    }
+  }
+
+  // --- gaze -----------------------------------------------------------------
+  idle.gazeT -= dt;
+  if (idle.gazeT <= 0) {
+    // Mostly return to the viewer; occasionally look away and hold it briefly.
+    const away = Math.random() < 0.45;
+    idle.gazeTo = away
+      ? { x: (Math.random() - 0.5) * 0.55, y: (Math.random() - 0.5) * 0.3 }
+      : { x: 0, y: 0 };
+    idle.gazeT = away ? 0.8 + Math.random() * 1.8 : 2 + Math.random() * 4;
+  }
+  idle.gaze.x += (idle.gazeTo.x - idle.gaze.x) * Math.min(1, dt * 2.5);
+  idle.gaze.y += (idle.gazeTo.y - idle.gaze.y) * Math.min(1, dt * 2.5);
+  if (lookTarget && camera) {
+    // Track the camera, offset by the drift, so "centred" really means eyes on you.
+    lookTarget.position.set(
+      camera.position.x + idle.gaze.x,
+      camera.position.y + idle.gaze.y,
+      camera.position.z,
+    );
+  }
+}
+
 function disposeModel() {
   for (const m of [currentVrm?.scene, placeholder]) {
     if (!m) continue;
@@ -128,6 +302,8 @@ function disposeModel() {
     });
   }
   if (currentVrm) VRMUtils.deepDispose(currentVrm.scene);
+  if (lookTarget) { scene.remove(lookTarget); lookTarget = null; }
+  idle = null; idleFailed = false;
   currentVrm = null;
   placeholder = null;
 }
@@ -158,11 +334,28 @@ async function loadCard(id, hasVrm, placeholderRequested) {
       currentVrm = vrm;
       scene.add(vrm.scene);
       frameBust();
-      start();
+      start();                  // render FIRST: a broken idle channel must never
+                                // cost us the loop that proves the model is there
+      try {
+        initIdle(vrm);          // 3b: breath, sway, blink, gaze — always on
+      } catch (e) {
+        console.warn("[avatar] idle init failed; model still renders:", e);
+        idle = null;
+        window.dispatchEvent(new CustomEvent("avatar:error", {
+          detail: { where: "idle-init", message: String(e && e.message || e),
+                    stack: String(e && e.stack || "") },
+        }));
+      }
       announce(true);
       return;
     } catch (e) {
       console.warn("[avatar] VRM load failed, falling back to sprite:", e);
+      // Surface it: this catch also covers post-load setup, so a bug in initIdle
+      // looked exactly like a network failure and reached no UI at all.
+      window.dispatchEvent(new CustomEvent("avatar:error", {
+        detail: { where: "load", message: String(e && e.message || e),
+                  stack: String(e && e.stack || "") },
+      }));
       disposeModel();
       stop();
       announce(false);                              // sprite portrait takes over again
@@ -189,9 +382,28 @@ function tick(now) {
   lastFrame = now;
   const dt = clock.getDelta();
   resize();
-  // 3b replaces this with real idle life. For now: enough motion to see the loop run.
+  stats.frames++; stats.lastRender = now;          // window.__avatarStats — proves the
+                                                   // loop is live even when nothing moves
   if (placeholder) placeholder.rotation.y += dt * 0.35;
-  currentVrm?.update(dt);
+  if (currentVrm) {
+    // Pose first, then update: vrm.update() consumes the normalized-bone rotations
+    // and runs the spring bones, so the hair reacts to THIS frame's sway. Update
+    // first and the springs lag a frame behind the body driving them.
+    try {
+      updateIdle(currentVrm, dt);
+    } catch (e) {
+      if (!idleFailed) {
+        idleFailed = true;                          // report once, then stay quiet
+        console.warn("[avatar] idle update failed; disabling idle:", e);
+        window.dispatchEvent(new CustomEvent("avatar:error", {
+          detail: { where: "idle-update", message: String(e && e.message || e),
+                    stack: String(e && e.stack || "") },
+        }));
+      }
+      idle = null;
+    }
+    currentVrm.update(dt);
+  }
   renderer.render(scene, camera);
 }
 

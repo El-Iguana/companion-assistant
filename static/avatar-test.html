@@ -11,7 +11,12 @@
   #avatar-canvas{position:absolute;right:12px;bottom:0;height:80vh;width:40%}
   #log{position:absolute;left:10px;top:10px;font-family:ui-monospace,monospace;
        white-space:pre;line-height:1.5}
-  .ok{color:#7ddc7d}.bad{color:#ff8080}
+  .ok{color:#7ddc7d}.bad{color:#ff8080}.dim{color:#9a9aa8}
+  #live{position:absolute;left:10px;bottom:60px;font-family:ui-monospace,monospace;
+        font-size:14px;background:#0006;padding:8px 12px;border-radius:8px}
+  #ctl{position:absolute;left:10px;bottom:14px;background:#0006;padding:8px 12px;
+       border-radius:8px;font-family:ui-monospace,monospace;font-size:13px}
+  #ctl input{vertical-align:middle;width:180px}
 </style>
 <script type="importmap">
 {"imports":{"three":"/static/vendor/three.module.js",
@@ -21,6 +26,14 @@
 <body><div id="wrap">
   <canvas id="avatar-canvas"></canvas>
   <div id="log"></div>
+  <div id="ctl">
+    <div>arm rest <input id="arm" type="range" min="-90" max="90" step="2" value="72">
+      <span id="armv">72</span>°
+      <span class="dim">— 0 = T-pose. If arms go UP, the sign is wrong.</span></div>
+    <div>idle gain <input id="gain" type="range" min="0" max="15" step="0.5" value="2">
+      <span id="gainv">2</span>
+      <span class="dim">— exaggerate breath/sway to confirm the rig is driven</span></div>
+  </div>
 </div>
 <script type="module">
 const el = document.getElementById("log");
@@ -28,6 +41,12 @@ const log = (m, cls) => el.innerHTML += `<span class="${cls||''}">${m}</span>\n`
 window.addEventListener("error", (e) => log("ERROR: " + e.message, "bad"));
 window.addEventListener("avatar:active", (e) =>
   log("avatar:active -> " + e.detail.active, e.detail.active ? "ok" : ""));
+window.addEventListener("avatar:error", (e) => {
+  log("AVATAR ERROR [" + e.detail.where + "]: " + e.detail.message, "bad");
+  if (e.detail.stack) log(e.detail.stack.split("\n").slice(0, 4).join("\n"), "bad");
+});
+window.addEventListener("unhandledrejection", (e) =>
+  log("UNHANDLED REJECTION: " + (e.reason && e.reason.message || e.reason), "bad"));
 try {
   await import("/static/js/vtuber.mjs");
   log("module imported", "ok");
@@ -45,14 +64,52 @@ try {
       { detail: { id: "harness", hasVrm: false, placeholder: true } }));
     log("requested placeholder (add ?card=<id> to load a real .vrm)");
   }
-  let frames = 0;
-  const seen = () => { frames++; requestAnimationFrame(seen); };
-  requestAnimationFrame(seen);
+  // A one-shot delta lies: the renderer pauses when the tab is hidden (by design),
+  // so alt-tabbing to copy the result reads as a stall. Live panel instead — look
+  // at it while the page is focused.
+  const panel = document.createElement("div");
+  panel.id = "live";
+  document.getElementById("wrap").appendChild(panel);
+  let prev = 0, prevT = performance.now(), pauses = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) pauses++;
+    log("visibility -> " + (document.hidden ? "hidden (renderer pauses by design)"
+                                            : "visible (renderer resumes)"));
+  });
+  setInterval(() => {
+    const st = window.__avatarStats || { frames: 0 };
+    const now = performance.now();
+    const fps = (st.frames - prev) / ((now - prevT) / 1000);
+    prev = st.frames; prevT = now;
+    const live = !document.hidden;
+    panel.innerHTML =
+      `<b>${live ? (fps > 5 ? "LOOP LIVE" : "LOOP STALLED") : "TAB HIDDEN"}</b>` +
+      `  ${fps.toFixed(1)} fps · ${st.frames} frames · model=${st.model || "?"}` +
+      `<br><span class="dim">idle: ${st.idle || "?"}` +
+      ` · chest ${(st.chestDeg || 0).toFixed(2)}°` +
+      ` · gain ${(st.gain || 0).toFixed(1)}` +
+      ` · arms ${(st.armDeg ?? 0)}°` +
+      ` · pauses ${pauses}</span>`;
+    panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
+  }, 500);
   setTimeout(() => {
     const c = document.getElementById("avatar-canvas");
     const painted = c.width > 0 && c.height > 0;
     log("canvas backing: " + c.width + "x" + c.height, painted ? "ok" : "bad");
-    log("rAF frames in 2s: " + frames, frames > 30 ? "ok" : "bad");
+    const st = window.__avatarStats || {};
+    log("RENDERED frames    : " + (st.frames | 0) + "  (model: " + (st.model || "?") + ")",
+        (st.frames | 0) > 20 ? "ok" : "bad");
+    log("\nWatch the panel bottom-left while this tab is FOCUSED.", "");
+  const gs = document.getElementById("gain"), gv = document.getElementById("gainv");
+  gs.addEventListener("input", () => {
+    gv.textContent = gs.value;
+    if (window.__avatarStats) window.__avatarStats.gain = Number(gs.value);
+  });
+  const as = document.getElementById("arm"), av = document.getElementById("armv");
+  as.addEventListener("input", () => {
+    av.textContent = as.value;
+    if (window.__avatarStats) window.__avatarStats.armDeg = Number(as.value);
+  });
     log(painted && frames > 30
         ? "\n3a looks healthy — " + (cardId ? "the avatar should be on screen."
                                             : "you should see a slowly turning figure.")
