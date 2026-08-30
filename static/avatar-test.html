@@ -32,9 +32,19 @@ try {
   await import("/static/js/vtuber.mjs");
   log("module imported", "ok");
   document.getElementById("avatar-canvas").hidden = false;
-  window.dispatchEvent(new CustomEvent("avatar:card",
-    { detail: { id: "harness", hasVrm: false, placeholder: true } }));
-  log("requested placeholder");
+  // ?card=<id> loads that card's real .vrm through the API. Same-origin, so your
+  // existing login cookie rides along — be logged in in this browser first.
+  // No ?card= falls back to the procedural placeholder.
+  const cardId = new URLSearchParams(location.search).get("card");
+  if (cardId) {
+    window.dispatchEvent(new CustomEvent("avatar:card",
+      { detail: { id: cardId, hasVrm: true } }));
+    log("requested REAL vrm for card " + cardId);
+  } else {
+    window.dispatchEvent(new CustomEvent("avatar:card",
+      { detail: { id: "harness", hasVrm: false, placeholder: true } }));
+    log("requested placeholder (add ?card=<id> to load a real .vrm)");
+  }
   let frames = 0;
   const seen = () => { frames++; requestAnimationFrame(seen); };
   requestAnimationFrame(seen);
@@ -44,7 +54,8 @@ try {
     log("canvas backing: " + c.width + "x" + c.height, painted ? "ok" : "bad");
     log("rAF frames in 2s: " + frames, frames > 30 ? "ok" : "bad");
     log(painted && frames > 30
-        ? "\n3a looks healthy — you should see a slowly turning figure."
+        ? "\n3a looks healthy — " + (cardId ? "the avatar should be on screen."
+                                            : "you should see a slowly turning figure.")
         : "\nsomething is wrong; check the console.", painted && frames > 30 ? "ok" : "bad");
   }, 2000);
 } catch (e) { log("IMPORT FAILED: " + e, "bad"); }

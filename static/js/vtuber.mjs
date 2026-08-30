@@ -67,13 +67,20 @@ function initScene(canvas) {
 // feet, so aim at eye height rather than the model's centre.
 function frameBust() {
   if (!camera) return;
-  let eye = 1.4;
+  let eye = 1.4;                                   // sane default if there is no rig
   if (currentVrm) {
-    const head = currentVrm.humanoid?.getNormalizedBoneNode?.("head");
-    if (head) eye = head.getWorldPosition(new THREE.Vector3()).y;
+    // Matrices are stale right after scene.add() — without this the head reads as
+    // world origin and the camera ends up on the floor looking at nothing.
+    currentVrm.scene.updateWorldMatrix(true, true);
+    const head = currentVrm.humanoid?.getNormalizedBoneNode?.("head")
+              || currentVrm.humanoid?.getRawBoneNode?.("head");
+    if (head) {
+      const y = head.getWorldPosition(new THREE.Vector3()).y;
+      if (y > 0.2) eye = y + 0.08;                 // head BONE sits at the jaw/ear line;
+    }                                              // nudge up to the visual centre of the head
   }
-  camera.position.set(0, eye, 1.35);
-  camera.lookAt(0, eye - 0.05, 0);
+  camera.position.set(0, eye, 1.4);
+  camera.lookAt(0, eye - 0.03, 0);
 }
 
 function resize() {
