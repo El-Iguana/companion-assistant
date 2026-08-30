@@ -333,9 +333,15 @@ per-relationship **context override** (⚙).
   **`GET/PUT /api/settings`** store (`AppSettings` → `data/settings/app.json`); plus `getUserMedia`
   `echoCancellation`. ◻ **Upgrades:** true wake-word engine (**openWakeWord**,
   ONNX/CPU) + **Silero-VAD** for accuracy; wake-word-gated barge-in.
-  🔨 **Phase 2 code complete** — inline `[expr:x]` beats: streaming parser (`_strip_expr`, sibling of
-  the `<think>` stripper), `{"expr":...}` SSE events, beats fire at TTS *playback* not parse, tag wins
-  over the classifier. Unverified against a live model — confirm the 9B actually emits tags on cue.
+  ✅ **Phase 2 done** — inline `[expr:x]` beats: streaming parser (`_strip_expr`, sibling of the
+  `<think>` stripper), `{"expr":...}` SSE events, beats fire at TTS *playback* not parse, tag wins over
+  the classifier. **Verified against the live 9B**: it emits well-formed in-set tags and the events
+  reach the wire. Two prompt bugs had to be fixed first — the instruction sat in the system block where
+  the trailing boundary note out-weighted it (1/6 replies tagged; 3/6 once moved to a trailing system
+  message before `boundary_note`), and the wording `emit a tag [expr:LABEL]` was copied verbatim, so the
+  shape is now taught by the example line alone. Tag rate is ~4/6 and varies; the classifier still
+  covers untagged replies. Occasional out-of-set labels (`curious`, `playful`) are dropped silently —
+  an alias map would recover them.
   ✅ **Phase 3a done** — avatar renderer: `static/js/vtuber.mjs` **module island** (three.js +
   `@pixiv/three-vrm`, vendored in `static/vendor/`, no CDN) talking to the classic-script `app.js` over
   four CustomEvents (`avatar:card`/`:speak`/`:expr`/`:active`); `CharacterCard.vrm` picks the tier

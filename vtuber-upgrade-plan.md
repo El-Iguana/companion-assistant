@@ -155,11 +155,15 @@ and has the longest lead time, so it starts **now**, alongside Phase 2.
 > `WHISPER_*` / `services/stt.py` at the container.
 
 
-🔨 **Phase 2 — Expression channel (hybrid)** — *code complete, unverified against a live model.*
-> Parser, transport, playback-time firing and prompt all shipped and tested against a mocked
-> stream. What is **not** yet proven is the part only a real model can show: whether the 9B
-> fine-tune actually emits `[expr:x]` on cue, at useful frequency, in the right places. Run a
-> real chat with sprites on and check the beats land — the classifier fallback covers it if not.
+✅ **Phase 2 — Expression channel (hybrid)** — *done, verified against the live 9B.*
+> The model emits well-formed, in-set tags and the events reach the SSE wire. Getting there took two
+> prompt fixes: the instruction sat in the **system block**, where the trailing boundary note
+> out-weighted it (**1/6** replies tagged, and that label invented) — moved to a trailing system
+> message before `boundary_note` it went to **3/6 with none invalid**; and the wording
+> `emit a tag [expr:LABEL]` was **copied verbatim** by the model, so the shape is now taught by the
+> example line alone with no placeholder anywhere. Tag rate is ~**4/6** and varies run to run; the
+> classifier fallback still covers untagged replies. ◻ Out-of-set labels the model reaches for
+> (`curious`, `playful`) are dropped silently — a small alias map would recover those beats.
 - System-prompt the model to emit inline `[expr:x]` tags.
 - **Parse and strip server-side**, in `services/kobold.py`, and emit expression events on the existing
   SSE envelope as `{"expr": "..."}` alongside `{"token": ...}` (`main.py:984`) — no protocol change needed.
