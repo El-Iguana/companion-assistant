@@ -40,6 +40,9 @@ const stats = { frames: 0, lastRender: 0,
   chestDeg: 0,
   get gain() { return idleGain; },
   set gain(v) { idleGain = Math.max(0, Number(v) || 0); },
+  mouth: 0,
+  get mouthGain() { return mouthGain; },
+  set mouthGain(v) { mouthGain = Math.max(0, Number(v) || 0); },
   get armDeg() { return armRestDeg; },
   set armDeg(v) {
     armRestDeg = Number(v) || 0;
@@ -58,6 +61,15 @@ let idleGain = 2;
 // How far the upper arms swing down out of T-pose. Exposed for tuning: if it ever
 // reads inverted (arms raised), this is the one number to flip.
 let armRestDeg = 72;
+
+// ---- Phase 3c: speech motion ---------------------------------------------
+// app.js already computes an RMS amplitude per frame for the sprite mouth
+// (the Phase 0 analyser) and forwards it as avatar:speak. That signal is one
+// scalar, so it can drive a JAW but not visemes: which mouth shape belongs to
+// which instant needs phoneme timings, and neither Kokoro nor Piper exposes
+// them today. Anything here claiming to be a viseme would be decoration.
+const speech = { amp: 0, target: 0, env: 0, last: 0 };
+let mouthGain = 6;      // RMS from the analyser runs ~0.05-0.25 on speech
 let lookTarget = null;           // Object3D the VRM's gaze tracks
 
 // --------------------------------------------------------------------------
@@ -291,6 +303,37 @@ function updateIdle(vrm, dt) {
   }
 }
 
+function updateSpeech(vrm, dt) {
+  const em = vrm.expressionManager;
+  if (!em) return;
+
+  // The stream stops sending when she stops talking, so silence is the absence
+  // of events rather than a zero. Close the mouth if nothing arrives.
+  if (performance.now() - speech.last > 150) speech.target = 0;
+
+  // Fast attack, slower release: a symmetric filter makes the jaw chatter on
+  // consonants and hang open on release.
+  const k = speech.target > speech.amp ? 18 : 7;
+  speech.amp += (speech.target - speech.amp) * Math.min(1, dt * k);
+
+  const open = Math.max(0, Math.min(1, speech.amp * mouthGain));
+  // Mostly "aa" with a little "ih" underneath — pure aa at full travel reads as
+  // a constant gape rather than speech.
+  em.setValue("aa", open * 0.85);
+  em.setValue("ih", open * 0.15);
+  stats.mouth = open;
+
+  // Prosody: a slow envelope of speech energy, not the per-frame amplitude, so
+  // the head moves with phrasing instead of twitching per syllable.
+  speech.env += (open - speech.env) * Math.min(1, dt * 1.5);
+  if (idle && idle.head && idle.rest.head) {
+    idle.head.rotation.x += speech.env * 0.045;          // slight nod into the line
+    idle.head.rotation.y += Math.sin(idle.t * 1.7) * speech.env * 0.020;
+  }
+  if (idle && idle.chest && idle.rest.chest)
+    idle.chest.rotation.x -= speech.env * 0.012;          // chest lifts a touch
+}
+
 function disposeModel() {
   for (const m of [currentVrm?.scene, placeholder]) {
     if (!m) continue;
@@ -304,6 +347,7 @@ function disposeModel() {
   if (currentVrm) VRMUtils.deepDispose(currentVrm.scene);
   if (lookTarget) { scene.remove(lookTarget); lookTarget = null; }
   idle = null; idleFailed = false;
+  speech.amp = speech.target = speech.env = speech.last = 0;
   currentVrm = null;
   placeholder = null;
 }
@@ -391,6 +435,7 @@ function tick(now) {
     // first and the springs lag a frame behind the body driving them.
     try {
       updateIdle(currentVrm, dt);
+      updateSpeech(currentVrm, dt);      // after idle: adds to the idle pose
     } catch (e) {
       if (!idleFailed) {
         idleFailed = true;                          // report once, then stay quiet
@@ -439,9 +484,10 @@ export function boot() {
     loadCard(id || null, !!hasVrm, !!ph);
   });
 
-  // 3c/3d consume these. Accepted now so app.js can be wired once, and so the
-  // events are exercised before there is anything to drive with them.
-  window.addEventListener("avatar:speak", () => { /* 3c: jaw from amplitude */ });
+  window.addEventListener("avatar:speak", (e) => {
+    speech.target = Math.max(0, Math.min(1, Number(e.detail && e.detail.amp) || 0));
+    speech.last = performance.now();
+  });
   window.addEventListener("avatar:expr",  () => { /* 3d: expression track */ });
 
   window.addEventListener("resize", resize);

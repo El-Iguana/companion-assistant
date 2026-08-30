@@ -33,6 +33,10 @@
     <div>idle gain <input id="gain" type="range" min="0" max="15" step="0.5" value="2">
       <span id="gainv">2</span>
       <span class="dim">— exaggerate breath/sway to confirm the rig is driven</span></div>
+    <div>mouth gain <input id="mgain" type="range" min="0" max="20" step="0.5" value="6">
+      <span id="mgainv">6</span>
+      <button id="speak" type="button">simulate speech</button>
+      <span class="dim">— no TTS here, so this feeds a speech-shaped amplitude</span></div>
   </div>
 </div>
 <script type="module">
@@ -89,6 +93,7 @@ try {
       ` · chest ${(st.chestDeg || 0).toFixed(2)}°` +
       ` · gain ${(st.gain || 0).toFixed(1)}` +
       ` · arms ${(st.armDeg ?? 0)}°` +
+      ` · mouth ${((st.mouth || 0) * 100).toFixed(0)}%` +
       ` · pauses ${pauses}</span>`;
     panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
   }, 500);
@@ -105,6 +110,27 @@ try {
     gv.textContent = gs.value;
     if (window.__avatarStats) window.__avatarStats.gain = Number(gs.value);
   });
+  const ms = document.getElementById("mgain"), mv = document.getElementById("mgainv");
+  ms.addEventListener("input", () => {
+    mv.textContent = ms.value;
+    if (window.__avatarStats) window.__avatarStats.mouthGain = Number(ms.value);
+  });
+  // Speech-shaped, not a sine: ~4 Hz syllables inside phrases, with gaps between,
+  // so the attack/release filter and the prosody envelope are actually exercised.
+  const sb = document.getElementById("speak");
+  let sim = null, t0 = 0;
+  sb.addEventListener("click", () => {
+    if (sim) { clearInterval(sim); sim = null; sb.textContent = "simulate speech"; return; }
+    t0 = performance.now(); sb.textContent = "stop simulation";
+    sim = setInterval(() => {
+      const t = (performance.now() - t0) / 1000;
+      const phrase = (t % 3.4) < 2.4 ? 1 : 0;
+      const syl = Math.pow(Math.abs(Math.sin(t * Math.PI * 4)), 1.5);
+      const amp = phrase * syl * (0.09 + Math.random() * 0.05);
+      window.dispatchEvent(new CustomEvent("avatar:speak", { detail: { amp } }));
+    }, 33);
+  });
+
   const as = document.getElementById("arm"), av = document.getElementById("armv");
   as.addEventListener("input", () => {
     av.textContent = as.value;
