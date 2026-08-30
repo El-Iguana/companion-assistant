@@ -336,10 +336,15 @@ per-relationship **context override** (⚙).
   🔨 **Phase 2 code complete** — inline `[expr:x]` beats: streaming parser (`_strip_expr`, sibling of
   the `<think>` stripper), `{"expr":...}` SSE events, beats fire at TTS *playback* not parse, tag wins
   over the classifier. Unverified against a live model — confirm the 9B actually emits tags on cue.
-  Next phases: ◻ Phase 3 **animated
-  VRM avatar** (`@pixiv/three-vrm`), split 3a renderer / 3b idle life / 3c speech / 3d emotion+gesture ·
-  ◻ Phase 5 interruption. Runs alongside **Track B**, the VRM/animation content pipeline. Local-first
-  voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
+  ✅ **Phase 3a done** — avatar renderer: `static/js/vtuber.mjs` **module island** (three.js +
+  `@pixiv/three-vrm`, vendored in `static/vendor/`, no CDN) talking to the classic-script `app.js` over
+  four CustomEvents (`avatar:card`/`:speak`/`:expr`/`:active`); `CharacterCard.vrm` picks the tier
+  (`""` = sprite tier, unchanged) and `GET /api/cards/{id}/avatar.vrm` serves models from `data/vrm/`.
+  Renderer verified in-browser via `/static/avatar-test.html`; the real `.vrm` branch is untested for
+  want of a model. Next: ◻ 3b idle life (spring bones, blink, breath, gaze) · ◻ 3c speech motion ·
+  ◻ 3d emotion+gesture · ◻ Phase 5 interruption. **Track B (sourcing a `.vrm`) now blocks 3b** —
+  Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
+  Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
 - **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).

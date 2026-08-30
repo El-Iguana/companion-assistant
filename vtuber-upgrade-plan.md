@@ -184,14 +184,22 @@ and has the longest lead time, so it starts **now**, alongside Phase 2.
 Split into four sub-phases. Each is independently shippable and each adds one or more of the six
 channels. **3a and 3b together are what make the avatar read as alive** — 3b is not polish.
 
-**Phase 3a — Renderer bring-up** *(no animation yet)*
+✅ **Phase 3a — Renderer bring-up (done)** *(no animation yet)*
+> Shipped: `static/js/vtuber.mjs` module island (three.js + `@pixiv/three-vrm`, **vendored** under
+> `static/vendor/` — not a CDN, so the app stays offline-after-build), four-event bridge to the
+> classic-script `app.js` (`avatar:card` / `:speak` / `:expr` / `:active`), `CharacterCard.vrm`
+> tiering with `GET /api/cards/{id}/avatar.vrm`, WebGL capability check, 30 fps cap, hidden-tab
+> pause, and sprite fallback. Render loop, canvas sizing and framing **verified in-browser** via
+> `static/avatar-test.html`. ◻ The real `.vrm` load path is still untested — Track B has produced
+> no model, so only the opt-in placeholder has been driven.
 - Add a **module island**: `static/js/vtuber.mjs` loaded as `type="module"` with an ESM import-map for
   `three` + `@pixiv/three-vrm`. `static/js/app.js` is a single 1589-line classic script and stays that
   way — the island talks to it through a small event bridge, not by refactoring it.
 - Load a `.vrm`, render loop, camera framing, transparent or scene background, resize handling.
 - Capability check + graceful fallback to the existing `<img id="portrait">` sprite path.
 - **Exit criteria:** the model stands on screen in the chat view at a stable frame rate, and a card
-  without a `.vrm` still renders sprites exactly as it does today.
+  without a `.vrm` still renders sprites exactly as it does today. — **met** for the renderer (harness)
+  and the sprite tier (`has_vrm` false → no canvas, no takeover); the VRM branch awaits a model.
 
 **Phase 3b — Idle life** *(the "alive" phase — do not skip or defer)*
 - **Spring bones** — `VRMSpringBoneManager`, hair and cloth secondary motion. Cheapest single win.
@@ -243,6 +251,14 @@ remain in the code and settings, dormant, waiting for this phase.
 
 **This is the schedule risk.** Code for 3a–3d is bounded and well-trodden. Rigging a VRM and
 retargeting an animation set is manual, slow, and cannot be compressed by starting late.
+
+> **B1 is now the single blocker for 3b.** Everything in Track A buildable without a model is built.
+> Sources: **Booth.pm** (largest marketplace), **VRoid Hub** (free, per-model download gating),
+> **VRoid Studio under Proton** (no native Linux build, but this is a Bazzite box — worth trying
+> before Blender), or **Blender + VRM Add-on** (native, full control, needed anyway for hero-tier
+> custom blendshapes). Check each model's **VRM meta license flags** — they carry machine-readable
+> allow/deny for sexual content, violence, commercial use and redistribution, and many Booth /
+> VRoid Hub models are marked sexual-use-prohibited by their authors.
 
 **B1 — Model sourcing.** VRoid Studio has **no native Linux build** → use the **VRM Add-on for Blender**
 (native, and fits the game-dev plan) or pull from **VRoidHub**. Produce one reference `.vrm` early, even
