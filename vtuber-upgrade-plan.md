@@ -205,7 +205,14 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
   without a `.vrm` still renders sprites exactly as it does today. — **met** for the renderer (harness)
   and the sprite tier (`has_vrm` false → no canvas, no takeover); the VRM branch awaits a model.
 
-**Phase 3b — Idle life** *(the "alive" phase — do not skip or defer)*
+✅ **Phase 3b — Idle life (done)** *(the "alive" phase)*
+> Shipped: **rest pose out of T** (a VRM carries a rig but no animation, so nothing lowers the arms
+> unless we do — this was missing from the original phase description and is why the first cut still
+> read as a mannequin), breathing, weight shift on two incommensurable periods, randomised blink with
+> double-blinks, `VRMLookAt` gaze that holds the viewer and glances away, and the model's spring bones
+> which finally have body motion to react to. Arm-rotation signs are **measured, not derived** — the
+> axis derivation gave the opposite; a VRM 1.0 model may want the sign flipped, so `armDeg` stays
+> tunable. Tuned by eye on the test model: gain 2, arms 72°.
 - **Spring bones** — `VRMSpringBoneManager`, hair and cloth secondary motion. Cheapest single win.
 - **Breathing + weight shift** — subtle continuous body motion, never a static T-rest.
 - **Blink** — randomised interval with natural double-blinks.
@@ -213,7 +220,13 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
 - **Exit criteria:** with **zero** chat activity, the avatar looks like a person waiting, not a paused
   model. Judge this with the sound off and no messages sent.
 
-**Phase 3c — Speech motion**
+✅ **Phase 3c — Speech motion (done, jaw only)**
+> Shipped: jaw driven by the Phase 0 RMS amplitude (`aa` 85% + `ih` 15%; pure `aa` reads as a gape),
+> asymmetric attack/release so it neither chatters on consonants nor hangs open, a 150 ms timeout
+> because silence is the *absence* of events rather than a zero, and prosody head motion keyed to a
+> slow energy envelope so the head moves with phrasing not syllables. Verified with the harness's
+> speech simulator. ◻ Still open: the real test with live TTS audio in a chat.
+> ◻ **Visemes remain blocked** — one scalar cannot say which mouth shape belongs to which instant.
 - **Jaw from amplitude** — port the working Phase 0 analyser path (`static/js/app.js:996`) onto the
   jaw bone / `aa` blendshape. Works today with no new data.
 - **Visemes — blocked on phoneme timing.** *(corrected)* Amplitude yields **one scalar**; it cannot

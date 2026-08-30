@@ -347,8 +347,15 @@ per-relationship **context override** (⚙).
   four CustomEvents (`avatar:card`/`:speak`/`:expr`/`:active`); `CharacterCard.vrm` picks the tier
   (`""` = sprite tier, unchanged) and `GET /api/cards/{id}/avatar.vrm` serves models from `data/vrm/`.
   Renderer verified in-browser via `/static/avatar-test.html`; the real `.vrm` branch is untested for
-  want of a model. Next: ◻ 3b idle life (spring bones, blink, breath, gaze) · ◻ 3c speech motion ·
-  ◻ 3d emotion+gesture · ◻ Phase 5 interruption. **Track B (sourcing a `.vrm`) now blocks 3b** —
+  want of a model. ✅ **3b idle life done** — rest pose out of T (a VRM has a rig but no animation, so nothing lowers
+  the arms unless we do), breathing, weight shift, randomised blink, `VRMLookAt` gaze, and the model's
+  spring bones now reacting to that motion. Arm signs are measured not derived; `armDeg` stays tunable
+  because a VRM 1.0 model may want them flipped. ✅ **3c speech motion done (jaw only)** — Phase 0's RMS
+  amplitude drives `aa`+`ih` with asymmetric attack/release and a silence timeout, plus prosody head
+  motion off a slow energy envelope; visemes stay blocked on phoneme timings no TTS backend exposes.
+  Tuning lives in `static/js/vtuber.mjs` (`idleGain` 2, `armRestDeg` 72, `mouthGain` 6) and is
+  adjustable live from `/static/avatar-test.html`. Next: ◻ 3d emotion+gesture (wires the Phase 2
+  `avatar:expr` beats to the face) · ◻ Phase 5 interruption. **Track B (sourcing a `.vrm`) now blocks 3b** —
   Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
   Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
 - **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
