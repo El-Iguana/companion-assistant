@@ -17,6 +17,10 @@
   #ctl{position:absolute;left:10px;bottom:14px;background:#0006;padding:8px 12px;
        border-radius:8px;font-family:ui-monospace,monospace;font-size:13px}
   #ctl input{vertical-align:middle;width:180px}
+  #ctl button, #beats button{margin:2px;background:#3a3a4a;color:#ddd;
+      border:1px solid #555;border-radius:5px;padding:3px 7px;cursor:pointer;
+      font:12px ui-monospace,monospace}
+  #ctl button:hover, #beats button:hover{background:#4a4a5e}
   #models{position:absolute;right:12px;top:10px;background:#0006;padding:8px 10px;
           border-radius:8px;font:13px ui-monospace,monospace;max-width:32%}
   #models button{display:block;width:100%;margin:3px 0;cursor:pointer;
@@ -43,6 +47,11 @@
       <span id="mgainv">6</span>
       <button id="speak" type="button">simulate speech</button>
       <span class="dim">— no TTS here, so this feeds a speech-shaped amplitude</span></div>
+    <div id="beats">beats: <span class="dim">click to fire an [expr:x] like the stream does</span></div>
+    <div>posture
+      <input id="post" type="range" min="-1" max="1" step="0.05" value="0">
+      <span id="postv">0</span>
+      <span class="dim">— relationship stage bias, stranger … intimate</span></div>
   </div>
 </div>
 <script type="module">
@@ -130,6 +139,11 @@ try {
       ` · gain ${(st.gain || 0).toFixed(1)}` +
       ` · arms ${(st.armDeg ?? 0)}° (sign ${st.armSign > 0 ? "+" : st.armSign < 0 ? "-" : "?"})` +
       ` · mouth ${((st.mouth || 0) * 100).toFixed(0)}%` +
+      `<br><span class="dim">presets: ${st.presets || "?"}` +
+      ` · face: ${st.emotion || "-"}` +
+      ` · beat: ${st.beat || "-"} · gesture: ${st.gesture || "-"}` +
+      ` · posture ${st.posture ?? "0"}` +
+      ` · shoulder ${(st.shoulderDeg || 0).toFixed(2)}°</span>` +
       ` · pauses ${pauses}</span>`;
     panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
   }, 500);
@@ -165,6 +179,27 @@ try {
       const amp = phrase * syl * (0.09 + Math.random() * 0.05);
       window.dispatchEvent(new CustomEvent("avatar:speak", { detail: { amp } }));
     }, 33);
+  });
+
+  // Emotion beats: the same event the SSE stream fires, so this exercises the
+  // real 3d path rather than a parallel one.
+  const bbar = document.getElementById("beats");
+  for (const lbl of ["happy", "sad", "angry", "surprised", "love", "curiosity",
+                     "annoyance", "embarrassed", "grief", "neutral"]) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = lbl;
+    b.onclick = () => window.dispatchEvent(
+      new CustomEvent("avatar:expr", { detail: { label: lbl } }));
+    bbar.appendChild(b);
+  }
+  const ps = document.getElementById("post"), pv = document.getElementById("postv");
+  const STAGES = [[-1,"Stranger"],[-0.5,"Acquaintance"],[0,"Friend"],
+                  [0.4,"Close"],[0.7,"Romantic"],[1,"Intimate"]];
+  ps.addEventListener("input", () => {
+    const v = Number(ps.value);
+    const st = STAGES.reduce((a, b) => Math.abs(b[0]-v) < Math.abs(a[0]-v) ? b : a);
+    pv.textContent = st[1];
+    window.dispatchEvent(new CustomEvent("avatar:mood", { detail: { stage: st[1] } }));
   });
 
   const as = document.getElementById("arm"), av = document.getElementById("armv");

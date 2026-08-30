@@ -125,6 +125,12 @@ const REL_AXES = [["affection", "Affection", "#e0557a"], ["trust", "Trust", "#5a
                   ["attraction", "Attraction", "#c86ce0"], ["tension", "Tension", "#e0a24a"]];
 
 function renderRelationship(rel) {
+  if (rel && rel.stage)
+    window.dispatchEvent(new CustomEvent("avatar:mood", { detail: {
+      mood: (state.session && state.session.mood && state.session.mood.mood) || "",
+      valence: (state.session && state.session.mood && state.session.mood.valence) || 0,
+      stage: rel.stage,
+    }}));
   const strip = $("#rel-strip");
   if (!rel || !currentCard()) { strip.hidden = true; return; }
   strip.hidden = false;
@@ -428,6 +434,12 @@ async function send(text, regenerate) {
         else if (evt.done) {
           if (evt.relationship) renderRelationship(evt.relationship);
           if (evt.milestones) evt.milestones.forEach(showToast);
+          // Resting affect + posture for the avatar: the running mood biases the
+          // face between beats, the relationship stage biases how she stands.
+          window.dispatchEvent(new CustomEvent("avatar:mood", { detail: {
+            mood: evt.mood, valence: evt.valence,
+            stage: evt.relationship && evt.relationship.stage,
+          }}));
         }
       }
     }

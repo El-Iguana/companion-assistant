@@ -43,7 +43,8 @@ const stats = { frames: 0, lastRender: 0,
   mouth: 0,
   get mouthGain() { return mouthGain; },
   set mouthGain(v) { mouthGain = Math.max(0, Number(v) || 0); },
-  armSign: 0,
+  armSign: 0, presets: "", emotion: "", beat: "", gesture: "", posture: "0",
+  shoulderDeg: 0,
   get armDeg() { return armRestDeg; },
   set armDeg(v) {
     armRestDeg = Number(v) || 0;
@@ -71,6 +72,51 @@ let armRestDeg = 72;
 // them today. Anything here claiming to be a viseme would be decoration.
 const speech = { amp: 0, target: 0, env: 0, last: 0 };
 let mouthGain = 6;      // RMS from the analyser runs ~0.05-0.25 on speech
+
+// ---- Phase 3d: emotion ----------------------------------------------------
+// The app's vocabulary is Core-8 or Full-28; a VRM offers at most five emotive
+// presets. The mapping is therefore lossy by construction, and the weight is
+// what carries intensity — "annoyance" and "anger" both land on `angry`, at
+// different strengths, rather than collapsing to the same face.
+//
+// Not every model has every preset: `surprised` exists in VRM 1.0 but not 0.x.
+// Unsupported targets are remapped at load time against what the model actually
+// reports, so a missing preset degrades instead of silently doing nothing.
+const EXPR_MAP = {
+  // -> happy
+  happy: ["happy", 1.0], joy: ["happy", 1.0], amusement: ["happy", 0.8],
+  excitement: ["happy", 0.9], optimism: ["happy", 0.6], pride: ["happy", 0.7],
+  gratitude: ["happy", 0.6], approval: ["happy", 0.5], admiration: ["happy", 0.7],
+  relief: ["happy", 0.5],
+  // -> sad
+  sad: ["sad", 1.0], sadness: ["sad", 1.0], grief: ["sad", 1.0],
+  disappointment: ["sad", 0.7], remorse: ["sad", 0.8], nervousness: ["sad", 0.4],
+  fear: ["sad", 0.6],
+  // -> angry
+  angry: ["angry", 1.0], anger: ["angry", 1.0], annoyance: ["angry", 0.5],
+  disapproval: ["angry", 0.5], disgust: ["angry", 0.7],
+  // -> surprised
+  surprised: ["surprised", 1.0], surprise: ["surprised", 1.0],
+  realization: ["surprised", 0.6], confusion: ["surprised", 0.5],
+  // -> relaxed  (warmth, not amusement)
+  relaxed: ["relaxed", 1.0], love: ["relaxed", 0.9], caring: ["relaxed", 0.8],
+  desire: ["relaxed", 0.7], curiosity: ["relaxed", 0.4],
+  embarrassed: ["relaxed", 0.5], embarrassment: ["relaxed", 0.5],
+  thoughtful: ["relaxed", 0.3],
+  neutral: ["neutral", 0],
+};
+// Where to go when a model lacks the mapped preset. VRM 0.x has no `surprised`.
+const EXPR_FALLBACK = { surprised: "happy", relaxed: "happy", happy: null,
+                        angry: null, sad: null, neutral: null };
+const EMOTIVE = ["happy", "angry", "sad", "relaxed", "surprised"];
+
+const emo = {
+  weights: { happy: 0, angry: 0, sad: 0, relaxed: 0, surprised: 0 },
+  target:  { happy: 0, angry: 0, sad: 0, relaxed: 0, surprised: 0 },
+  supported: new Set(),
+  beatUntil: 0,          // a beat is momentary; resting affect resumes after
+  resting: { preset: null, weight: 0 },
+};
 let lookTarget = null;           // Object3D the VRM's gaze tracks
 
 // --------------------------------------------------------------------------
@@ -223,10 +269,14 @@ function initIdle(vrm) {
   const rest = (b) => (b ? { x: b.rotation.x, y: b.rotation.y, z: b.rotation.z } : null);
   const spine = bone("spine"), chest = bone("chest") || bone("upperChest");
   const neck = bone("neck"), head = bone("head"), hips = bone("hips");
+  const ls = bone("leftShoulder"), rs = bone("rightShoulder");
   idle = {
-    spine, chest, neck, head, hips,
+    spine, chest, neck, head, hips, ls, rs,
+    // Rest must cover EVERY bone any channel touches. Shoulders were missing, and
+    // because nothing reset them the posture and gesture deltas compounded frame
+    // after frame until the arms wandered off and never came back.
     rest: { spine: rest(spine), chest: rest(chest), neck: rest(neck),
-            head: rest(head), hips: rest(hips) },
+            head: rest(head), hips: rest(hips), ls: rest(ls), rs: rest(rs) },
     t: 0,
     // Blink: a random interval, and sometimes a double-blink, because a perfectly
     // periodic blink reads as a machine.
@@ -245,8 +295,21 @@ function initIdle(vrm) {
   }
 }
 
+// Every animated bone back to its rest pose. Called once per frame BEFORE any
+// channel runs, which is what lets idle, posture, speech and gesture all be
+// purely additive — and lets an interrupted gesture simply stop contributing
+// instead of leaving its offset baked in.
+function resetPose() {
+  if (!idle) return;
+  for (const k of ["spine", "chest", "neck", "head", "hips", "ls", "rs"]) {
+    const node = idle[k], r = idle.rest[k];
+    if (node && r) node.rotation.set(r.x, r.y, r.z);
+  }
+}
+
 function updateIdle(vrm, dt) {
   if (!idle) return;
+  resetPose();                 // all channels below are += from here
   idle.t += dt;
   const t = idle.t;
 
@@ -254,28 +317,37 @@ function updateIdle(vrm, dt) {
 
   // --- breathing: chest rises, spine counter-rotates a touch -----------------
   const breath = Math.sin(t * 1.05);                   // ~17 breaths/min
-  if (idle.chest && idle.rest.chest)
-    idle.chest.rotation.x = idle.rest.chest.x - breath * 0.045 * G;
-  if (idle.spine && idle.rest.spine)
-    idle.spine.rotation.x = idle.rest.spine.x + breath * 0.022 * G;
+  if (idle.chest) idle.chest.rotation.x -= breath * 0.045 * G;
+  if (idle.spine) idle.spine.rotation.x += breath * 0.022 * G;
+
+  // --- posture bias from the relationship -----------------------------------
+  // A slow, sustained lean rather than a beat: guarded and closed at a distance,
+  // open and inclined once she is close. Eased so a stage change does not snap.
+  posture.cur += (posture.target - posture.cur) * Math.min(1, dt * 0.6);
+  if (idle.spine) idle.spine.rotation.x += posture.cur * 0.055;
+  if (idle.ls) idle.ls.rotation.z -= posture.cur * 0.03;
+  if (idle.rs) idle.rs.rotation.z += posture.cur * 0.03;
 
   // --- weight shift: slow lateral sway, hips lead and the head trails --------
   const sway = Math.sin(t * 0.31 + idle.swayPhase);
   const sway2 = Math.sin(t * 0.19 + idle.swayPhase * 1.7);
-  if (idle.hips && idle.rest.hips) {
-    idle.hips.rotation.z = idle.rest.hips.z + sway * 0.026 * G;
-    idle.hips.rotation.y = idle.rest.hips.y + sway2 * 0.038 * G;
+  if (idle.hips) {
+    idle.hips.rotation.z += sway * 0.026 * G;
+    idle.hips.rotation.y += sway2 * 0.038 * G;
   }
-  if (idle.neck && idle.rest.neck)
-    idle.neck.rotation.z = idle.rest.neck.z - sway * 0.030 * G;
-  if (idle.head && idle.rest.head) {
-    idle.head.rotation.z = idle.rest.head.z - sway * 0.020 * G;
-    idle.head.rotation.x = idle.rest.head.x + Math.sin(t * 0.23) * 0.018 * G;
+  if (idle.neck) idle.neck.rotation.z -= sway * 0.030 * G;
+  if (idle.head) {
+    idle.head.rotation.z -= sway * 0.020 * G;
+    idle.head.rotation.x += Math.sin(t * 0.23) * 0.018 * G;
   }
   // What actually reached the rig this frame — so "is the bone moving?" is a
   // number, not a squint.
   if (idle.chest && idle.rest.chest)
     stats.chestDeg = (idle.chest.rotation.x - idle.rest.chest.x) * 57.2958;
+  // Shoulder drift was the bug that sent the arms wandering; keep it on screen so
+  // it cannot come back unnoticed. Bounded numbers = healthy.
+  if (idle.ls && idle.rest.ls)
+    stats.shoulderDeg = (idle.ls.rotation.z - idle.rest.ls.z) * 57.2958;
 
   // --- blink ----------------------------------------------------------------
   const em = vrm.expressionManager;
@@ -324,6 +396,173 @@ function updateIdle(vrm, dt) {
   }
 }
 
+// Which emotive presets does THIS model actually have? Asked once per load.
+function initEmotion(vrm) {
+  emo.supported = new Set();
+  const em = vrm.expressionManager;
+  for (const name of EMOTIVE) {
+    if (em?.getExpression?.(name)) emo.supported.add(name);
+  }
+  for (const k of Object.keys(emo.weights)) { emo.weights[k] = 0; emo.target[k] = 0; }
+  emo.beatUntil = 0;
+  emo.resting = { preset: null, weight: 0 };
+  stats.presets = [...emo.supported].join(",") || "none";
+}
+
+// Resolve a label to a preset this model can actually show.
+function resolvePreset(preset) {
+  let p = preset, guard = 0;
+  while (p && !emo.supported.has(p) && guard++ < 4) p = EXPR_FALLBACK[p] || null;
+  return emo.supported.has(p) ? p : null;
+}
+
+// A momentary beat from the stream. Phase 2 already timed these to audio playback,
+// so this is deliberately not re-delayed here.
+function setBeat(label) {
+  const hit = EXPR_MAP[String(label || "").toLowerCase()];
+  if (!hit) return;
+  const [preset, weight] = hit;
+  const use = resolvePreset(preset);
+  for (const k of EMOTIVE) emo.target[k] = 0;
+  if (use && weight > 0) emo.target[use] = weight;
+  // Beats are punctuation, not state: hold, then fall back to resting affect.
+  emo.beatUntil = performance.now() + 2600;
+  stats.beat = label;
+  const g = GESTURE_FOR[String(label || "").toLowerCase()];
+  if (g) playGesture(g);
+}
+
+// Resting affect from the running mood: a low, sustained bias, distinct from the
+// sharp beats above. Valence -1..1 leans sad or happy; a named mood overrides.
+function setResting(mood, valence) {
+  const hit = mood && EXPR_MAP[String(mood).toLowerCase()];
+  if (hit && hit[1] > 0) {
+    const use = resolvePreset(hit[0]);
+    emo.resting = use ? { preset: use, weight: hit[1] * 0.35 } : { preset: null, weight: 0 };
+    return;
+  }
+  const v = Number(valence) || 0;
+  const preset = resolvePreset(v > 0.15 ? "happy" : v < -0.15 ? "sad" : null);
+  emo.resting = preset ? { preset, weight: Math.min(0.3, Math.abs(v) * 0.35) }
+                       : { preset: null, weight: 0 };
+}
+
+function updateEmotion(vrm, dt) {
+  const em = vrm.expressionManager;
+  if (!em) return;
+
+  // Beat expired: hand the face back to resting affect.
+  if (emo.beatUntil && performance.now() > emo.beatUntil) {
+    emo.beatUntil = 0;
+    for (const k of EMOTIVE) emo.target[k] = 0;
+    if (emo.resting.preset) emo.target[emo.resting.preset] = emo.resting.weight;
+    stats.beat = "";
+  }
+  // Cross-fade, never snap. Rising faster than falling: a reaction should arrive
+  // promptly and leave slowly, which is also how the sprite swap used to feel.
+  for (const k of EMOTIVE) {
+    if (!emo.supported.has(k)) continue;
+    const up = emo.target[k] > emo.weights[k];
+    emo.weights[k] += (emo.target[k] - emo.weights[k]) * Math.min(1, dt * (up ? 4.5 : 1.8));
+    em.setValue(k, emo.weights[k]);
+  }
+  stats.emotion = EMOTIVE.filter(k => emo.weights[k] > 0.02)
+    .map(k => `${k} ${emo.weights[k].toFixed(2)}`).join(" ") || "neutral";
+}
+
+// ---- Phase 3d: gesture ----------------------------------------------------
+// Procedural, not clip-based. Retargeting a Mixamo set is Track B3 and has not
+// happened, so rather than block the whole phase these are short hand-authored
+// pose offsets on an attack/hold/release envelope. They layer on top of the idle
+// pose the same way speech motion does. When real clips arrive they replace the
+// bodies of these functions, not the state machine around them.
+const GESTURES = {
+  // agreement / emphasis on a beat
+  nod: { dur: 0.9, apply: (b, ph, w) => {
+    const a = Math.sin(ph * Math.PI * 2) * w;
+    if (b.head) b.head.rotation.x += a * 0.13;
+    if (b.neck) b.neck.rotation.x += a * 0.05;
+  }},
+  // curiosity / listening
+  tilt: { dur: 1.6, apply: (b, ph, w) => {
+    const a = Math.sin(ph * Math.PI) * w;
+    if (b.head) { b.head.rotation.z += a * 0.16; b.head.rotation.y += a * 0.05; }
+  }},
+  // interest, warmth — comes toward you
+  leanIn: { dur: 2.2, apply: (b, ph, w) => {
+    const a = Math.sin(ph * Math.PI) * w;
+    if (b.spine) b.spine.rotation.x += a * 0.075;
+    if (b.head) b.head.rotation.x -= a * 0.03;
+  }},
+  // shock / hurt — pulls back and up
+  recoil: { dur: 1.1, apply: (b, ph, w) => {
+    const a = Math.sin(ph * Math.PI) * w;
+    if (b.spine) b.spine.rotation.x -= a * 0.09;
+    if (b.head) b.head.rotation.x -= a * 0.07;
+    if (b.ls) b.ls.rotation.z += a * 0.10;
+    if (b.rs) b.rs.rotation.z -= a * 0.10;
+  }},
+  // dismissal / uncertainty
+  shrug: { dur: 1.4, apply: (b, ph, w) => {
+    const a = Math.sin(ph * Math.PI) * w;
+    if (b.ls) b.ls.rotation.z += a * 0.16;
+    if (b.rs) b.rs.rotation.z -= a * 0.16;
+    if (b.head) b.head.rotation.z += a * 0.04;
+  }},
+};
+
+// Which gesture reads as which feeling. Deliberately not one per label: a
+// gesture on every beat would be a fidget, so several emotions share one and
+// some map to nothing at all.
+const GESTURE_FOR = {
+  happy: "nod", joy: "nod", amusement: "nod", excitement: "nod",
+  approval: "nod", gratitude: "nod", admiration: "leanIn",
+  love: "leanIn", caring: "leanIn", desire: "leanIn", curiosity: "tilt",
+  confusion: "tilt", realization: "tilt", thoughtful: "tilt",
+  surprised: "recoil", surprise: "recoil", fear: "recoil", grief: "recoil",
+  disgust: "recoil", anger: "recoil", angry: "recoil",
+  annoyance: "shrug", disapproval: "shrug", disappointment: "shrug",
+  nervousness: "shrug", embarrassed: "tilt", embarrassment: "tilt",
+};
+
+const gesture = { name: null, t: 0, dur: 0, cooldown: 0 };
+
+// -1 = closed/guarded, +1 = open/leaning in. Driven by relationship stage.
+const posture = { cur: 0, target: 0 };
+const STAGE_POSTURE = {
+  stranger: -0.7, acquaintance: -0.3, friend: 0.15, close: 0.45,
+  romantic: 0.7, intimate: 0.85,
+};
+function setPosture(stage) {
+  const key = String(stage || "").toLowerCase();
+  let v = 0;
+  for (const k of Object.keys(STAGE_POSTURE)) if (key.includes(k)) v = STAGE_POSTURE[k];
+  if (key.includes("strained")) v -= 0.35;        // tension pulls back whatever the stage
+  posture.target = Math.max(-1, Math.min(1, v));
+  stats.posture = posture.target.toFixed(2);
+}
+
+function playGesture(name) {
+  const g = GESTURES[name];
+  if (!g || gesture.cooldown > 0) return;
+  gesture.name = name; gesture.t = 0; gesture.dur = g.dur;
+  gesture.cooldown = g.dur + 1.2;          // no stacking, no twitching
+  stats.gesture = name;
+}
+
+function updateGesture(vrm, dt) {
+  if (gesture.cooldown > 0) gesture.cooldown -= dt;
+  if (!gesture.name || !idle) return;
+  gesture.t += dt;
+  const ph = gesture.t / gesture.dur;
+  if (ph >= 1) { gesture.name = null; stats.gesture = ""; return; }
+  // Ease in and out so it never starts or stops abruptly.
+  const w = Math.sin(Math.min(1, ph) * Math.PI) ** 0.6;
+  GESTURES[gesture.name].apply(
+    { head: idle.head, neck: idle.neck, spine: idle.spine, chest: idle.chest,
+      ls: idle.ls, rs: idle.rs }, ph, w);
+}
+
 function updateSpeech(vrm, dt) {
   const em = vrm.expressionManager;
   if (!em) return;
@@ -347,12 +586,11 @@ function updateSpeech(vrm, dt) {
   // Prosody: a slow envelope of speech energy, not the per-frame amplitude, so
   // the head moves with phrasing instead of twitching per syllable.
   speech.env += (open - speech.env) * Math.min(1, dt * 1.5);
-  if (idle && idle.head && idle.rest.head) {
+  if (idle && idle.head) {
     idle.head.rotation.x += speech.env * 0.045;          // slight nod into the line
     idle.head.rotation.y += Math.sin(idle.t * 1.7) * speech.env * 0.020;
   }
-  if (idle && idle.chest && idle.rest.chest)
-    idle.chest.rotation.x -= speech.env * 0.012;          // chest lifts a touch
+  if (idle && idle.chest) idle.chest.rotation.x -= speech.env * 0.012;
 }
 
 function disposeModel() {
@@ -404,6 +642,7 @@ async function loadCard(id, hasVrm, placeholderRequested, modelUrl) {
       start();                  // render FIRST: a broken idle channel must never
                                 // cost us the loop that proves the model is there
       try {
+        initEmotion(vrm);       // 3d: what presets does this model have?
         initIdle(vrm);          // 3b: breath, sway, blink, gaze — always on
       } catch (e) {
         console.warn("[avatar] idle init failed; model still renders:", e);
@@ -459,6 +698,8 @@ function tick(now) {
     try {
       updateIdle(currentVrm, dt);
       updateSpeech(currentVrm, dt);      // after idle: adds to the idle pose
+      updateGesture(currentVrm, dt);     // and so does gesture
+      updateEmotion(currentVrm, dt);     // expression track (independent of pose)
     } catch (e) {
       if (!idleFailed) {
         idleFailed = true;                          // report once, then stay quiet
@@ -511,7 +752,15 @@ export function boot() {
     speech.target = Math.max(0, Math.min(1, Number(e.detail && e.detail.amp) || 0));
     speech.last = performance.now();
   });
-  window.addEventListener("avatar:expr",  () => { /* 3d: expression track */ });
+  window.addEventListener("avatar:expr", (e) => {
+    if (currentVrm) setBeat(e.detail && e.detail.label);
+  });
+  window.addEventListener("avatar:mood", (e) => {
+    const d = e.detail || {};
+    if (!currentVrm) return;
+    setResting(d.mood, d.valence);
+    if (d.stage !== undefined) setPosture(d.stage);
+  });
 
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {
