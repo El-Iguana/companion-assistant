@@ -615,6 +615,28 @@ async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)
     return Response(content=base64.b64decode(b64), media_type="image/png")
 
 
+@app.get("/api/vrm")
+async def list_vrm(_: User = Depends(current_user)):
+    """Avatar models available to assign to a card (data/vrm/*.vrm)."""
+    d = DATA / "vrm"
+    if not d.is_dir():
+        return []
+    return sorted(
+        ({"name": f.name, "size": f.stat().st_size} for f in d.glob("*.vrm")),
+        key=lambda x: x["name"],
+    )
+
+
+@app.get("/api/vrm/{name}")
+async def get_vrm(name: str, _: User = Depends(current_user)):
+    """Serve one model by name. Used by the card editor's picker and the harness,
+    so a model can be previewed before it is assigned to a card."""
+    path = (DATA / "vrm" / Path(name).name).resolve()
+    if not str(path).startswith(str((DATA / "vrm").resolve())) or not path.is_file():
+        raise HTTPException(404, "model not found")
+    return FileResponse(path, media_type="model/gltf-binary")
+
+
 @app.get("/api/cards/{card_id}/avatar.vrm")
 async def get_avatar(card_id: str, cur: Ctx = Depends(get_ctx)):
     """Return this card's VRM model, if it is on the avatar tier.

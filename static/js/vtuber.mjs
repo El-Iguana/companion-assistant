@@ -373,7 +373,7 @@ function disposeModel() {
   placeholder = null;
 }
 
-async function loadCard(id, hasVrm, placeholderRequested) {
+async function loadCard(id, hasVrm, placeholderRequested, modelUrl) {
   cardId = id;
   disposeModel();
   if (!id) { stop(); announce(false); return; }
@@ -381,13 +381,15 @@ async function loadCard(id, hasVrm, placeholderRequested) {
   // Sprite tier is the default and must be untouched: no canvas, no takeover, the
   // portrait keeps the corner exactly as it always has. The placeholder is NOT a
   // fallback for these cards — it is opt-in, for the dev harness only.
-  if (!hasVrm && !placeholderRequested) { stop(); announce(false); return; }
+  if (!hasVrm && !modelUrl && !placeholderRequested) { stop(); announce(false); return; }
 
-  if (hasVrm) {
+  if (hasVrm || modelUrl) {
     try {
       const loader = new GLTFLoader();
       loader.register((parser) => new VRMLoaderPlugin(parser));
-      const gltf = await loader.loadAsync(`/api/cards/${id}/avatar.vrm`);
+      // A direct url wins over the card lookup: the harness previews a model that
+      // no card points at yet, which is also what a model picker needs.
+      const gltf = await loader.loadAsync(modelUrl || `/api/cards/${id}/avatar.vrm`);
       if (cardId !== id) return;                    // card switched mid-load
       const vrm = gltf.userData.vrm;
       VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -501,8 +503,8 @@ export function boot() {
   initScene(canvas);
 
   window.addEventListener("avatar:card", (e) => {
-    const { id, hasVrm, placeholder: ph } = e.detail || {};
-    loadCard(id || null, !!hasVrm, !!ph);
+    const { id, hasVrm, placeholder: ph, url } = e.detail || {};
+    loadCard(id || null, !!hasVrm, !!ph, url || null);
   });
 
   window.addEventListener("avatar:speak", (e) => {
