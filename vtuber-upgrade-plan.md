@@ -237,7 +237,17 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
 - **Prosody head motion** — small nods/tilts keyed off amplitude envelope and sentence boundaries.
 - **Exit criteria:** the mouth tracks speech convincingly at conversational distance; head is not rigid.
 
-**Phase 3d — Emotion and gesture**
+✅ **Phase 3d — Emotion and gesture (done)**
+> Shipped: expression track consuming the Phase 2 beats (weight carries intensity, so `annoyance`
+> and `anger` differ rather than collapsing; cross-faded, rising faster than falling; presets
+> **detected per model** so VRM 0.x's missing `surprised` falls back instead of no-op), a
+> **procedural** gesture track (nod/tilt/leanIn/recoil/shrug on an envelope, with a cooldown —
+> clip retargeting is Track B3 and blocking on it was the worse trade), and posture bias from
+> relationship stage fed by a new `avatar:mood` event.
+> Also fixed the pose-composition bug this phase exposed: idle **set** bones while gesture/speech/
+> posture **added**, and shoulders were reset by neither — posture integrated a delta every frame
+> and the arms wandered off. Rest now covers every animated bone, `resetPose()` runs first, and all
+> channels are additive.
 - **Expression track** — Phase 2 `[expr]` beats + mood/relationship resting affect → VRM presets,
   **cross-faded**, never snapped.
   - *Mapping is lossy and needs a decision.* VRM 1.0 ships ~5 emotive presets
@@ -248,6 +258,8 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
   machine with cross-fade blending, triggered on speech beats and `[expr]` changes.
 - **Posture bias** — relationship stage shifts resting posture (guarded/closed → open/leaning-in).
 - **Exit criteria:** all six channels run together without fighting each other; blends look continuous.
+  — **met**, and "without fighting each other" turned out to be the whole difficulty: the mixed
+  absolute/additive convention was exactly that fight.
 
 **Phase 4 — Polish**
 - Transition smoothing everywhere, idle micro-motion variety, camera framing per scene.

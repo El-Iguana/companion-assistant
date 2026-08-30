@@ -354,8 +354,15 @@ per-relationship **context override** (⚙).
   amplitude drives `aa`+`ih` with asymmetric attack/release and a silence timeout, plus prosody head
   motion off a slow energy envelope; visemes stay blocked on phoneme timings no TTS backend exposes.
   Tuning lives in `static/js/vtuber.mjs` (`idleGain` 2, `armRestDeg` 72, `mouthGain` 6) and is
-  adjustable live from `/static/avatar-test.html`. Next: ◻ 3d emotion+gesture (wires the Phase 2
-  `avatar:expr` beats to the face) · ◻ Phase 5 interruption. **Track B (sourcing a `.vrm`) now blocks 3b** —
+  adjustable live from `/static/avatar-test.html`. ✅ **3d emotion+gesture done** — the Phase 2
+  `avatar:expr` beats now drive the face: Core-8/Full-28 → VRM presets with weight as intensity,
+  cross-faded, presets detected per model (VRM 0.x has no `surprised`, so it falls back). Procedural
+  gesture track (nod/tilt/leanIn/recoil/shrug; clips are Track B3) and posture bias from relationship
+  stage via a new `avatar:mood` event. **Pose composition rule: `resetPose()` returns every animated
+  bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
+  is what sent the arms wandering, and shoulders must stay in the rest set.
+  **All six channels of "fully animated" are now live.** Next: ◻ Phase 5 interruption ·
+  ◻ Track B3 real animation clips · ◻ visemes (blocked on phoneme timings). **Track B (sourcing a `.vrm`) now blocks 3b** —
   Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
   Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
 - **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
