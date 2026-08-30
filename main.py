@@ -21,7 +21,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.responses import (
-    HTMLResponse, JSONResponse, StreamingResponse, Response,
+    HTMLResponse, JSONResponse, StreamingResponse, Response, FileResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -479,6 +479,8 @@ async def list_cards(cur: Ctx = Depends(get_ctx)):
         # Labels only — the sprite blobs stay trimmed. The client needs these to know
         # which inline [expr:x] beats it actually has a sprite for.
         d["expression_labels"] = sorted(c.expressions.keys())
+        # Avatar tier: "" here means the client stays on the sprite portrait.
+        d["has_vrm"] = bool(c.vrm)
         out.append(d)
     return out
 
@@ -611,6 +613,25 @@ async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)
         raise HTTPException(404, "no sprite")
     import base64
     return Response(content=base64.b64decode(b64), media_type="image/png")
+
+
+@app.get("/api/cards/{card_id}/avatar.vrm")
+async def get_avatar(card_id: str, cur: Ctx = Depends(get_ctx)):
+    """Return this card's VRM model, if it is on the avatar tier.
+
+    Models live in data/vrm/ rather than inside the card: a .vrm is tens of
+    megabytes, and the card JSON is read and rewritten on every turn.
+    """
+    card = _load(cur.cards, card_id, CharacterCard)
+    if not card:
+        raise HTTPException(404, "card not found")
+    if not card.vrm:
+        raise HTTPException(404, "card is on the sprite tier")
+    # Filename only — never let a card walk out of the models dir.
+    path = (DATA / "vrm" / Path(card.vrm).name).resolve()
+    if not str(path).startswith(str((DATA / "vrm").resolve())) or not path.is_file():
+        raise HTTPException(404, "model file missing")
+    return FileResponse(path, media_type="model/gltf-binary")
 
 
 @app.get("/api/cards/{card_id}/expressions")

@@ -32,7 +32,7 @@ if podman container exists "$CONTAINER"; then
   podman rm -f "$CONTAINER"
 fi
 
-mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions,settings}
+mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions,settings,vrm}
 
 # Both backend URLs have to move together. They used to not: only KOBOLD_URL was set
 # here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite

@@ -76,10 +76,39 @@ function renderMessages() {
   scrollDown();
 }
 
+// ---- avatar bridge (Phase 3a) ---------------------------------------------
+// static/js/vtuber.mjs is an ESM module and this file is a classic script, so the
+// two never import each other — they exchange CustomEvents on window. When the
+// avatar takes over, the sprite portrait hides; if it fails or the card is on the
+// sprite tier, it stays exactly as it always was.
+let avatarActive = false;
+let avatarCardId = null;
+
+window.addEventListener("avatar:active", (e) => {
+  avatarActive = !!(e.detail && e.detail.active);
+  const cv = $("#avatar-canvas"); if (cv) cv.hidden = !avatarActive;
+  updatePortrait();
+});
+
+// Tell the renderer which card is open. Cheap and idempotent, so it is safe to
+// call from every path that can change the current card.
+function syncAvatarCard() {
+  const card = currentCard();
+  const id = card ? card.id : null;
+  if (id === avatarCardId) return;
+  avatarCardId = id;
+  window.dispatchEvent(new CustomEvent("avatar:card", {
+    detail: { id, hasVrm: !!(card && card.has_vrm) },
+  }));
+}
+
 // Swap the floating portrait to the current character's active emotion sprite.
 function updatePortrait() {
   const card = currentCard();
   const img = $("#portrait");
+  syncAvatarCard();
+  // Avatar tier owns the corner — the sprite would draw on top of the canvas.
+  if (avatarActive) { img.hidden = true; updateMood(); return; }
   if (!card || !card.has_expressions) { img.hidden = true; updateMood(); return; }
   const msgs = state.session.messages;
   const lastChar = [...msgs].reverse().find(m => m.role === "char");
@@ -1015,6 +1044,9 @@ function playBuffer(ctx, arrayBuf, valid) {
       const amp = Math.sqrt(sum / data.length);
       ttsLevel = amp;                     // publish her output level for the mic's self-suppression
       if (img && !img.hidden) img.style.transform = `scaleY(${1 + Math.min(amp * 0.5, 0.06)})`;
+      // Same signal the sprite mouth uses; 3c drives the jaw bone with it.
+      if (avatarActive)
+        window.dispatchEvent(new CustomEvent("avatar:speak", { detail: { amp } }));
       mouthRAF = requestAnimationFrame(tick);
     };
     tick();
@@ -1059,7 +1091,13 @@ function cleanForTTS(t) {
 // the next speech segment, and is applied when that segment actually starts playing.
 function applyExpr(label) {
   const card = currentCard();
-  if (!card || !card.has_expressions || !label || label === exprLive) return;
+  if (!card || !label || label === exprLive) return;
+  if (avatarActive) {            // 3d will drive the avatar's expression track with this
+    exprLive = label;
+    window.dispatchEvent(new CustomEvent("avatar:expr", { detail: { label } }));
+    return;
+  }
+  if (!card.has_expressions) return;
   // /api/cards trims the sprite blobs, so labels come from expression_labels.
   const have = card.expression_labels || Object.keys(card.expressions || {});
   if (have.length && !have.includes(label)) return;        // no sprite for it — leave the portrait

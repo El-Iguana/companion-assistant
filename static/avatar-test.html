@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Avatar harness (Phase 3a).
+     Exercises static/js/vtuber.mjs on its own: no login, no chat, no card needed.
+     Track B has not produced a .vrm yet, so the default here is the opt-in
+     placeholder path — the only way to drive the renderer before a model exists.
+     Open http://localhost:7861/static/avatar-test.html -->
+<html><head><meta charset="utf-8"><title>avatar harness</title>
+<style>
+  html,body{margin:0;background:#20202a;height:100%;color:#ddd;font:13px system-ui}
+  #wrap{position:relative;width:100vw;height:100vh}
+  #avatar-canvas{position:absolute;right:12px;bottom:0;height:80vh;width:40%}
+  #log{position:absolute;left:10px;top:10px;font-family:ui-monospace,monospace;
+       white-space:pre;line-height:1.5}
+  .ok{color:#7ddc7d}.bad{color:#ff8080}
+</style>
+<script type="importmap">
+{"imports":{"three":"/static/vendor/three.module.js",
+            "three/addons/":"/static/vendor/",
+            "@pixiv/three-vrm":"/static/vendor/three-vrm.module.js"}}
+</script></head>
+<body><div id="wrap">
+  <canvas id="avatar-canvas"></canvas>
+  <div id="log"></div>
+</div>
+<script type="module">
+const el = document.getElementById("log");
+const log = (m, cls) => el.innerHTML += `<span class="${cls||''}">${m}</span>\n`;
+window.addEventListener("error", (e) => log("ERROR: " + e.message, "bad"));
+window.addEventListener("avatar:active", (e) =>
+  log("avatar:active -> " + e.detail.active, e.detail.active ? "ok" : ""));
+try {
+  await import("/static/js/vtuber.mjs");
+  log("module imported", "ok");
+  document.getElementById("avatar-canvas").hidden = false;
+  window.dispatchEvent(new CustomEvent("avatar:card",
+    { detail: { id: "harness", hasVrm: false, placeholder: true } }));
+  log("requested placeholder");
+  let frames = 0;
+  const seen = () => { frames++; requestAnimationFrame(seen); };
+  requestAnimationFrame(seen);
+  setTimeout(() => {
+    const c = document.getElementById("avatar-canvas");
+    const painted = c.width > 0 && c.height > 0;
+    log("canvas backing: " + c.width + "x" + c.height, painted ? "ok" : "bad");
+    log("rAF frames in 2s: " + frames, frames > 30 ? "ok" : "bad");
+    log(painted && frames > 30
+        ? "\n3a looks healthy — you should see a slowly turning figure."
+        : "\nsomething is wrong; check the console.", painted && frames > 30 ? "ok" : "bad");
+  }, 2000);
+} catch (e) { log("IMPORT FAILED: " + e, "bad"); }
+</script></body></html>

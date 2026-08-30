@@ -142,6 +142,7 @@
       <div id="chat-body">
         <div id="messages"></div>
         <img id="portrait" alt="" hidden>
+        <canvas id="avatar-canvas" hidden></canvas>
       </div>
       <form id="composer">
         <button id="mic" type="button" class="btn-icon" title="Hold to talk (push-to-talk)" disabled>🎤</button>
@@ -557,5 +558,20 @@
   </div>
 
   <script src="/static/js/app.js?v={{ js_v }}"></script>
+
+  <!-- Avatar renderer (Phase 3a). three.js is ESM-only, so it loads as a module
+       island beside the classic app.js and they talk over CustomEvents. Libraries
+       are vendored under /static/vendor rather than pulled from a CDN: the app is
+       offline after first build and that stays true. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/static/vendor/three.module.js",
+      "three/addons/": "/static/vendor/",
+      "@pixiv/three-vrm": "/static/vendor/three-vrm.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="/static/js/vtuber.mjs?v={{ js_v }}"></script>
 </body>
 </html>

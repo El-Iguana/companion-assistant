@@ -98,6 +98,11 @@ class CharacterCard(BaseModel):
     expr_from_upload: bool = False       # derive expression sprites from the uploaded portrait (img2img) vs. txt2img
     expr_denoise: float = 0.55           # img2img denoise for emotion sprites (lower = closer to base/likeness)
     expressions: Dict[str, str] = {}     # emotion -> base64 PNG sprite
+    # Avatar tier. "" = sprite tier (the default): this card keeps the generated
+    # expression sprites and no 3D avatar. A filename here (under data/vrm/) puts the
+    # card on the avatar tier. Sprites are generated per card at no manual cost; a VRM
+    # is hand-authored content, so this stays opt-in per character.
+    vrm: str = ""
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 

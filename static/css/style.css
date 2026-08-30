@@ -75,6 +75,13 @@ body {
   max-width: 34%; pointer-events: none; filter: drop-shadow(0 4px 16px #0008);
   z-index: 1; }
 
+/* Avatar canvas (Phase 3a) occupies the same corner as #portrait — the two are
+   mutually exclusive, swapped by the avatar:active event. Sized in CSS, not by
+   attribute: the renderer reads clientWidth/clientHeight and resizes to match. */
+#avatar-canvas { position: absolute; right: 12px; bottom: 0; height: 46vh;
+  width: 34%; pointer-events: none; z-index: 1;
+  filter: drop-shadow(0 4px 16px #0008); }
+
 /* Expression generator panel */
 #expr-panel { padding: 12px 20px; border-bottom: 1px solid var(--line);
   background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
