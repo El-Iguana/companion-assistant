@@ -1353,11 +1353,28 @@ async function playSample(voice, speed) {
 $("#voice-test").addEventListener("click", () => playSample(currentVoice()));
 
 // ---- speech input (push-to-talk STT + barge-in) ---------------------------
-let micStream = null, mediaRec = null, recChunks = [], recording = false;
+// Push-to-talk. Captures PCM off an AudioContext for the same reason hands-free
+// does: WebKitGTK's MediaRecorder constructs, reports state="recording", and
+// never emits a byte, so in the desktop shell this button was silently dead.
+// The WAV encoder is shared with the hands-free path (hfWav).
+let micStream = null, recording = false;
+let recCtx = null, recProc = null, recPcm = [];
 
 async function ensureMic() {
   if (micStream) return micStream;
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: a });
+  const want = await pickMicDeviceId();      // labels need the grant above first
+  const open = (micStream.getAudioTracks()[0] || {}).getSettings
+    ? micStream.getAudioTracks()[0].getSettings().deviceId : null;
+  if (want && want !== open) {
+    try {
+      const better = await navigator.mediaDevices.getUserMedia(
+        { audio: { ...a, deviceId: { exact: want } } });
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = better;
+    } catch { /* keep the default */ }
+  }
   return micStream;
 }
 
@@ -1366,13 +1383,25 @@ async function startRecording() {
   stopSpeaking();        // barge-in: cut her voice…
   abortChat();           // …and stop any in-flight generation
   let stream;
-  try { stream = await ensureMic(); }
-  catch { alert("Microphone access denied."); return; }
-  recChunks = [];
-  mediaRec = new MediaRecorder(stream);
-  mediaRec.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
-  mediaRec.onstop = onRecordingStop;
-  mediaRec.start();
+  try {
+    stream = await ensureMic();
+  } catch (e) {
+    // alert() is invisible in the desktop shell; say it somewhere readable.
+    console.error("[ptt] microphone unavailable:", e && e.message || e);
+    showToast("Microphone unavailable: " + ((e && e.name) || "permission denied"));
+    return;
+  }
+  recPcm = [];
+  if (!recCtx) recCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (recCtx.state === "suspended") { try { await recCtx.resume(); } catch {} }
+  recProc = recCtx.createScriptProcessor(4096, 1, 1);
+  recProc.onaudioprocess = (e) => {
+    if (recording) recPcm.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  };
+  const src = recCtx.createMediaStreamSource(stream);
+  src.connect(recProc);
+  const mute = recCtx.createGain(); mute.gain.value = 0;   // node must reach a
+  recProc.connect(mute); mute.connect(recCtx.destination); // destination to run
   recording = true;
   $("#mic").classList.add("recording");
 }
@@ -1381,22 +1410,25 @@ function stopRecording() {
   if (!recording) return;
   recording = false;
   $("#mic").classList.remove("recording");
-  try { if (mediaRec && mediaRec.state !== "inactive") mediaRec.stop(); } catch {}
+  if (recProc) { recProc.onaudioprocess = null; try { recProc.disconnect(); } catch {} recProc = null; }
+  onRecordingStop();
 }
 
 async function transcribeBlob(blob) {
   try {
     const fd = new FormData();
-    fd.append("file", blob, "speech.webm");
+    fd.append("file", blob, blob.type === "audio/wav" ? "speech.wav" : "speech.webm");
     const r = await fetch("/api/stt", { method: "POST", body: fd });
     return r.ok ? ((await r.json()).text || "") : "";
   } catch { return ""; }
 }
 
 async function onRecordingStop() {
-  const blob = new Blob(recChunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" });
-  recChunks = [];
-  if (!blob.size) return;
+  const rate = (recCtx && recCtx.sampleRate) || 48000;
+  const blob = hfWav(recPcm, rate);
+  console.log(`[ptt] ${recPcm.length} block(s), ${blob.size} bytes @${rate}Hz`);
+  recPcm = [];
+  if (blob.size <= 44) return;              // header only: nothing was captured
   $("#mic").classList.add("busy");
   try {
     const t = (await transcribeBlob(blob)).trim();   // push-to-talk: no wake-word gate (explicit press)
