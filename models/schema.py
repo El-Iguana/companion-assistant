@@ -33,6 +33,7 @@ class AppSettings(BaseModel):
     #                sleep phrase or the idle timeout, so follow-ups need no prefix
     wake_mode: str = "phrase"            # "phrase" | "continuous"
     sleep_phrase: str = "that will be all"   # ends a continuous conversation
+    farewell: str = "Goodbye."           # spoken when the conversation closes
     # An open mic that never closes is a privacy problem, not just an annoyance:
     # walk away mid-conversation and it would keep transcribing the room. 0 = never.
     sleep_after_s: int = Field(180, ge=0, le=3600)
@@ -136,6 +137,7 @@ class CharacterCard(BaseModel):
     wake_word: str = ""
     # Per-character too: the phrase that ends her conversation. "" = the global one.
     sleep_phrase: str = ""
+    farewell: str = ""                   # what she says on the way out; "" = global
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 

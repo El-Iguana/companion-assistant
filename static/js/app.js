@@ -747,6 +747,7 @@ async function openCardEditor(card) {
   await refreshVrmSelect(ceBase.vrm || "");
   $("#ce-wake").value = ceBase.wake_word || "";
   $("#ce-sleep").value = ceBase.sleep_phrase || "";
+  $("#ce-farewell").value = ceBase.farewell || "";
   const mode = ceBase.avatar_mode || (ceBase.vrm ? "vrm" : "sprite");
   $("#ce-mode-vrm").checked = mode === "vrm";
   $("#ce-mode-sprite").checked = mode !== "vrm";
@@ -902,6 +903,7 @@ function buildCardPayload() {
     avatar_mode: $("#ce-mode-vrm").checked ? "vrm" : "sprite",
     wake_word: $("#ce-wake").value.trim(),
     sleep_phrase: $("#ce-sleep").value.trim(),
+    farewell: $("#ce-farewell").value.trim(),
     image: ceImage !== undefined ? ceImage : (ceBase.image || null),
     character_book: ceEntries.length
       ? { ...(ceBase.character_book || {}),
@@ -1404,6 +1406,7 @@ mic.addEventListener("pointercancel", () => stopRecording());
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
   full_duplex: false, mic_device_id: "", mic_device_label: "", desktop_card_id: "",
   wake_mode: "phrase", sleep_phrase: "that will be all", sleep_after_s: 180,
+  farewell: "Goodbye.",
   summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
   recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
   auto_facts_max_new: 3 };
@@ -1448,6 +1451,32 @@ function activeWakeWord() {
   return ((card && card.wake_word) || voiceSettings.wake_word || "").trim();
 }
 
+function activeFarewell() {
+  const card = currentCard();
+  const v = (card && card.farewell !== undefined && card.farewell !== "")
+    ? card.farewell : voiceSettings.farewell;
+  return (v === undefined ? "Goodbye." : v).trim();
+}
+
+// Say one line now, outside the reply queue. Silence after the sleep phrase is
+// ambiguous -- it looks the same whether she heard you and closed the
+// conversation or simply did not hear you at all.
+//
+// Deliberately not routed through the model: this is a confirmation, and it has
+// to be immediate and predictable rather than a generated turn that takes
+// seconds and might ramble. It is not added to the transcript either, for the
+// same reason -- it is UI feedback, not something she said in the conversation.
+async function speakLine(text) {
+  if (!text || !ttsEnabled) return;
+  try {
+    const ctx = ensureAudioCtx();
+    stopSpeaking();                       // nothing else should be mid-sentence
+    const run = ttsRun;
+    const buf = await fetchTTS(text);
+    if (buf && run === ttsRun) await playBuffer(ctx, buf, () => run === ttsRun);
+  } catch (e) { console.warn("[tts] farewell failed:", e); }
+}
+
 function activeSleepPhrase() {
   const card = currentCard();
   return ((card && card.sleep_phrase) || voiceSettings.sleep_phrase || "").trim();
@@ -1472,6 +1501,9 @@ function setAwake(on, why) {
   awake = on;
   awakeUntil = on ? Date.now() + wakeTimeoutMs() : 0;
   console.log(`[mic] ${on ? "awake" : "asleep"} (${why})`);
+  // Only when the conversation ends, and not when the mic is switched off --
+  // saying goodbye to someone who just muted you is talking to an empty room.
+  if (!on && why !== "mic off") speakLine(activeFarewell());
   const dot = $("#hf-btn");
   if (dot) dot.classList.toggle("awake", on);
   if (on) showToast("Listening — say \u201c" + (activeSleepPhrase() || "stop") + "\u201d when done");
@@ -1482,14 +1514,40 @@ function wakeTimeoutMs() {
   return (s === 0 || s === undefined) ? Infinity : s * 1000;
 }
 
-function stripPrefix(text, phrase) {
-  const t = text.trim().replace(/^[^\w]+/, "");
-  return t.slice(phrase.length).replace(/^[\s,.:!?-]+/, "").trim();
+// Compare on words alone. Both sides carry punctuation nobody controls: Whisper
+// decides whether to end a sentence with a full stop, and a phrase typed into a
+// settings box may well be "That will be all." -- which would never prefix-match
+// a transcript of "That will be all". Contractions are expanded because the
+// transcriber picks between "that will" and "that'll" on its own.
+const CONTRACTIONS = [
+  [/\bthat'?ll\b/g, "that will"], [/\bthat'?s\b/g, "that is"],
+  [/\bit'?s\b/g, "it is"],        [/\bwe'?re\b/g, "we are"],
+  [/\bi'?m\b/g, "i am"],          [/\bdon'?t\b/g, "do not"],
+  [/\bwon'?t\b/g, "will not"],    [/\bcan'?t\b/g, "cannot"],
+  [/\byou'?re\b/g, "you are"],    [/\blet'?s\b/g, "let us"],
+];
+
+function normPhrase(t) {
+  let x = String(t || "").toLowerCase().replace(/[\u2018\u2019]/g, "'");
+  for (const [re, to] of CONTRACTIONS) x = x.replace(re, to);
+  return x.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function startsWith(text, phrase) {
-  if (!phrase) return false;
-  return text.toLowerCase().replace(/^[^\w]+/, "").startsWith(phrase.toLowerCase());
+  const p = normPhrase(phrase);
+  if (!p) return false;
+  const t = normPhrase(text);
+  return t === p || t.startsWith(p + " ");
+}
+
+// Drop a leading phrase, working on the ORIGINAL text so the reply keeps its
+// punctuation and capitals -- only the comparison is normalised.
+function stripPrefix(text, phrase) {
+  const words = normPhrase(phrase).split(" ").filter(Boolean).length;
+  let t = text.trim().replace(/^[^\w]+/, "");
+  for (let i = 0; i < words; i++)
+    t = t.replace(/^[^\s]+\s*/, "");
+  return t.replace(/^[\s,.:!?-]+/, "").trim();
 }
 
 // Returns the text to send, or "" to ignore this utterance.
@@ -1868,6 +1926,7 @@ $("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
   $("#vc-wakemode").value = voiceSettings.wake_mode || "phrase";
   $("#vc-sleep").value = voiceSettings.sleep_phrase ?? "that will be all";
+  $("#vc-farewell").value = voiceSettings.farewell ?? "Goodbye.";
   const slp = voiceSettings.sleep_after_s ?? 180;
   $("#vc-sleepafter").value = slp;
   $("#vc-sleepafter-val").textContent = slp ? slp + " s" : "never";
@@ -2019,6 +2078,7 @@ $("#vc-save").addEventListener("click", async () => {
     vad_silence_ms: Number($("#vc-silence").value),
     wake_mode: $("#vc-wakemode").value,
     sleep_phrase: $("#vc-sleep").value.trim(),
+    farewell: $("#vc-farewell").value.trim(),
     sleep_after_s: Number($("#vc-sleepafter").value),
     full_duplex: $("#vc-duplex").checked,
     mic_device_id: $("#vc-mic").value,
