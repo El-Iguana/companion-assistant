@@ -1382,7 +1382,7 @@ let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad
   recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
   auto_facts_max_new: 3 };
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
-let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
+let hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
 
 // ---- self-hearing guard ---------------------------------------------------
 // full_duplex is only safe when her voice cannot reach the mic. If it is on
@@ -1423,25 +1423,33 @@ function applyWakeWord(text) {
 }
 
 function hfStartUtterance() {
-  if (!hfStream) return;
-  hfChunks = [];
-  try { hfRec = new MediaRecorder(hfStream); } catch { return; }
-  hfRec.ondataavailable = (e) => { if (e.data.size) hfChunks.push(e.data); };
-  hfRec.onstop = hfOnUtterance;
-  hfRec.start();
+  if (!hfStream) { console.warn("[mic] no stream to record"); return; }
+  hfPcm = hfPre.slice();          // keep what was said just before the gate opened
+  hfCapturing = true;
   $("#hf-btn").classList.add("listening");
+  console.log("[mic] capturing (pre-roll " + hfPre.length + " blocks)");
 }
 
 function hfStopUtterance() {
   $("#hf-btn").classList.remove("listening");
-  try { if (hfRec && hfRec.state !== "inactive") hfRec.stop(); } catch {}
+  if (!hfCapturing) return;
+  hfCapturing = false;
+  hfOnUtterance();          // no recorder to stop; the buffer is already complete
 }
 
 async function hfOnUtterance() {
-  const blob = new Blob(hfChunks, { type: (hfRec && hfRec.mimeType) || "audio/webm" });
-  hfChunks = [];
-  if (!blob.size || !hfActive) return;
+  const rate = (hfCtx && hfCtx.sampleRate) || 48000;
+  const blob = hfWav(hfPcm, rate);
+  console.log(`[mic] utterance: ${hfPcm.length} block(s), ${blob.size} bytes @${rate}Hz, ` +
+              `active=${hfActive}`);
+  hfPcm = []; hfPre = [];
+  if (!blob.size || !hfActive) {
+    console.warn("[mic] dropped: " + (!blob.size ? "recorder produced no audio"
+                                                 : "hands-free disengaged"));
+    return;
+  }
   const raw = (await transcribeBlob(blob)).trim();
+  console.log("[mic] transcript: " + JSON.stringify(raw));
   if (!raw) return;
   if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
   selfHeardCount = 0;                                     // a genuine turn clears it
@@ -1543,6 +1551,16 @@ function hfTick() {
   const rms = Math.sqrt(sum / data.length);
   const now = performance.now();
   const base = voiceSettings.vad_threshold ?? 0.015;
+  // Peak level once a second. Without this, "nothing happens when I talk" is
+  // indistinguishable between a dead mic, a suspended context and too high a gate.
+  hfPeak = Math.max(hfPeak, rms);
+  if (now - hfPeakAt > 1000) {
+    if (hfPeak > 0.002)
+      console.log(`[mic] peak ${hfPeak.toFixed(4)} / gate ${base}` +
+                  (hfPeak > base ? " OPEN" : " (below gate)"));
+    else console.log("[mic] silence — analyser reading 0");
+    hfPeak = 0; hfPeakAt = now;
+  }
 
   if (!hfSpeaking) {
     // Phase 5. Half-duplex (default) refuses to listen while she speaks: no
@@ -1572,31 +1590,112 @@ function hfTick() {
   hfRAF = requestAnimationFrame(hfTick);
 }
 
+let hfLastError = "";
+let hfPeak = 0, hfPeakAt = 0;
+
+// ---- PCM capture ----------------------------------------------------------
+// Not MediaRecorder. WebKitGTK's implementation constructs fine, reports
+// state="recording" and advertises audio/mp4, then never fires ondataavailable
+// -- measured: 19 utterances, 0 bytes each. Since the desktop shell IS
+// WebKitGTK, recording has to come from somewhere that actually works.
+//
+// The AudioContext is already open for the VAD, so tapping raw PCM off it costs
+// one node and removes every codec question. /api/stt takes WAV, which is what
+// Phase 1 was originally verified with.
+//
+// ScriptProcessorNode is deprecated in favour of AudioWorklet, but it needs no
+// separate module file and is supported everywhere including here; the buffer is
+// small and this only runs while the mic is on.
+let hfProc = null, hfPcm = [], hfCapturing = false, hfPre = [];
+const HF_PRE_ROLL = 8;          // ~0.7 s of 4096-frame blocks kept before the gate
+
+function hfWav(chunks, rate) {
+  let n = 0;
+  for (const c of chunks) n += c.length;
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVEfmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for (const c of chunks)
+    for (let i = 0; i < c.length; i++, o += 2) {
+      const x = Math.max(-1, Math.min(1, c[i]));
+      v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+    }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
 async function engageHandsFree() {
   if (hfActive) return true;
+  hfLastError = "";
   try {
     const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     if (voiceSettings.mic_device_id) a.deviceId = { exact: voiceSettings.mic_device_id };
     try {
       hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
-    } catch {
+    } catch (e1) {
       delete a.deviceId;                       // saved device unplugged — fall back
       hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
     }
-  } catch { return false; }
+  } catch (e) {
+    hfLastError = (e && (e.name + ": " + e.message)) || String(e);
+    return false;
+  }
   hfCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // A context created outside a user gesture starts SUSPENDED, and a suspended
+  // AnalyserNode returns silence -- so the VAD saw rms 0 forever and no
+  // utterance was ever captured, while the mic stream sat open and looked fine.
+  // Resuming is separate from the TTS context; they are two AudioContexts.
+  if (hfCtx.state === "suspended") {
+    try { await hfCtx.resume(); } catch (e) { /* reported below */ }
+  }
+  if (hfCtx.state !== "running") {
+    hfLastError = "audio context " + hfCtx.state + " (needs a user gesture)";
+    try { hfStream.getTracks().forEach(t => t.stop()); } catch {}
+    hfStream = null;
+    return false;                       // fail loudly rather than listen to silence
+  }
   hfAnalyser = hfCtx.createAnalyser(); hfAnalyser.fftSize = 512;
-  hfCtx.createMediaStreamSource(hfStream).connect(hfAnalyser);
+  const src = hfCtx.createMediaStreamSource(hfStream);
+  src.connect(hfAnalyser);
+  hfProc = hfCtx.createScriptProcessor(4096, 1, 1);
+  hfPcm = []; hfPre = []; hfCapturing = false;
+  hfProc.onaudioprocess = (e) => {
+    const block = new Float32Array(e.inputBuffer.getChannelData(0));   // copy: reused
+    if (hfCapturing) { hfPcm.push(block); return; }
+    // Rolling pre-roll. The gate only opens once speech is already loud enough,
+    // so without this the front of the utterance is clipped -- and the wake word
+    // is the very first thing said, which is exactly the part that was lost.
+    hfPre.push(block);
+    if (hfPre.length > HF_PRE_ROLL) hfPre.shift();
+  };
+  src.connect(hfProc);
+  // A ScriptProcessor only runs while connected to a destination. Route it
+  // through a silent gain so nothing is played back.
+  const mute = hfCtx.createGain(); mute.gain.value = 0;
+  hfProc.connect(mute); mute.connect(hfCtx.destination);
   hfActive = true; hfSpeaking = false; hfSilenceStart = 0;
+  console.log("[mic] hands-free engaged; ctx=" + hfCtx.state +
+              " device=" + ((hfStream.getAudioTracks()[0] || {}).label || "?"));
   hfTick();
   return true;
 }
 
 function disengageHandsFree() {
-  hfActive = false; hfSpeaking = false;
+  hfActive = false; hfSpeaking = false; hfCapturing = false;
   if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
-  try { if (hfRec && hfRec.state !== "inactive") hfRec.stop(); } catch {}
-  hfRec = null;
+  // The ScriptProcessor keeps firing until it is disconnected, so dropping the
+  // reference alone would leave an audio callback running against a closed
+  // context every 4096 frames.
+  if (hfProc) {
+    hfProc.onaudioprocess = null;
+    try { hfProc.disconnect(); } catch {}
+    hfProc = null;
+  }
+  hfPcm = []; hfPre = [];
   $("#hf-btn").classList.remove("listening");
   if (hfStream) { hfStream.getTracks().forEach(t => t.stop()); hfStream = null; }
   if (hfCtx) { try { hfCtx.close(); } catch {} hfCtx = null; }
@@ -1612,7 +1711,15 @@ async function persistSettings(patch) {
 async function setHandsFree(on) {
   $("#hf-btn").classList.toggle("active", on);
   if (on) {
-    if (!await engageHandsFree()) { alert("Microphone access denied."); $("#hf-btn").classList.remove("active"); on = false; }
+    if (!await engageHandsFree()) {
+      // alert() is invisible in the desktop shell (WebKitGTK drops script
+      // dialogs when nothing handles them), so the real reason has to go
+      // somewhere it can be read.
+      console.error("[mic] hands-free failed:", hfLastError || "(no detail)");
+      showToast("Microphone unavailable: " + (hfLastError || "permission denied"));
+      $("#hf-btn").classList.remove("active");
+      on = false;
+    }
   } else {
     disengageHandsFree();
   }
@@ -1791,11 +1898,27 @@ $("#vc-save").addEventListener("click", async () => {
 
 async function loadSettings() {
   try { voiceSettings = Object.assign(voiceSettings, await api("/settings")); } catch {}
-  if (voiceSettings.hands_free) {          // persisted ON → show active, engage on first user gesture
+  if (voiceSettings.hands_free) {
     $("#hf-btn").classList.add("active");
-    window.addEventListener("pointerdown", async function resume() {
-      if (voiceSettings.hands_free && !hfActive && !await engageHandsFree()) $("#hf-btn").classList.remove("active");
-    }, { once: true });
+    // Try to open the mic straight away, and only fall back to waiting for a
+    // click if that is refused.
+    //
+    // This used to wait for a pointerdown unconditionally, which is correct in a
+    // browser tab -- getUserMedia there is gated on a user gesture -- but wrong
+    // in the desktop shell, where the avatar is click-through and every control
+    // lives in the tray. Nobody ever clicks the page, so the mic was never
+    // opened: the button showed active, the setting said on, and speaking did
+    // nothing. Attempting first costs one rejected promise in the browser case.
+    (async () => {
+      if (hfActive || await engageHandsFree()) return;
+      console.warn("[mic] deferred until a click:", hfLastError || "(gesture required)");
+      window.addEventListener("pointerdown", async function resume() {
+        if (voiceSettings.hands_free && !hfActive && !await engageHandsFree()) {
+          $("#hf-btn").classList.remove("active");
+          showToast("Microphone unavailable: " + (hfLastError || "permission denied"));
+        }
+      }, { once: true });
+    })();
   }
 }
 
@@ -1987,5 +2110,61 @@ async function init() {
     }
     if (sessions.length) openSession(sessions[0].id);
   }
+  // Voice on by default here. In the browser 🔊 is opt-in because you are sitting
+  // in front of a transcript you can read; a face in the corner of the screen that
+  // types at you silently is just a worse chat window. The shell allows autoplay
+  // (media-playback-requires-user-gesture=false), so the AudioContext can start
+  // without a click -- in a plain browser tab it may stay suspended until you
+  // interact, which is a browser policy we cannot and should not defeat.
+  async function enableVoice() {
+    if (ttsEnabled) return;
+    $("#tts-btn").click();                       // same path as the button
+    try {
+      const ctx = ensureAudioCtx();
+      if (ctx && ctx.state === "suspended") await ctx.resume();
+    } catch (e) { console.warn("[desktop] audio context blocked:", e); }
+  }
+
   window.addEventListener("load", () => setTimeout(pickCharacter, 900));
+  window.addEventListener("load", () => setTimeout(enableVoice, 1200));
+
+  // Hooks for the native shell's tray menu. The page is the authenticated side --
+  // it holds the session cookie -- so the shell asks it for the character list and
+  // tells it to switch, rather than trying to reach the API itself.
+  window.__desktopCharacters = () => (state.cards || []).map(c => ({
+    id: c.id, name: c.name, avatar: !!c.has_vrm,
+    current: !!(state.session && state.session.character_id === c.id),
+  }));
+
+  // Listening is a persisted setting, not something desktop mode turns on for
+  // you -- an assistant that starts recording because you opened it would be
+  // the wrong default. Exposed here so the tray can toggle it, since the HUD
+  // only appears on hover inside the click-through strip.
+  window.__desktopListening = () => ({
+    on: !!voiceSettings.hands_free,
+    wake: voiceSettings.wake_word || "",
+    duplex: !!voiceSettings.full_duplex,
+  });
+
+  window.__desktopSetListening = async (on) => {
+    await setHandsFree(!!on);
+    return !!voiceSettings.hands_free;
+  };
+
+  window.__desktopSetCharacter = async (id) => {
+    const card = (state.cards || []).find(c => c.id === id);
+    if (!card) return false;
+    // Persist first, so a restart comes back as whoever was last chosen.
+    voiceSettings.desktop_card_id = id;
+    persistSettings({ desktop_card_id: id });
+    const mine = (state.sessions || []).filter(s => s.character_id === id);
+    if (mine.length) { await openSession(mine[0].id); return true; }
+    const s = await api("/sessions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ character_id: id }),
+    });
+    await loadSessions();
+    await openSession(s.id);
+    return true;
+  };
 })();
