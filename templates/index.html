@@ -72,7 +72,6 @@
           <button id="mem-btn" class="btn-mini" title="Memory — pinned facts + summary" hidden>📌 Memory</button>
           <button id="voice-test" class="btn-mini" title="Hear this character's voice" hidden>▶</button>
           <button id="gallery-btn" class="btn-mini" title="Review expression sprites" hidden>🖼 Gallery</button>
-          <button id="expr-btn" class="btn-mini" title="Generate expression sprites" hidden>🎭 Expressions</button>
         </span>
       </header>
 
@@ -81,62 +80,6 @@
         <div id="rel-axes"></div>
         <span id="rel-intimacy" class="muted"></span>
         <button id="rel-ctx-btn" class="btn-mini" title="Relationship context (power / social)">⚙</button>
-      </div>
-
-      <div id="expr-panel" hidden>
-        <div id="expr-preview" class="expr-row">
-          <label>Preview — in-chat portrait sizing</label>
-          <div class="expr-preview-body">
-            <button id="expr-prev" type="button" class="btn-mini" title="Previous expression">‹</button>
-            <div id="expr-preview-stage">
-              <img id="expr-preview-img" alt="" hidden>
-              <div id="expr-preview-empty" class="muted">Generate sprites to preview them here.</div>
-            </div>
-            <button id="expr-next" type="button" class="btn-mini" title="Next expression">›</button>
-          </div>
-          <div id="expr-preview-label" class="muted"></div>
-        </div>
-        <div class="expr-row">
-          <label>Appearance prompt</label>
-          <textarea id="expr-appearance" rows="2" class="field"
-            placeholder="e.g. Lyria, silver-haired starship AI, glowing blue eyes, sleek bodysuit"></textarea>
-        </div>
-        <div class="expr-row inline">
-          <div>
-            <label>Checkpoint</label>
-            <select id="expr-checkpoint" class="field"></select>
-          </div>
-          <div>
-            <label>Style</label>
-            <select id="expr-style" class="field">
-              <option value="anime">anime</option>
-              <option value="none">none</option>
-              <option value="photorealistic">photorealistic</option>
-              <option value="fantasy_art">fantasy_art</option>
-              <option value="cinematic">cinematic</option>
-              <option value="dark_fantasy">dark_fantasy</option>
-            </select>
-          </div>
-          <div>
-            <label>Set</label>
-            <select id="expr-preset" class="field">
-              <option value="core">Core (8) — fast</option>
-              <option value="full">Full (28) — SillyTavern</option>
-            </select>
-          </div>
-        </div>
-        <div class="expr-row">
-          <label>Expression strength (denoise): <output id="expr-denoise-val"></output>
-            <input id="expr-denoise" type="range" min="0.2" max="0.9" step="0.05">
-            <span class="muted">Lower = closer to the base (better likeness, subtler expression);
-              higher = stronger expression (more drift from the source).</span></label>
-        </div>
-        <div class="expr-row inline">
-          <label class="check"><input id="expr-transparent" type="checkbox" checked> Transparent background</label>
-          <label class="check" id="expr-from-upload-row" hidden><input id="expr-from-upload" type="checkbox"> Use uploaded portrait as base</label>
-          <button id="expr-generate" class="btn-mini">Generate sprites</button>
-          <span id="expr-status" class="muted"></span>
-        </div>
       </div>
 
       <div id="chat-body">
@@ -184,22 +127,103 @@
               <input id="ce-social" type="range" min="0" max="100" step="5">
               <span class="muted">0 = taboo/stigmatized · 100 = fully accepted</span></label>
           </div>
-          <div class="ce-grid">
-            <label>Voice<select id="ce-voice" class="field"></select></label>
-            <label>&nbsp;<button id="ce-voice-test" type="button" class="btn-mini">▶ Test voice</button></label>
-            <label>Speaking pace: <output id="ce-speed-val"></output>
-              <input id="ce-speed" type="range" min="0.5" max="1.5" step="0.05">
-              <span class="muted">1.00 = the voice's own tempo · lower is slower. Test voice uses this.</span></label>
+          <!-- Avatar: how she looks and how she sounds. The sprite workflow used
+               to live on the chat screen, which meant configuring a character
+               from two places; it belongs with the rest of her definition. -->
+          <div class="ce-full ce-section">
+            <h4>Avatar</h4>
+            <div class="ce-modes">
+              <label class="check"><input type="radio" name="ce-avatar-mode" id="ce-mode-sprite" value="sprite">
+                Expression sprites <span class="muted">— generated, 2D portrait</span></label>
+              <label class="check"><input type="radio" name="ce-avatar-mode" id="ce-mode-vrm" value="vrm">
+                3D avatar (VRM) <span class="muted">— animated model</span></label>
+            </div>
+
+            <div id="ce-avatar-vrm" class="ce-mode-body">
+              <div class="ce-vrm">
+                <label>Model
+                  <select id="ce-vrm" class="field"></select></label>
+                <label>&nbsp;
+                  <span class="vrm-actions">
+                    <label class="btn-mini">Import…<input id="ce-vrm-file" type="file" accept=".vrm" hidden></label>
+                    <button id="ce-vrm-delete" type="button" class="btn-mini">Delete</button>
+                  </span></label>
+                <div id="ce-vrm-info" class="ce-full muted"></div>
+              </div>
+            </div>
+
+            <div id="ce-avatar-sprite" class="ce-mode-body">
+          <div id="expr-panel" hidden>
+            <div id="expr-preview" class="expr-row">
+              <label>Preview — in-chat portrait sizing</label>
+              <div class="expr-preview-body">
+                <button id="expr-prev" type="button" class="btn-mini" title="Previous expression">‹</button>
+                <div id="expr-preview-stage">
+                  <img id="expr-preview-img" alt="" hidden>
+                  <div id="expr-preview-empty" class="muted">Generate sprites to preview them here.</div>
+                </div>
+                <button id="expr-next" type="button" class="btn-mini" title="Next expression">›</button>
+              </div>
+              <div id="expr-preview-label" class="muted"></div>
+            </div>
+            <div class="expr-row">
+              <label>Appearance prompt</label>
+              <textarea id="expr-appearance" rows="2" class="field"
+                placeholder="e.g. Lyria, silver-haired starship AI, glowing blue eyes, sleek bodysuit"></textarea>
+            </div>
+            <div class="expr-row inline">
+              <div>
+                <label>Checkpoint</label>
+                <select id="expr-checkpoint" class="field"></select>
+              </div>
+              <div>
+                <label>Style</label>
+                <select id="expr-style" class="field">
+                  <option value="anime">anime</option>
+                  <option value="none">none</option>
+                  <option value="photorealistic">photorealistic</option>
+                  <option value="fantasy_art">fantasy_art</option>
+                  <option value="cinematic">cinematic</option>
+                  <option value="dark_fantasy">dark_fantasy</option>
+                </select>
+              </div>
+              <div>
+                <label>Set</label>
+                <select id="expr-preset" class="field">
+                  <option value="core">Core (8) — fast</option>
+                  <option value="full">Full (28) — SillyTavern</option>
+                </select>
+              </div>
+            </div>
+            <div class="expr-row">
+              <label>Expression strength (denoise): <output id="expr-denoise-val"></output>
+                <input id="expr-denoise" type="range" min="0.2" max="0.9" step="0.05">
+                <span class="muted">Lower = closer to the base (better likeness, subtler expression);
+                  higher = stronger expression (more drift from the source).</span></label>
+            </div>
+            <div class="expr-row inline">
+              <label class="check"><input id="expr-transparent" type="checkbox" checked> Transparent background</label>
+              <label class="check" id="expr-from-upload-row" hidden><input id="expr-from-upload" type="checkbox"> Use uploaded portrait as base</label>
+              <button id="expr-generate" class="btn-mini">Generate sprites</button>
+              <span id="expr-status" class="muted"></span>
+            </div>
           </div>
-          <div class="ce-full ce-vrm">
-            <label>Avatar model (VRM)
-              <select id="ce-vrm" class="field"></select></label>
-            <label>&nbsp;
-              <span class="vrm-actions">
-                <label class="btn-mini">Import…<input id="ce-vrm-file" type="file" accept=".vrm" hidden></label>
-                <button id="ce-vrm-delete" type="button" class="btn-mini">Delete</button>
-              </span></label>
-            <div id="ce-vrm-info" class="ce-full muted"></div>
+            </div>
+          </div>
+
+          <div class="ce-full ce-section">
+            <h4>Voice</h4>
+            <div class="ce-voice-grid">
+              <label>Voice<select id="ce-voice" class="field"></select></label>
+              <label>&nbsp;<button id="ce-voice-test" type="button" class="btn-mini">▶ Test voice</button></label>
+              <label>Speaking pace: <output id="ce-speed-val"></output>
+                <input id="ce-speed" type="range" min="0.5" max="1.5" step="0.05">
+                <span class="muted">1.00 = the voice's own tempo · lower is slower.</span></label>
+              <label>Wake word
+                <input id="ce-wake" class="field" placeholder="(uses the global wake word)">
+                <span class="muted">What she answers to in hands-free mode. Blank = the
+                  global one in ⚙ Settings.</span></label>
+            </div>
           </div>
           <label class="ce-full">First message (greeting)<textarea id="ce-first_mes" class="field" rows="3"></textarea></label>
           <label class="ce-full">Alternate greetings (one per line)
@@ -319,7 +343,9 @@
           <label>Wake word / phrase
             <input id="vc-wake" class="field" placeholder="e.g. hey luna  (blank = always listen)">
             <span class="muted">In hands-free mode, only speech that starts with this phrase is sent
-              (and it interrupts her). Leave blank for pure open-mic.</span></label>
+              (and it interrupts her). Leave blank for pure open-mic.
+              <b>A character with her own wake word overrides this</b> — set that in her card
+              under Voice.</span></label>
           <label>Mic sensitivity: <output id="vc-thresh-val"></output>
             <input id="vc-thresh" type="range" min="0.005" max="0.05" step="0.001">
             <span class="muted">Lower = picks up quieter speech (may false-trigger on noise).</span></label>

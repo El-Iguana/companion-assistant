@@ -499,7 +499,9 @@ async def list_cards(cur: Ctx = Depends(get_ctx)):
         # which inline [expr:x] beats it actually has a sprite for.
         d["expression_labels"] = sorted(c.expressions.keys())
         # Avatar tier: "" here means the client stays on the sprite portrait.
-        d["has_vrm"] = bool(c.vrm)
+        # An avatar needs BOTH a model and the mode set to use it, so the
+        # renderer must not infer the tier from the filename alone.
+        d["has_vrm"] = bool(c.vrm) and c.avatar_mode == "vrm"
         out.append(d)
     return out
 

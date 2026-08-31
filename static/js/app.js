@@ -303,20 +303,17 @@ function renderSession(session) {
   const card = state.cards.find(c => c.id === session.character_id);
   $("#chat-title").textContent = card ? card.name : session.title;
   // Expression controls
-  $("#expr-btn").hidden = !card;
   $("#gallery-btn").hidden = !card;
   $("#tts-btn").hidden = !card;
   $("#hf-btn").hidden = !card;
   $("#voicecfg-btn").hidden = !card;
   $("#mem-btn").hidden = false;                  // memory is session-scoped, works with or without a card
   $("#voice-test").hidden = !(card && ttsEnabled);
-  $("#expr-panel").hidden = true;
   if (card) $("#expr-appearance").value = card.appearance || "";
   $("#expr-from-upload-row").hidden = !(card && card.image);   // only when a portrait exists
   $("#expr-from-upload").checked = !!(card && card.expr_from_upload);
   const dn = (card && card.expr_denoise) || 0.55;
   $("#expr-denoise").value = dn; $("#expr-denoise-val").textContent = Number(dn).toFixed(2);
-  if (!$("#expr-panel").hidden) { previewIdx = 0; refreshExprPreview(); }   // keep preview in sync on card switch
   renderMessages();
   loadRelationship();
   $("#input").disabled = false; $("#send").disabled = false; $("#regen").disabled = false;
@@ -384,7 +381,7 @@ async function deleteSession(id, title) {
     $("#chat-title").textContent = "Select or import a character to begin";
     $("#input").disabled = true; $("#send").disabled = true; $("#regen").disabled = true;
     $("#mic").disabled = true;
-    $("#portrait").hidden = true; $("#expr-btn").hidden = true;
+    $("#portrait").hidden = true;
     $("#mem-btn").hidden = true;
   }
   await loadSessions();
@@ -563,17 +560,11 @@ async function loadCheckpoints() {
   }
 }
 
-$("#expr-btn").addEventListener("click", async () => {
-  const panel = $("#expr-panel");
-  panel.hidden = !panel.hidden;
-  if (!panel.hidden) { await loadCheckpoints(); await refreshExprPreview(); }
-});
-
 // ---- expression preview (renders each sprite at true in-chat portrait sizing) ----
 let previewEmotions = [], previewIdx = 0;
 
 async function refreshExprPreview() {
-  const card = currentCard();
+  const card = exprCard();
   const img = $("#expr-preview-img"), empty = $("#expr-preview-empty"), label = $("#expr-preview-label");
   let present = [];
   if (card) { try { present = (await api(`/cards/${card.id}/expressions`)).emotions || []; } catch {} }
@@ -589,7 +580,7 @@ async function refreshExprPreview() {
 }
 
 function showExprPreview() {
-  const card = currentCard(); if (!card || !previewEmotions.length) return;
+  const card = exprCard(); if (!card || !previewEmotions.length) return;
   const emo = previewEmotions[previewIdx];
   const img = $("#expr-preview-img"), label = $("#expr-preview-label");
   const tag = `${emo} (${previewIdx + 1}/${previewEmotions.length})`;
@@ -609,7 +600,7 @@ $("#expr-next").addEventListener("click", () => cycleExprPreview(1));
 
 $("#expr-denoise").addEventListener("input", (e) => { $("#expr-denoise-val").textContent = Number(e.target.value).toFixed(2); });
 $("#expr-generate").addEventListener("click", async () => {
-  const card = currentCard(); if (!card) return;
+  const card = exprCard(); if (!card) return;
   const checkpoint = $("#expr-checkpoint").value;
   if (!checkpoint) { $("#expr-status").textContent = "Pick a checkpoint first."; return; }
   const preset = $("#expr-preset").value;
@@ -658,7 +649,7 @@ async function loadGalCheckpoints() {
 }
 
 async function openGallery() {
-  const card = currentCard(); if (!card) return;
+  const card = exprCard(); if (!card) return;
   $("#gal-title").textContent = `Expressions — ${card.name}`;
   $("#gallery").hidden = false;
   await loadGalCheckpoints();
@@ -666,7 +657,7 @@ async function openGallery() {
 }
 
 async function refreshGallery() {
-  const card = currentCard(); if (!card) return;
+  const card = exprCard(); if (!card) return;
   const [sets, present] = await Promise.all([
     api("/expressions/emotions"),
     api(`/cards/${card.id}/expressions`)
@@ -701,7 +692,7 @@ async function refreshGallery() {
 }
 
 async function regenOne(emo) {
-  const card = currentCard(); if (!card) return;
+  const card = exprCard(); if (!card) return;
   const checkpoint = $("#gal-checkpoint").value;
   if (!checkpoint) { $("#gal-count").textContent = "Pick a checkpoint (ComfyUI must be running)."; return; }
   $("#gal-count").textContent = `Generating ${emo}…`;
@@ -716,7 +707,7 @@ async function regenOne(emo) {
 }
 
 async function delOne(emo) {
-  const card = currentCard(); if (!card) return;
+  const card = exprCard(); if (!card) return;
   if (!confirm(`Delete the "${emo}" sprite?`)) return;
   await api(`/cards/${card.id}/expression/${emo}`, { method: "DELETE" });
   await refreshGallery();
@@ -754,6 +745,16 @@ async function openCardEditor(card) {
   await loadVoices();
   fillVoiceSelect($("#ce-voice"), ceBase.tts_voice);
   await refreshVrmSelect(ceBase.vrm || "");
+  $("#ce-wake").value = ceBase.wake_word || "";
+  const mode = ceBase.avatar_mode || (ceBase.vrm ? "vrm" : "sprite");
+  $("#ce-mode-vrm").checked = mode === "vrm";
+  $("#ce-mode-sprite").checked = mode !== "vrm";
+  syncAvatarMode();
+  // The sprite panel used to be opened deliberately from the chat screen; here it
+  // is just part of the form, so its contents have to be ready when it appears.
+  loadCheckpoints().catch(() => {});
+  previewIdx = 0;
+  refreshExprPreview().catch(() => {});
   // Deep-copy so edits don't mutate ceBase until saved.
   ceEntries = JSON.parse(JSON.stringify((ceBase.character_book || {}).entries || []));
   renderLore();
@@ -824,6 +825,16 @@ function renderVrmInfo() {
 
 $("#ce-vrm").addEventListener("change", renderVrmInfo);
 
+// Show one mode's controls at a time. Both keep their data: switching to sprites
+// does not clear an assigned model, so flipping back and forth is free.
+function syncAvatarMode() {
+  const vrm = $("#ce-mode-vrm").checked;
+  $("#ce-avatar-vrm").hidden = !vrm;
+  $("#ce-avatar-sprite").hidden = vrm;
+}
+$("#ce-mode-vrm").addEventListener("change", syncAvatarMode);
+$("#ce-mode-sprite").addEventListener("change", syncAvatarMode);
+
 $("#ce-vrm-file").addEventListener("change", async (e) => {
   const f = e.target.files[0];
   e.target.value = "";
@@ -857,6 +868,16 @@ $("#ce-vrm-delete").addEventListener("click", async () => {
   }
 });
 
+// The sprite workflow moved from the chat screen into the card editor, so it has
+// to act on the card being EDITED, not the one open in chat -- those are usually
+// different, and generating sprites onto the wrong character is not a mistake you
+// notice quickly. Falls back to the chat card so the gallery still works when
+// opened from there.
+function exprCard() {
+  return ($("#card-editor") && !$("#card-editor").hidden && ceBase && ceBase.id)
+    ? ceBase : currentCard();
+}
+
 function buildCardPayload() {
   const g = id => $("#ce-" + id).value.trim();
   const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean);
@@ -877,6 +898,8 @@ function buildCardPayload() {
     tts_voice: $("#ce-voice").value,
     tts_speed: Number($("#ce-speed").value),
     vrm: $("#ce-vrm").value,
+    avatar_mode: $("#ce-mode-vrm").checked ? "vrm" : "sprite",
+    wake_word: $("#ce-wake").value.trim(),
     image: ceImage !== undefined ? ceImage : (ceBase.image || null),
     character_book: ceEntries.length
       ? { ...(ceBase.character_book || {}),
@@ -1414,8 +1437,16 @@ function noteSelfHeard() {
             "aec_source in ⚙ Settings.");
 }
 
+// The character's own wake word wins over the global one. With several
+// characters a single global name is the wrong shape -- you address whoever you
+// are talking to, and in desktop mode she is the only one listening.
+function activeWakeWord() {
+  const card = currentCard();
+  return ((card && card.wake_word) || voiceSettings.wake_word || "").trim();
+}
+
 function applyWakeWord(text) {
-  const w = (voiceSettings.wake_word || "").trim().toLowerCase();
+  const w = activeWakeWord().toLowerCase();
   if (!w) return text.trim();
   const low = text.toLowerCase().replace(/^[^\w]+/, "");     // ignore leading punctuation
   if (!low.startsWith(w)) return "";                          // no wake word → drop this utterance
@@ -2155,7 +2186,7 @@ async function init() {
   // only appears on hover inside the click-through strip.
   window.__desktopListening = () => ({
     on: !!voiceSettings.hands_free,
-    wake: voiceSettings.wake_word || "",
+    wake: activeWakeWord(),          // whoever is loaded, not the global default
     duplex: !!voiceSettings.full_duplex,
   });
 

@@ -117,6 +117,14 @@ class CharacterCard(BaseModel):
     # card on the avatar tier. Sprites are generated per card at no manual cost; a VRM
     # is hand-authored content, so this stays opt-in per character.
     vrm: str = ""
+    # Which appearance this character uses. Derivable from `vrm` being set, but
+    # stored explicitly so a character can keep a model assigned while showing
+    # sprites -- switching back and forth must not throw the other away.
+    avatar_mode: str = "sprite"          # "sprite" | "vrm"
+    # Per-character wake word. Empty falls back to the global one in AppSettings,
+    # so existing setups keep working; set it to give each character her own name
+    # to answer to, which is the point of having several.
+    wake_word: str = ""
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 

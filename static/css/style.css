@@ -361,3 +361,19 @@ body.desktop-mode:hover #dt-hud, #dt-hud:focus-within { opacity: 1; }
   background: #e0a24a1a; border: 1px solid #e0a24a55; border-radius: 8px;
   padding: 7px 10px; margin-top: 4px; }
 .vc-warn code { background: #0004; padding: 1px 5px; border-radius: 4px; }
+
+/* Card editor: Avatar + Voice sections */
+.ce-section { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  margin-top: 6px; background: #0000001a; }
+.ce-section > h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted, #9a9aa8); font-weight: 700; }
+.ce-modes { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.ce-modes .check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.ce-mode-body { display: flex; flex-direction: column; gap: 10px; }
+.ce-mode-body[hidden] { display: none !important; }
+/* the moved sprite panel sits flush inside its section */
+.ce-mode-body #expr-panel { padding: 0; border: none; background: none; }
+.ce-voice-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px 14px;
+  align-items: end; }
+.ce-voice-grid > label:nth-child(3), .ce-voice-grid > label:last-child { grid-column: 1 / -1; }
