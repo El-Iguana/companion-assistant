@@ -1654,6 +1654,46 @@ async function fillDesktopCardSelect() {
   sel.value = voiceSettings.desktop_card_id || "";
 }
 
+// Resolve which microphone to open.
+//
+// deviceId is the obvious key and the wrong one to rely on alone: it is
+// per-origin, rotates when permissions are reset, and cannot be set from
+// outside the browser -- so a device chosen here could not be configured any
+// other way. The label is stable and human-meaningful, so it is the fallback.
+//
+// With full duplex on and nothing chosen, prefer an echo-cancelled source
+// automatically. That combination has exactly one correct answer, and expecting
+// someone to know the name `aec_source` to get it is a poor trade.
+async function pickMicDeviceId() {
+  let devices = [];
+  try {
+    devices = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === "audioinput");
+  } catch { return voiceSettings.mic_device_id || ""; }
+
+  const byId = devices.find(d => d.deviceId === voiceSettings.mic_device_id);
+  if (byId) return byId.deviceId;
+
+  const label = (voiceSettings.mic_device_label || "").trim().toLowerCase();
+  if (label) {
+    const byLabel = devices.find(d => (d.label || "").toLowerCase().includes(label));
+    if (byLabel) {
+      console.log("[mic] matched saved device by label:", byLabel.label);
+      return byLabel.deviceId;
+    }
+  }
+  if (voiceSettings.full_duplex) {
+    const aec = devices.find(d => /aec|echo|cancel/i.test(d.label || ""));
+    if (aec) {
+      console.log("[mic] full duplex: auto-selected echo-cancelled source:", aec.label);
+      return aec.deviceId;
+    }
+    console.warn("[mic] full duplex is on but no echo-cancelled source was found — " +
+                 "she may hear herself. Run scripts/setup-aec.sh --persist");
+  }
+  return "";
+}
+
 // ---- microphone selection (Phase 5) ---------------------------------------
 // Device labels are only exposed after a getUserMedia permission grant, so an
 // unprompted enumerate returns anonymous entries. Ask once, then list.
@@ -1827,12 +1867,23 @@ async function engageHandsFree() {
   hfLastError = "";
   try {
     const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-    if (voiceSettings.mic_device_id) a.deviceId = { exact: voiceSettings.mic_device_id };
-    try {
-      hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
-    } catch (e1) {
-      delete a.deviceId;                       // saved device unplugged — fall back
-      hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
+    // Open the default device first. enumerateDevices() returns blank labels
+    // until a getUserMedia grant exists, so choosing by label before this point
+    // is choosing between empty strings -- which silently fell back to the raw
+    // microphone and defeated the whole echo-cancelled setup.
+    hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
+    const want = await pickMicDeviceId();
+    const open = (hfStream.getAudioTracks()[0] || {}).getSettings
+      ? hfStream.getAudioTracks()[0].getSettings().deviceId : null;
+    if (want && want !== open) {
+      try {
+        const better = await navigator.mediaDevices.getUserMedia(
+          { audio: { ...a, deviceId: { exact: want } } });
+        hfStream.getTracks().forEach(t => t.stop());     // release the first one
+        hfStream = better;
+      } catch (e) {
+        console.warn("[mic] could not switch device, keeping the default:", e && e.name);
+      }
     }
   } catch (e) {
     hfLastError = (e && (e.name + ": " + e.message)) || String(e);

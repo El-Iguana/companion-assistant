@@ -49,6 +49,7 @@ case "${1:-}" in
     for m in $ids; do pactl unload-module "$m"; done
     echo "unloaded; defaults revert on their own"; exit 0 ;;
   --persist)
+    PERSIST_DEFAULT=1
     mkdir -p "$(dirname "$DROPIN")"
     cat > "$DROPIN" <<'CONF'
 # Pantheon: echo-cancelled capture, loaded at PipeWire start.
@@ -82,6 +83,13 @@ CONF
     systemctl --user restart pipewire pipewire-pulse wireplumber
     sleep 3
     if pactl list short sources 2>/dev/null | grep -q '\baec_source\b'; then
+      # Selecting aec_source alone cancels nothing: the canceller subtracts what
+      # it is PLAYING, so playback has to go through aec_sink too. Getting only
+      # half of this right is the obvious failure, so --persist does both.
+      pactl set-default-sink aec_sink 2>/dev/null && echo "default sink -> aec_sink"
+      for i in $(pactl list short sink-inputs 2>/dev/null | awk '{print $1}'); do
+        pactl move-sink-input "$i" aec_sink 2>/dev/null || true
+      done
       echo "aec_source is up and will return on every boot"
     else
       echo "WARNING: aec_source did not appear -- check: journalctl --user -u pipewire -n 40"
