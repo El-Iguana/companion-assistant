@@ -611,7 +611,7 @@ function disposeModel() {
   placeholder = null;
 }
 
-async function loadCard(id, hasVrm, placeholderRequested, modelUrl) {
+async function loadCard(id, hasVrm, placeholderRequested, modelUrl, rev) {
   cardId = id;
   disposeModel();
   if (!id) { stop(); announce(false); return; }
@@ -627,7 +627,12 @@ async function loadCard(id, hasVrm, placeholderRequested, modelUrl) {
       loader.register((parser) => new VRMLoaderPlugin(parser));
       // A direct url wins over the card lookup: the harness previews a model that
       // no card points at yet, which is also what a model picker needs.
-      const gltf = await loader.loadAsync(modelUrl || `/api/cards/${id}/avatar.vrm`);
+      // The per-card URL is stable while its contents are not, so a changed
+      // model would otherwise be served from cache. `rev` is the filename, so
+      // the URL only changes when the model actually does.
+      const url = modelUrl ||
+        `/api/cards/${id}/avatar.vrm${rev ? "?v=" + encodeURIComponent(rev) : ""}`;
+      const gltf = await loader.loadAsync(url);
       if (cardId !== id) return;                    // card switched mid-load
       const vrm = gltf.userData.vrm;
       VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -744,8 +749,8 @@ export function boot() {
   initScene(canvas);
 
   window.addEventListener("avatar:card", (e) => {
-    const { id, hasVrm, placeholder: ph, url } = e.detail || {};
-    loadCard(id || null, !!hasVrm, !!ph, url || null);
+    const { id, hasVrm, placeholder: ph, url, rev } = e.detail || {};
+    loadCard(id || null, !!hasVrm, !!ph, url || null, rev || "");
   });
 
   window.addEventListener("avatar:speak", (e) => {

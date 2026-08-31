@@ -711,7 +711,8 @@ async def delete_vrm(name: str, cur: Ctx = Depends(get_ctx)):
 async def get_vrm(name: str, _: User = Depends(current_user)):
     """Serve one model by name. Used by the card editor's picker and the harness,
     so a model can be previewed before it is assigned to a card."""
-    return FileResponse(_vrm_path(name), media_type="model/gltf-binary")
+    return FileResponse(_vrm_path(name), media_type="model/gltf-binary",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/cards/{card_id}/avatar.vrm")
@@ -730,7 +731,10 @@ async def get_avatar(card_id: str, cur: Ctx = Depends(get_ctx)):
     path = (DATA / "vrm" / Path(card.vrm).name).resolve()
     if not str(path).startswith(str((DATA / "vrm").resolve())) or not path.is_file():
         raise HTTPException(404, "model file missing")
-    return FileResponse(path, media_type="model/gltf-binary")
+    # Same URL, different bytes whenever the card is pointed at another model,
+    # so it must not be cached by the view that loads it.
+    return FileResponse(path, media_type="model/gltf-binary",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/cards/{card_id}/expressions")

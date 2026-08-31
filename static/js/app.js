@@ -82,7 +82,7 @@ function renderMessages() {
 // avatar takes over, the sprite portrait hides; if it fails or the card is on the
 // sprite tier, it stays exactly as it always was.
 let avatarActive = false;
-let avatarCardId = null;
+let avatarCardId = null, avatarCardKey = null;
 
 window.addEventListener("avatar:active", (e) => {
   avatarActive = !!(e.detail && e.detail.active);
@@ -95,10 +95,17 @@ window.addEventListener("avatar:active", (e) => {
 function syncAvatarCard() {
   const card = currentCard();
   const id = card ? card.id : null;
-  if (id === avatarCardId) return;
+  // Key on the MODEL, not just the character. Tracking the card id alone meant
+  // assigning a different .vrm to the same character never reloaded anything --
+  // the id had not changed, so the renderer was never told. The mode is in the
+  // key too, since switching a card between sprites and 3D changes what shows
+  // without touching either the id or the filename.
+  const key = [id, (card && card.vrm) || "", (card && card.avatar_mode) || ""].join("|");
+  if (key === avatarCardKey) return;
+  avatarCardKey = key;
   avatarCardId = id;
   window.dispatchEvent(new CustomEvent("avatar:card", {
-    detail: { id, hasVrm: !!(card && card.has_vrm) },
+    detail: { id, hasVrm: !!(card && card.has_vrm), rev: (card && card.vrm) || "" },
   }));
 }
 
@@ -934,7 +941,13 @@ async function saveCard() {
                    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
     await api(ceEditingId ? "/cards/" + ceEditingId : "/cards", opts);
     await loadCards();
-    if (state.session && ceEditingId === state.session.character_id) renderMessages();
+    if (state.session && ceEditingId === state.session.character_id) {
+      renderMessages();
+      // Re-evaluate the avatar. Changing a character's model is a change to the
+      // card she is already displaying, so nothing else would notice.
+      syncAvatarCard();
+      updatePortrait();
+    }
     closeCardEditor();
   } catch (e) {
     $("#ce-status").textContent = "Failed: " + (e.detail || e.message || e);
