@@ -94,12 +94,14 @@ MENU_XML = f"""
 
 
 class MenuItem:
-    __slots__ = ("id", "label", "on_click", "toggle", "checked", "is_sep", "enabled")
+    __slots__ = ("id", "label", "on_click", "toggle", "checked", "is_sep",
+                 "enabled", "children")
 
     def __init__(self, id_, label="", on_click=None, toggle=False,
-                 checked=False, is_sep=False, enabled=True):
+                 checked=False, is_sep=False, enabled=True, children=None):
         self.id, self.label, self.on_click = id_, label, on_click
         self.toggle, self.checked, self.is_sep, self.enabled = toggle, checked, is_sep, enabled
+        self.children = children or []       # a non-empty list makes this a submenu
 
     def props(self) -> dict:
         if self.is_sep:
@@ -109,10 +111,18 @@ class MenuItem:
             "enabled": GLib.Variant("b", self.enabled),
             "visible": GLib.Variant("b", True),
         }
+        if self.children:
+            p["children-display"] = GLib.Variant("s", "submenu")
         if self.toggle:
             p["toggle-type"] = GLib.Variant("s", "checkmark")
             p["toggle-state"] = GLib.Variant("i", 1 if self.checked else 0)
         return p
+
+    def walk(self):
+        """This item and every descendant, so lookups by id do not miss submenus."""
+        yield self
+        for c in self.children:
+            yield from c.walk()
 
 
 class Tray:
@@ -199,6 +209,10 @@ class Tray:
         inv.return_value(None)
 
     # -- dbusmenu ----------------------------------------------------------
+    def _all(self):
+        for it in self.items:
+            yield from it.walk()
+
     def _menu_get(self, _c, _s, _p, _i, prop):
         return {
             "Version": GLib.Variant("u", 3),
@@ -207,8 +221,16 @@ class Tray:
             "IconThemePath": GLib.Variant("as", []),
         }.get(prop)
 
-    def _layout(self):
-        """Root node plus one level of children, as a PLAIN (ia{sv}av) tuple.
+    def _layout(self, parent_id: int = 0, depth: int = -1):
+        """The subtree under `parent_id`, as a PLAIN (ia{sv}av) tuple.
+
+        parent_id MUST be honoured. Opening a submenu is a second GetLayout call
+        naming that item, and an implementation that always returns the root
+        answers it with the top-level menu -- which the panel then renders in
+        place of the submenu, so clicking "Character" reopened the main menu.
+
+        depth is how many levels to include: -1 all, 0 the node alone, n that
+        many below it.
 
         Returned unwrapped on purpose. GLib.Variant() builds a value out of
         Python primitives and cannot consume an already-built Variant for a
@@ -216,26 +238,39 @@ class Tray:
         The `av` children are the exception: every element of a variant array
         must itself be a Variant.
         """
-        kids = [GLib.Variant("(ia{sv}av)", (it.id, it.props(), []))
-                for it in self.items]
-        return (0, {"children-display": GLib.Variant("s", "submenu")}, kids)
+        def node(it, d):
+            kids = ([GLib.Variant("(ia{sv}av)", node(c, d - 1)) for c in it.children]
+                    if d != 0 else [])
+            return (it.id, it.props(), kids)
+
+        if parent_id == 0:
+            kids = ([GLib.Variant("(ia{sv}av)", node(it, depth - 1)) for it in self.items]
+                    if depth != 0 else [])
+            return (0, {"children-display": GLib.Variant("s", "submenu")}, kids)
+
+        item = next((i for i in self._all() if i.id == parent_id), None)
+        if item is None:
+            return (parent_id, {}, [])
+        return node(item, depth)
 
     def _menu_call(self, _c, _s, _p, _i, method, params, inv):
         if method == "GetLayout":
-            inv.return_value(GLib.Variant("(u(ia{sv}av))", (self.revision, self._layout())))
+            parent_id, depth = params.unpack()[0], params.unpack()[1]
+            inv.return_value(GLib.Variant(
+                "(u(ia{sv}av))", (self.revision, self._layout(parent_id, depth))))
         elif method == "GetGroupProperties":
             ids = params.unpack()[0]
-            out = [(it.id, it.props()) for it in self.items if not ids or it.id in ids]
+            out = [(it.id, it.props()) for it in self._all() if not ids or it.id in ids]
             inv.return_value(GLib.Variant("(a(ia{sv}))", (out,)))
         elif method == "GetProperty":
             mid, name = params.unpack()[0], params.unpack()[1]
-            item = next((i for i in self.items if i.id == mid), None)
+            item = next((i for i in self._all() if i.id == mid), None)
             val = item.props().get(name) if item else None
             inv.return_value(GLib.Variant("(v)", (val or GLib.Variant("s", ""),)))
         elif method == "Event":
             mid, event_id = params.unpack()[0], params.unpack()[1]
             if event_id == "clicked":
-                item = next((i for i in self.items if i.id == mid), None)
+                item = next((i for i in self._all() if i.id == mid), None)
                 if item and item.on_click:
                     if item.toggle:
                         item.checked = not item.checked

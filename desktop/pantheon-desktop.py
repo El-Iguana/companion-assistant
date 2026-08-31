@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -54,6 +55,8 @@ class DesktopShell(Gtk.Application):
         self.position_mode = False
         self.drag_bar = None
         self._mi_through = None
+        self._mi_chars = None
+        self._char_ids = {}
         self.tray = None
         self.icon_name = "face-smile"
 
@@ -88,6 +91,9 @@ class DesktopShell(Gtk.Application):
             ("enable-mediasource", True),
             ("media-playback-requires-user-gesture", False),
             ("enable-developer-extras", True),
+            # Without this a console.error in the page goes nowhere -- there is
+            # no devtools window to read, and the journal is the only channel.
+            ("enable-write-console-messages-to-stdout", True),
         ):
             try:
                 s.set_property(prop, val)
@@ -141,6 +147,10 @@ class DesktopShell(Gtk.Application):
 
         if self.want_tray:
             self._build_tray()
+        # First fill once the page has had time to log in and load, then keep it
+        # current so characters added in the main window show up here.
+        GLib.timeout_add_seconds(4, self._refresh_characters)
+        GLib.timeout_add_seconds(30, self._refresh_characters)
 
     def _on_permission(self, _view, request):
         request.allow()
@@ -188,11 +198,20 @@ class DesktopShell(Gtk.Application):
         self._mi_through = MenuItem(
             2, "Click through the avatar", self._menu_click_through,
             toggle=True, checked=self.click_through)
+        # Characters live in a submenu, filled in once the page has loaded. The
+        # page is the authenticated side -- it holds the session cookie -- so the
+        # list is read out of it rather than fetched from the API here.
+        self._mi_chars = MenuItem(10, "Character", children=[
+            MenuItem(11, "loading…", enabled=False)])
+        self._mi_listen = MenuItem(
+            7, "Listening", self._menu_listen, toggle=True, checked=False)
         self._mi_position = MenuItem(
             6, "Move her (drag to position)", self._menu_position_mode,
             toggle=True, checked=False)
         items = [
             MenuItem(1, "Show / hide", self._menu_toggle_visible),
+            self._mi_chars,
+            self._mi_listen,
             self._mi_position,
             self._mi_through,
             MenuItem(3, is_sep=True),
@@ -214,6 +233,92 @@ class DesktopShell(Gtk.Application):
             self.win.present()
             # The surface is recreated on re-show, so the input region goes with it.
             GLib.timeout_add(250, self._apply_input_region_once)
+
+    # -- character switching -------------------------------------------------
+    # Ids are opaque strings, but dbusmenu addresses items by integer, so the
+    # submenu keeps its own index -> id map rather than trying to encode one in
+    # the other.
+    def _refresh_characters(self, *_):
+        if not self.view:
+            return True
+        def cb(view, res, _u):
+            try:
+                val = view.evaluate_javascript_finish(res)
+                cards = json.loads(val.to_string() or "[]")
+            except Exception:                              # noqa: BLE001
+                return                                     # page not ready yet
+            if not isinstance(cards, list) or not cards:
+                return
+            self._char_ids = {}
+            kids = []
+            for i, c in enumerate(cards):
+                mid = 100 + i
+                self._char_ids[mid] = c.get("id")
+                label = c.get("name") or "?"
+                if not c.get("avatar"):
+                    # Sprite tier renders a flat PNG, not a 3D avatar -- worth
+                    # saying here, since picking one is the likeliest surprise.
+                    label += "  (no 3D avatar)"
+                kids.append(MenuItem(mid, label, self._menu_pick_character,
+                                     toggle=True, checked=bool(c.get("current"))))
+            changed = [(k.id, k.label, k.checked) for k in kids] != \
+                      [(k.id, k.label, k.checked) for k in self._mi_chars.children]
+            if changed:
+                self._mi_chars.children = kids
+            if self._sync_listening() or changed:
+                if self.tray:
+                    self.tray.update()
+        self.view.evaluate_javascript(
+            "JSON.stringify(window.__desktopCharacters ? window.__desktopCharacters() : [])",
+            -1, None, None, None, cb, None)
+        return True                                        # keep the timer alive
+
+    def _sync_listening(self) -> bool:
+        """Pull listening state off the page. Returns True if the menu changed."""
+        if not self.view or not self._mi_listen:
+            return False
+        before = (self._mi_listen.checked, self._mi_listen.label)
+        def cb(view, res, _u):
+            try:
+                d = json.loads(view.evaluate_javascript_finish(res).to_string() or "{}")
+            except Exception:                              # noqa: BLE001
+                return
+            self._mi_listen.checked = bool(d.get("on"))
+            wake = (d.get("wake") or "").strip()
+            # Naming the wake word here saves a trip to Settings to find out why
+            # nothing happens when you talk.
+            self._mi_listen.label = (
+                f'Listening (say "{wake}")' if wake and d.get("on")
+                else "Listening" if d.get("on") else
+                f'Listening — off (wake word "{wake}")' if wake else "Listening — off")
+            if self.tray and (self._mi_listen.checked, self._mi_listen.label) != before:
+                self.tray.update()
+        self.view.evaluate_javascript(
+            "JSON.stringify(window.__desktopListening ? window.__desktopListening() : {})",
+            -1, None, None, None, cb, None)
+        return False
+
+    def _menu_listen(self, item):
+        if not self.view:
+            return
+        js = "window.__desktopSetListening && window.__desktopSetListening(%s)" % (
+            "true" if item.checked else "false")
+        self.view.evaluate_javascript(js, -1, None, None, None, None, None)
+        GLib.timeout_add_seconds(2, self._refresh_characters)
+
+    def _menu_pick_character(self, item):
+        cid = getattr(self, "_char_ids", {}).get(item.id)
+        if not cid or not self.view:
+            return
+        # Tick this one immediately; the refresh below reconciles with the page.
+        for k in self._mi_chars.children:
+            k.checked = (k.id == item.id)
+        if self.tray:
+            self.tray.update()
+        self.view.evaluate_javascript(
+            f"window.__desktopSetCharacter && window.__desktopSetCharacter({json.dumps(cid)})",
+            -1, None, None, None, None, None)
+        GLib.timeout_add_seconds(2, self._refresh_characters)
 
     def _menu_click_through(self, item):
         self.click_through = item.checked
