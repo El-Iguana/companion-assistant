@@ -51,6 +51,9 @@ class DesktopShell(Gtk.Application):
         self.win: Gtk.Window | None = None
         self.view: WebKit.WebView | None = None
         self.click_through = True
+        self.position_mode = False
+        self.drag_bar = None
+        self._mi_through = None
         self.tray = None
         self.icon_name = "face-smile"
 
@@ -95,7 +98,24 @@ class DesktopShell(Gtk.Application):
         # so a prompt with no window chrome to host it would just be a dead end.
         self.view.connect("permission-request", self._on_permission)
         self.view.set_background_color(Gdk.RGBA())  # fully transparent
-        self.win.set_child(self.view)
+
+        # Drag-to-position. A Wayland client may not set its own coordinates --
+        # but it may ask the compositor for an interactive move, which is what
+        # Gtk.WindowHandle does. So instead of editing numbers in a KWin rule,
+        # you grab this bar and drag her where you want. It is hidden until
+        # position mode is on, so it costs no screen space the rest of the time.
+        self.drag_bar = Gtk.WindowHandle()
+        grip = Gtk.Label(label="⠿  drag to position  ·  release when placed")
+        grip.add_css_class("dim-label")
+        grip.set_margin_top(6); grip.set_margin_bottom(6)
+        self.drag_bar.set_child(grip)
+        self.drag_bar.set_visible(False)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(self.drag_bar)
+        self.view.set_vexpand(True)
+        box.append(self.view)
+        self.win.set_child(box)
         self.view.load_uri(self.url)
 
         self.win.connect("notify::default-width", lambda *_: self._apply_input_region())
@@ -132,7 +152,7 @@ class DesktopShell(Gtk.Application):
             import cairo
             w = self.win.get_width() or self.w
             h = self.win.get_height() or self.h
-            if self.click_through:
+            if self.click_through and not self.position_mode:
                 strip = cairo.RectangleInt(0, max(0, h - HUD_STRIP_PX), w, HUD_STRIP_PX)
                 surface.set_input_region(cairo.Region(strip))
             else:
@@ -152,8 +172,12 @@ class DesktopShell(Gtk.Application):
         self._mi_through = MenuItem(
             2, "Click through the avatar", self._menu_click_through,
             toggle=True, checked=self.click_through)
+        self._mi_position = MenuItem(
+            6, "Move her (drag to position)", self._menu_position_mode,
+            toggle=True, checked=False)
         items = [
             MenuItem(1, "Show / hide", self._menu_toggle_visible),
+            self._mi_position,
             self._mi_through,
             MenuItem(3, is_sep=True),
             MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
@@ -178,6 +202,30 @@ class DesktopShell(Gtk.Application):
     def _menu_click_through(self, item):
         self.click_through = item.checked
         self._apply_input_region()
+
+    def _menu_position_mode(self, item):
+        """Show the drag bar and make the whole window grabbable.
+
+        Position mode and click-through are mutually exclusive by definition:
+        you cannot drag a window that does not accept the click. So entering it
+        suspends click-through and leaving it restores whatever was set before.
+        """
+        self.position_mode = item.checked
+        self.drag_bar.set_visible(self.position_mode)
+        if self.position_mode:
+            self._saved_click_through = self.click_through
+            self.click_through = False
+        else:
+            self.click_through = getattr(self, "_saved_click_through", True)
+        # Keep the checkbox honest in BOTH directions: it reflects click_through,
+        # and position mode changes click_through, so a stale tick here would
+        # have the menu reporting a state the window is not in.
+        if self._mi_through:
+            self._mi_through.checked = self.click_through
+            self._mi_through.enabled = not self.position_mode
+        self._apply_input_region()
+        if self.tray:
+            self.tray.update()
 
 
 def main() -> int:

@@ -22,20 +22,35 @@ The container on `:7861` stays the brain. The shell is a picture frame.
 
 Options: `--url`, `--width`, `--height`.
 
-## Positioning it (one-time)
+## Positioning it — just drag her
 
-A Wayland client **cannot place itself or keep itself above** — that is a
-protocol restriction, not a toolkit gap, and it applies to Electron and Tauri
-equally. Two ways round it:
+Pick **"Move her (drag to position)"** from the tray menu. A grab bar appears at
+the top; drag her where you want and untick it again.
 
-**KWin rule (recommended, no new packages).** Import
-`kwinrule/pantheon.kwinrule` via *System Settings → Window Management → Window
-Rules → Import*, then adjust `position=` for your screen. This gives position,
-always-on-top, no border, and keeps her off the taskbar and pager.
+The distinction that makes this work: a Wayland client may not *set* its own
+coordinates — a hard protocol restriction that applies to Electron and Tauri
+equally — but it *may* ask the compositor for an interactive move, which is
+exactly what dragging a titlebar does. `Gtk.WindowHandle` does that for us.
+
+Position mode also suspends click-through while it is on, because you cannot
+drag a window that does not accept the click; your previous setting comes back
+when you leave.
+
+### Making it stick
+
+Import `kwinrule/pantheon.kwinrule` (*System Settings → Window Management →
+Window Rules → Import*). It sets always-on-top, no border, and keeps her off
+the taskbar, pager and window switcher.
+
+Position and size in that rule are **Remember**, not Force — deliberately, so
+your drag is what persists. Force would snap her back every time. The
+coordinates in the file are only a first guess for a 1920×1080 screen; once you
+have dragged her, they stop mattering.
 
 **gtk4-layer-shell (not used here).** It is packaged for Fedora and would let
 the app anchor itself natively, but it needs `rpm-ostree` layering plus a
-reboot, which this machine's conventions avoid.
+reboot, which this machine's conventions avoid — and it would not add anything
+dragging does not already give you.
 
 ## Click-through
 

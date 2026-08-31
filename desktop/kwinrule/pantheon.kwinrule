@@ -8,12 +8,14 @@ Description=Pantheon desktop avatar
 wmclass=ai.jotunheim.pantheon.desktop
 wmclasscomplete=false
 wmclassmatch=1
-# Pin it bottom-right. A Wayland client cannot place itself under any toolkit,
-# so this is the compositor doing what layer-shell would otherwise do.
+# Position and size are REMEMBER (2), not Force (3), so that dragging her with
+# the shell's position mode actually sticks -- Force would snap her back every
+# time. KWin stores wherever you leave her. The starting values are only a first
+# guess for a 1920x1080 screen; drag her once and this becomes irrelevant.
 position=1480,400
-positionrule=3
+positionrule=2
 size=420,620
-sizerule=3
+sizerule=2
 # Always visible, never in the way of window management.
 above=true
 aboverule=3
