@@ -30,6 +30,14 @@ import sys
 
 import gi
 
+# stdout is a pipe under systemd, so Python block-buffers it and every print()
+# in this file was invisible in the journal until the process exited.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:                                        # noqa: BLE001
+    pass
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("WebKit", "6.0")
@@ -37,6 +45,7 @@ from gi.repository import Gtk, Gdk, GLib, WebKit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tray import Tray, MenuItem  # noqa: E402
+from kwin import KWinGeometry  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
 DEFAULT_URL = "http://localhost:7861/desktop"
@@ -59,6 +68,10 @@ class DesktopShell(Gtk.Application):
         self._char_ids = {}
         self.tray = None
         self.icon_name = "face-smile"
+        self.kwin = None
+        self._geom = None
+        self._geom_file = os.path.join(
+            GLib.get_user_config_dir(), "pantheon-desktop", "geometry.json")
 
     # -- lifecycle ---------------------------------------------------------
     def do_activate(self):
@@ -147,10 +160,66 @@ class DesktopShell(Gtk.Application):
 
         if self.want_tray:
             self._build_tray()
+
+        # Position persistence. A Wayland client cannot place itself, and KWin's
+        # own Remember rule was measured not to write back -- the avatar sat at
+        # 1070,387 while the rule still read 1400,380. So we ask the compositor
+        # where we are and tell it where to go, and keep the value ourselves.
+        self.kwin = KWinGeometry("pantheon", self._on_geometry)
+        self.kwin.start()
+        GLib.timeout_add(1500, self._restore_geometry)
+        # Poll rather than saving only on exit: systemd stops the shell with
+        # SIGTERM and it gets killed outright often enough that an exit-only save
+        # would lose the very drag it exists to keep.
+        GLib.timeout_add_seconds(4, self._poll_geometry)
         # First fill once the page has had time to log in and load, then keep it
         # current so characters added in the main window show up here.
         GLib.timeout_add_seconds(4, self._refresh_characters)
         GLib.timeout_add_seconds(30, self._refresh_characters)
+
+    # -- position persistence ------------------------------------------------
+    def _load_geometry(self):
+        try:
+            with open(self._geom_file, encoding="utf-8") as f:
+                g = json.load(f)
+            if all(isinstance(g.get(k), int) for k in ("x", "y", "w", "h")):
+                return g
+        except Exception:                                    # noqa: BLE001
+            pass
+        return None
+
+    def _restore_geometry(self):
+        """Put the window back. Safe to call whenever a surface appears."""
+        g = self._geom or self._load_geometry()
+        if g and self.kwin:
+            self.kwin.apply(g["x"], g["y"], g["w"], g["h"])
+            print(f"[shell] restored to {g['x']},{g['y']} {g['w']}x{g['h']}")
+        return False                                          # never repeats itself
+
+    def _poll_geometry(self):
+        # Only while mapped: a hidden window has no surface, so KWin either
+        # reports nothing or reports something meaningless.
+        if self.kwin and self.win and self.win.get_visible():
+            self.kwin.request()
+        return True
+
+    def _on_geometry(self, x, y, w, h):
+        g = {"x": x, "y": y, "w": w, "h": h}
+        if g == self._geom:
+            return                                            # unchanged; no write
+        # Ignore a bogus report rather than persist a position that would put her
+        # off-screen on the next launch.
+        if w < 80 or h < 80:
+            return
+        self._geom = g
+        try:
+            os.makedirs(os.path.dirname(self._geom_file), exist_ok=True)
+            tmp = self._geom_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(g, f)
+            os.replace(tmp, self._geom_file)                  # atomic
+        except Exception as e:                                # noqa: BLE001
+            print(f"[shell] could not save geometry: {e}")
 
     def _on_permission(self, _view, request):
         request.allow()
@@ -227,12 +296,20 @@ class DesktopShell(Gtk.Application):
         if not self.win:
             return
         if self.win.get_visible():
+            # Capture before hiding: once the surface is gone KWin has no window
+            # to report on, so a poll after this point returns nothing and the
+            # last known position would be however stale the 4s timer left it.
+            if self.kwin:
+                self.kwin.request()
             self.win.set_visible(False)
         else:
             self.win.set_visible(True)
             self.win.present()
-            # The surface is recreated on re-show, so the input region goes with it.
+            # Hiding destroys the Wayland surface and showing makes a NEW one,
+            # which the compositor places wherever it likes -- so both the input
+            # region and the position have to be reapplied, not just the region.
             GLib.timeout_add(250, self._apply_input_region_once)
+            GLib.timeout_add(400, self._restore_geometry)
 
     # -- character switching -------------------------------------------------
     # Ids are opaque strings, but dbusmenu addresses items by integer, so the
