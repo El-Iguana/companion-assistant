@@ -32,7 +32,7 @@ from models.schema import (
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt, auth
+from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
@@ -615,26 +615,82 @@ async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)
     return Response(content=base64.b64decode(b64), media_type="image/png")
 
 
+def _vrm_dir() -> Path:
+    d = DATA / "vrm"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _vrm_path(name: str) -> Path:
+    """Resolve a model name to a path inside data/vrm, or 404.
+
+    Basename only, then resolved and prefix-checked: a name is user input and
+    must not be able to address anything outside the models directory.
+    """
+    base = _vrm_dir().resolve()
+    path = (base / Path(name).name).resolve()
+    if not str(path).startswith(str(base)) or not path.is_file():
+        raise HTTPException(404, "model not found")
+    return path
+
+
 @app.get("/api/vrm")
 async def list_vrm(_: User = Depends(current_user)):
-    """Avatar models available to assign to a card (data/vrm/*.vrm)."""
-    d = DATA / "vrm"
-    if not d.is_dir():
-        return []
-    return sorted(
-        ({"name": f.name, "size": f.stat().st_size} for f in d.glob("*.vrm")),
-        key=lambda x: x["name"],
-    )
+    """Avatar models available to assign to a card, each with its audit."""
+    out = []
+    for f in sorted(_vrm_dir().glob("*.vrm")):
+        try:
+            out.append(vrm.audit_file(f))
+        except Exception as e:                      # noqa: BLE001
+            # A corrupt file in the folder must not break the whole listing.
+            out.append({"name": f.name, "size": f.stat().st_size,
+                        "error": str(e), "usable": False})
+    return out
+
+
+@app.post("/api/vrm")
+async def upload_vrm(file: UploadFile = File(...), _: User = Depends(current_user)):
+    """Import a .vrm. Audited before it is written, so a file that cannot work
+    as an avatar is rejected at the door rather than failing later in the
+    renderer, where the only symptom is a model that never appears."""
+    data = await file.read()
+    if len(data) > vrm.MAX_BYTES:
+        raise HTTPException(413, f"model exceeds {vrm.MAX_BYTES // 1048576} MB")
+    try:
+        report = vrm.audit(data)
+    except vrm.NotAVrm as e:
+        raise HTTPException(400, str(e)) from e
+    if not report["usable"]:
+        raise HTTPException(400, "unusable as an avatar: " + "; ".join(report["problems"]))
+
+    name = Path(file.filename or "model.vrm").name
+    if not name.lower().endswith(".vrm"):
+        name += ".vrm"
+    dest = _vrm_dir() / name
+    stem, i = dest.stem, 1
+    while dest.exists():                            # never silently replace a model
+        dest = _vrm_dir() / f"{stem}-{i}.vrm"
+        i += 1
+    dest.write_bytes(data)
+    return {"name": dest.name, **report}
+
+
+@app.delete("/api/vrm/{name}")
+async def delete_vrm(name: str, cur: Ctx = Depends(get_ctx)):
+    """Remove a model. Refused while a card still points at it."""
+    path = _vrm_path(name)
+    users = [c.name for c in _list(cur.cards, CharacterCard) if c.vrm == path.name]
+    if users:
+        raise HTTPException(409, "in use by: " + ", ".join(users))
+    path.unlink()
+    return {"deleted": path.name}
 
 
 @app.get("/api/vrm/{name}")
 async def get_vrm(name: str, _: User = Depends(current_user)):
     """Serve one model by name. Used by the card editor's picker and the harness,
     so a model can be previewed before it is assigned to a card."""
-    path = (DATA / "vrm" / Path(name).name).resolve()
-    if not str(path).startswith(str((DATA / "vrm").resolve())) or not path.is_file():
-        raise HTTPException(404, "model not found")
-    return FileResponse(path, media_type="model/gltf-binary")
+    return FileResponse(_vrm_path(name), media_type="model/gltf-binary")
 
 
 @app.get("/api/cards/{card_id}/avatar.vrm")

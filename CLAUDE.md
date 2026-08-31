@@ -362,8 +362,15 @@ per-relationship **context override** (⚙).
   stage via a new `avatar:mood` event. **Pose composition rule: `resetPose()` returns every animated
   bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
   is what sent the arms wandering, and shoulders must stay in the rest set.
-  **All six channels of "fully animated" are now live.** Next: ◻ Phase 5 interruption ·
-  ◻ Track B3 real animation clips · ◻ visemes (blocked on phoneme timings). **Track B (sourcing a `.vrm`) now blocks 3b** —
+  **All six channels of "fully animated" are now live.** Next: ◻ **Phase 5 interruption** ·
+  ◻ **Phase 6 desktop mode** — tray-resident avatar in the screen corner; a repackage, not a rebuild
+  (backend already is the microservice; adds a `/desktop` avatar-only view + a thin native shell).
+  Measured on this box: KWin advertises **`zwlr_layer_shell_v1` v5**, so a corner-anchored click-through
+  overlay is possible natively on Wayland; XWayland is the fallback. Phase 5 gates it — half-duplex is
+  disqualifying for a desktop assistant. · ◻ **Option: realistic non-VRM avatars** (Ready Player Me /
+  Avaturn / CC4 — glTF + 52 ARKit blendshapes, which would retire both the 28→5 expression collapse and
+  the viseme block; costs a rig-adapter refactor and loses VRM spring bones) · ◻ Track B3 real animation
+  clips · ◻ visemes (blocked on phoneme timings unless the ARKit route is taken). **Track B (sourcing a `.vrm`) now blocks 3b** —
   Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
   Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
 - **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived

@@ -28,6 +28,10 @@ emotion/mood/relationship engine already built.
 The existing sprite path is **retained as the fallback tier**, not the destination — see
 *Model tiering* below.
 
+**Two further goals now shape this**: a **desktop mode** (Phase 6) where she lives in the corner of the
+screen as a tray-resident presence rather than a browser tab, and an **option on realistic, non-VRM
+avatars** (see Component choices) which would also retire the viseme and expression-mapping limits.
+
 ## Current state (what we already have — reuse it)
 - FastAPI backend, vanilla-JS frontend, KoboldCPP streaming (`chat_generate_stream`, SSE).
 - **Emotion system**: post-reply classifier (Core-8 / Full-28), running **mood/valence**, per-swipe emotions.
@@ -276,6 +280,59 @@ means she cannot be interrupted in hands-free mode without reaching for push-to-
 openWakeWord (ONNX/CPU) and Silero-VAD are the accuracy upgrades for this. `echo_suppress` + `ttsLevel`
 remain in the code and settings, dormant, waiting for this phase.
 
+### Phase 6 — Desktop mode *(new goal)*
+
+Her as a **resident desktop presence** rather than a browser tab: a tray service that keeps running,
+with the avatar occupying the lower-right corner of the desktop and surfacing when addressed.
+
+**This is a repackaging, not a rebuild.** The backend already is the microservice — chat, TTS, STT,
+settings and the avatar are all HTTP on `:7861`. Desktop mode adds exactly two things:
+
+1. **`/desktop`** — an avatar-only view: no chat pane, no sidebar, transparent background. Same
+   `vtuber.mjs`, same `avatar:*` bridge, same `/api/tts` + `/api/stt` the SPA uses. The chat transcript
+   becomes optional rather than the primary surface.
+2. **A thin native shell** that hosts that view in a borderless, transparent, always-on-top window and
+   owns the tray icon. It holds no logic of its own; the container stays the brain.
+
+#### Platform findings (measured on this box, 2026-08-31)
+
+| | Result |
+|---|---|
+| Session | Wayland, KDE, `kwin_wayland` with XWayland up on `:0` |
+| `zwlr_layer_shell_v1` | **advertised, version 5** |
+| `org_kde_plasma_shell` | advertised, version 8 |
+| Tray | StatusNotifierItem via `kded6` on the session bus |
+
+Layer-shell being present is the important one, and it was not a safe assumption — it is the clean way
+to anchor an overlay to a screen corner on Wayland, choose its layer, and set an **input region** so
+clicks pass through to the desktop everywhere except the avatar itself. Without it the fallbacks are
+XWayland positioning or asking the user to write a KWin window rule.
+
+#### Shell options
+
+| Option | Layer-shell | Notes |
+|---|---|---|
+| **GTK4 + WebKitGTK + gtk4-layer-shell** | native | Python/PyGObject, fits the existing stack, no Electron or Rust. **Risk:** WebKitGTK's `getUserMedia` and WebGL need verifying before committing. |
+| **Electron / Tauri** | no native support | Would run under XWayland, where positioning and always-on-top work. Heavier; Electron especially. |
+| **Ordinary window + KWin rule** | n/a | Zero shell work, but pushes setup onto the user. |
+
+#### Requirements the browser version never had
+
+- **Click-through** — the avatar must not eat clicks meant for the desktop behind it. Input region via
+  layer-shell, or `setIgnoreMouseEvents` with forwarding on Electron/Tauri.
+- **Summoning** — a global hotkey (KDE can bind one to a D-Bus call) and/or the wake word already built
+  in Phase 1b. "Pop up on a decided interaction" is the wake-word path.
+- **Idle behaviour** — she is on screen all the time now, so the render loop's cost and the
+  hidden-tab pause both need rethinking for a window that is always visible but rarely looked at.
+- **Multi-monitor** — which output, and what happens when it changes.
+- **Autostart** — systemd user unit, matching how `stack` already installs one.
+
+#### Dependency worth stating plainly
+
+**Phase 5 (interruption) stops being optional here.** Half-duplex is tolerable in a chat window you are
+already looking at; in a desktop assistant that talks at you and cannot be cut off without reaching for
+push-to-talk, it is the defining flaw. Desktop mode should not ship before it.
+
 ## Track B — Content pipeline *(new; starts now, in parallel with Phase 2)*
 
 **This is the schedule risk.** Code for 3a–3d is bounded and well-trodden. Rigging a VRM and
@@ -343,7 +400,34 @@ waits only on a loadable `.vrm` from Track B.
 - **Animation sourcing**: **Mixamo** retarget for the generic set; **Blender + VRM Add-on** for
   hand-authored hero clips.
 - **VRM sourcing on Linux**: **VRM Add-on for Blender** (native) or **VRoidHub**. VRoid Studio has no
-  Linux build.
+  Linux build (worth trying under Proton on this box before falling back to Blender).
+- ◻ **OPTION — realistic (non-VRM) avatars.** VRM is an anime-first format: MToon toon shading, and at
+  most **5** emotive presets (4 on the 0.x models we have). The realistic ecosystems ship plain glTF with
+  **ARKit blendshapes — 52 of them**, including real mouth shapes. That is not just a look: it would
+  retire two limits this plan currently carries, the lossy 28→5 expression collapse and the
+  viseme block, since ARKit shapes are what viseme drivers target.
+  | Source | Style | Notes |
+  |---|---|---|
+  | **Ready Player Me** | stylized-realistic | glTF+ARKit, free, embeddable creator; best effort/reward |
+  | **Avaturn** | near-photoreal from a selfie | GLB+ARKit, commercial SDK |
+  | **Character Creator 4** | genuinely realistic | GLB/FBX, paid desktop authoring, **no service dependency** |
+  | ~~MetaHuman~~ | photoreal | Unreal only — not a browser format, ruled out |
+  - **Cost:** the 3b/3c/3d channels are VRM-coupled (`humanoid.getNormalizedBoneNode`,
+    `expressionManager`, `VRMLookAt`, VRM spring bones). The refactor is bounded though — everything
+    already funnels through seven bone handles and `setValue`, so a **rig adapter** of about two methods
+    (`bone(name)`, `setExpression(name, weight)`) covers it, with a VRM impl and a glTF/ARKit impl. The
+    channels themselves would not change. **Spring bones are the real loss**: VRM declares them in the
+    file, a plain glTF has none.
+  - **Counter-argument, taken seriously:** near-photoreal amplifies every animation flaw. At 30 fps with
+    procedural idle and a five-clip gesture library, a photoreal face will read *worse* than the current
+    anime model, not better. Stylized-realistic is the safer target; going photoreal makes
+    **NVIDIA Audio2Face / ACE** (local, runs on the 4070, generates blendshape animation from audio)
+    effectively mandatory rather than optional.
+  - **Cheap way to decide:** export one RPM or CC4 avatar as GLB and load it in the harness. It will
+    fail for want of VRM extensions, and the failure names exactly what the adapter needs — while
+    showing the realism against our real lighting and bust framing.
+  - Hosted creators (RPM, Avaturn) carry usage terms worth reading for this app's content; CC4 and
+    Blender avoid that entirely and fit the local-first principle better.
 
 ## Performance budget *(new)*
 One RTX 4070, 12 GB, already shared by KoboldCPP and ComfyUI. The avatar adds a **continuous** WebGL
@@ -374,6 +458,12 @@ render loop — unlike sprites, it never idles.
 - **Emotion mapping** — collapse Core-8/Full-28 to the ~5 VRM presets, or author custom blendshapes?
   (cost lands in Track B)
 - **Framing** — bust or full body? Determines whether the gesture track is worth building at all.
+  Desktop mode leans this way: a corner overlay is a bust, and a full body would be a tall thin window.
+- **Realistic vs VRM avatars** — see the option under Component choices. Decide before investing in
+  hero-tier VRM content, since the rig adapter and the content pipeline both fork on it.
+- **Desktop shell** — GTK4 + WebKitGTK (native layer-shell, needs a `getUserMedia`/WebGL check) vs
+  Electron/Tauri under XWayland vs an ordinary window plus a KWin rule.
+- **Desktop summoning** — global hotkey, wake word, or both.
 - In-app avatar view vs separate `/vtuber` page (three.js is heavy for the no-build SPA).
 - VRM sourcing: Blender VRM addon vs VRoidHub.
 - Animation set: Mixamo retarget vs hand-authored.

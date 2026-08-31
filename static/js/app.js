@@ -753,6 +753,7 @@ async function openCardEditor(card) {
   $("#ce-speed-val").textContent = Number($("#ce-speed").value).toFixed(2);
   await loadVoices();
   fillVoiceSelect($("#ce-voice"), ceBase.tts_voice);
+  await refreshVrmSelect(ceBase.vrm || "");
   // Deep-copy so edits don't mutate ceBase until saved.
   ceEntries = JSON.parse(JSON.stringify((ceBase.character_book || {}).entries || []));
   renderLore();
@@ -767,6 +768,94 @@ async function openCardEditor(card) {
 }
 
 const closeCardEditor = () => { $("#card-editor").hidden = true; };
+
+// ---- avatar model (VRM) picker + import -----------------------------------
+// A .vrm is opaque until something reads it: the same file can be a complete
+// avatar or a mesh with no rig, and the difference only shows up as "the model
+// never appeared". So every model is audited server-side and the verdict is put
+// on screen here, next to the choice it informs.
+let vrmModels = [];
+
+async function refreshVrmSelect(selected) {
+  const sel = $("#ce-vrm");
+  try {
+    vrmModels = await api("/vrm");
+  } catch { vrmModels = []; }
+  sel.innerHTML = '<option value="">— none (use expression sprites) —</option>';
+  for (const m of vrmModels) {
+    const o = document.createElement("option");
+    o.value = m.name;
+    o.textContent = `${m.name} (${(m.size / 1048576).toFixed(0)} MB${m.usable === false ? " — unusable" : ""})`;
+    sel.appendChild(o);
+  }
+  sel.value = selected && vrmModels.some(m => m.name === selected) ? selected : "";
+  renderVrmInfo();
+}
+
+function renderVrmInfo() {
+  const box = $("#ce-vrm-info");
+  const m = vrmModels.find(x => x.name === $("#ce-vrm").value);
+  if (!m) {
+    box.innerHTML = "This character uses generated expression sprites. " +
+      "Assign a model to give her a 3D avatar instead.";
+    $("#ce-vrm-delete").disabled = true;
+    return;
+  }
+  $("#ce-vrm-delete").disabled = false;
+  if (m.error) { box.innerHTML = `<span class="bad">unreadable: ${m.error}</span>`; return; }
+  const L = m.license || {};
+  const yes = (v) => v === true || v === "Allow" || v === "allow" || v === "everyone";
+  const flag = (label, v) =>
+    `<span class="${yes(v) ? "ok" : "warn"}">${label}: ${v === undefined || v === null ? "?" : v}</span>`;
+  const bits = [
+    `<code>${m.spec}</code> ${m.title || "untitled"}${m.author ? " — " + m.author : ""}`,
+    `${(m.triangles || 0).toLocaleString()} tris · ${m.springs} spring group(s) · ` +
+      `${m.emotive.length}/5 expressions · ${m.visemes.length}/5 visemes` +
+      `${m.blink ? " · blink" : ""}${m.look_at ? " · gaze" : ""}`,
+    [flag("redistribution", L.redistribution), flag("sexual use", L.sexual),
+     flag("users", L.allowed_user)].join(" &nbsp;·&nbsp; "),
+  ];
+  if (m.problems && m.problems.length)
+    bits.push(`<span class="bad">${m.problems.join("; ")}</span>`);
+  if (m.notes && m.notes.length)
+    bits.push(`<span class="warn">${m.notes.join("; ")}</span>`);
+  box.innerHTML = bits.join("<br>");
+}
+
+$("#ce-vrm").addEventListener("change", renderVrmInfo);
+
+$("#ce-vrm-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const box = $("#ce-vrm-info");
+  box.textContent = `Importing ${f.name}…`;
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    const res = await fetch("/api/vrm", { method: "POST", body: fd });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    await refreshVrmSelect(body.name);          // select what was just imported
+  } catch (err) {
+    box.innerHTML = `<span class="bad">Import failed: ${err.message}</span>`;
+  }
+});
+
+$("#ce-vrm-delete").addEventListener("click", async () => {
+  const name = $("#ce-vrm").value;
+  if (!name) return;
+  if (!confirm(`Delete ${name}? The file is removed from disk.`)) return;
+  const box = $("#ce-vrm-info");
+  try {
+    const res = await fetch("/api/vrm/" + encodeURIComponent(name), { method: "DELETE" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    await refreshVrmSelect("");
+  } catch (err) {
+    box.innerHTML = `<span class="bad">${err.message}</span>`;
+  }
+});
 
 function buildCardPayload() {
   const g = id => $("#ce-" + id).value.trim();
@@ -787,6 +876,7 @@ function buildCardPayload() {
     social_acceptance: Number($("#ce-social").value),
     tts_voice: $("#ce-voice").value,
     tts_speed: Number($("#ce-speed").value),
+    vrm: $("#ce-vrm").value,
     image: ceImage !== undefined ? ceImage : (ceBase.image || null),
     character_book: ceEntries.length
       ? { ...(ceBase.character_book || {}),

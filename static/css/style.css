@@ -289,3 +289,12 @@ body {
 @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(221,51,51,.6); } 50% { box-shadow: 0 0 0 6px rgba(221,51,51,0); } }
 #hf-btn.active { color: #fff; background: #2a7; border-radius: 8px; }
 #hf-btn.listening { animation: micpulse 1s ease-in-out infinite; }
+
+/* Card editor: avatar model row */
+.ce-vrm { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+.ce-vrm .vrm-actions { display: flex; gap: 6px; }
+#ce-vrm-info { grid-column: 1 / -1; font-size: 12px; line-height: 1.6; }
+#ce-vrm-info .warn { color: #e0a24a; }
+#ce-vrm-info .bad  { color: #e0557a; }
+#ce-vrm-info .ok   { color: #5ac47a; }
+#ce-vrm-info code  { background: #0003; padding: 1px 5px; border-radius: 4px; }

@@ -191,6 +191,16 @@
               <input id="ce-speed" type="range" min="0.5" max="1.5" step="0.05">
               <span class="muted">1.00 = the voice's own tempo · lower is slower. Test voice uses this.</span></label>
           </div>
+          <div class="ce-full ce-vrm">
+            <label>Avatar model (VRM)
+              <select id="ce-vrm" class="field"></select></label>
+            <label>&nbsp;
+              <span class="vrm-actions">
+                <label class="btn-mini">Import…<input id="ce-vrm-file" type="file" accept=".vrm" hidden></label>
+                <button id="ce-vrm-delete" type="button" class="btn-mini">Delete</button>
+              </span></label>
+            <div id="ce-vrm-info" class="ce-full muted"></div>
+          </div>
           <label class="ce-full">First message (greeting)<textarea id="ce-first_mes" class="field" rows="3"></textarea></label>
           <label class="ce-full">Alternate greetings (one per line)
             <textarea id="ce-greetings" class="field" rows="2"></textarea></label>
