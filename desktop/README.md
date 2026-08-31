@@ -50,11 +50,24 @@ Measured on this host before committing to it: WebGL 2.0, `getUserMedia`
 and the avatar renderer confirmed running inside it at a live frame rate. GTK4
 and WebKit 6.0 were already installed; Electron would have been a new stack.
 
+## Tray icon
+
+`tray.py` speaks **StatusNotifierItem directly over D-Bus** — KDE's own tray
+protocol. The obvious binding, `AppIndicator3`, is a GTK3 library that wants a
+`Gtk.Menu`, which GTK4 removed, so using it would mean two GTK versions in one
+process. SNI is just a D-Bus interface, and GLib's `Gio` already provides the
+bus, so this adds no dependency at all.
+
+Two objects are published — `/StatusNotifierItem` for the icon and `/MenuBar`
+(`com.canonical.dbusmenu`) for the menu — then `org.kde.StatusNotifierWatcher`
+is asked to adopt them. Left-click shows or hides her; the menu carries
+show/hide, a click-through checkbox, reload and quit.
+
+`--icon NAME` picks a themed icon (default `face-smile`). `--no-tray` skips it;
+if no watcher is running the shell says so and carries on without one.
+
 ## Known gaps
 
-- **No tray icon yet.** `AppIndicator3` is a GTK3 library and wants a
-  `Gtk.Menu`, which GTK4 removed. Doing it properly means speaking
-  StatusNotifierItem over D-Bus directly. The HUD carries the controls for now.
 - **No global hotkey.** Bind one in KDE to a script that focuses the window, or
   use the wake word, which already works.
 - **Login persists via a cookie store** under `~/.local/share/pantheon-desktop`.

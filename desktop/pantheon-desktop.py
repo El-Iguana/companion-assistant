@@ -34,6 +34,9 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("WebKit", "6.0")
 from gi.repository import Gtk, Gdk, GLib, WebKit  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from tray import Tray, MenuItem  # noqa: E402
+
 APP_ID = "ai.jotunheim.pantheon.desktop"
 DEFAULT_URL = "http://localhost:7861/desktop"
 # The HUD lives in a strip along the bottom. Only that strip accepts clicks;
@@ -48,6 +51,8 @@ class DesktopShell(Gtk.Application):
         self.win: Gtk.Window | None = None
         self.view: WebKit.WebView | None = None
         self.click_through = True
+        self.tray = None
+        self.icon_name = "face-smile"
 
     # -- lifecycle ---------------------------------------------------------
     def do_activate(self):
@@ -98,6 +103,9 @@ class DesktopShell(Gtk.Application):
         self.win.present()
         GLib.timeout_add(300, self._apply_input_region_once)
 
+        if self.want_tray:
+            self._build_tray()
+
     def _on_permission(self, _view, request):
         request.allow()
         return True
@@ -137,13 +145,39 @@ class DesktopShell(Gtk.Application):
         self._apply_input_region()
 
     # -- tray --------------------------------------------------------------
-    # Not implemented yet, deliberately rather than badly. The obvious binding,
-    # AppIndicator3, is a GTK3 library and wants a Gtk.Menu, which GTK4 removed
-    # -- so using it means loading GTK3 alongside GTK4 in one process. The right
-    # answer is to speak StatusNotifierItem over D-Bus directly (KDE's own tray
-    # protocol, no toolkit involved), which is a self-contained piece of work.
-    # Until then the HUD in the page carries the controls, and --no-tray is the
-    # only supported mode.
+    # StatusNotifierItem straight over D-Bus (see tray.py). AppIndicator3 is
+    # available but is GTK3 and wants a Gtk.Menu that GTK4 removed, which would
+    # mean two GTK versions in one process.
+    def _build_tray(self):
+        self._mi_through = MenuItem(
+            2, "Click through the avatar", self._menu_click_through,
+            toggle=True, checked=self.click_through)
+        items = [
+            MenuItem(1, "Show / hide", self._menu_toggle_visible),
+            self._mi_through,
+            MenuItem(3, is_sep=True),
+            MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
+            MenuItem(5, "Quit", lambda _i: self.quit()),
+        ]
+        self.tray = Tray(APP_ID, "Pantheon", self.icon_name, items,
+                         on_activate=self._menu_toggle_visible)
+        if not self.tray.start():
+            self.tray = None
+
+    def _menu_toggle_visible(self, *_):
+        if not self.win:
+            return
+        if self.win.get_visible():
+            self.win.set_visible(False)
+        else:
+            self.win.set_visible(True)
+            self.win.present()
+            # The surface is recreated on re-show, so the input region goes with it.
+            GLib.timeout_add(250, self._apply_input_region_once)
+
+    def _menu_click_through(self, item):
+        self.click_through = item.checked
+        self._apply_input_region()
 
 
 def main() -> int:
@@ -151,11 +185,12 @@ def main() -> int:
     ap.add_argument("--url", default=os.environ.get("PANTHEON_URL", DEFAULT_URL))
     ap.add_argument("--width", type=int, default=420)
     ap.add_argument("--height", type=int, default=620)
-    ap.add_argument("--no-tray", action="store_true",
-                    help="accepted for forward compatibility; there is no tray yet")
+    ap.add_argument("--no-tray", action="store_true", help="run without a tray icon")
+    ap.add_argument("--icon", default="face-smile", help="themed tray icon name")
     args = ap.parse_args()
 
     app = DesktopShell(args.url, args.width, args.height, not args.no_tray)
+    app.icon_name = args.icon
     return app.run([])
 
 
