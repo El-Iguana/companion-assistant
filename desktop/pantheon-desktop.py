@@ -97,7 +97,12 @@ class DesktopShell(Gtk.Application):
         # Mic and autoplay: this is a local app the user launched deliberately,
         # so a prompt with no window chrome to host it would just be a dead end.
         self.view.connect("permission-request", self._on_permission)
-        self.view.set_background_color(Gdk.RGBA())  # fully transparent
+        # Gdk.RGBA() default-constructs to OPAQUE WHITE (1,1,1,1), not to zeroes,
+        # so passing a bare one here painted the view solid white -- set every
+        # component explicitly.
+        transparent = Gdk.RGBA()
+        transparent.red = transparent.green = transparent.blue = transparent.alpha = 0.0
+        self.view.set_background_color(transparent)
 
         # Drag-to-position. A Wayland client may not set its own coordinates --
         # but it may ask the compositor for an interactive move, which is what
@@ -110,6 +115,17 @@ class DesktopShell(Gtk.Application):
         grip.set_margin_top(6); grip.set_margin_bottom(6)
         self.drag_bar.set_child(grip)
         self.drag_bar.set_visible(False)
+
+        # Three layers have to agree for the desktop to show through: the page
+        # (CSS), the WebView (above) and the GTK window itself, which otherwise
+        # paints the theme's background behind everything.
+        css = Gtk.CssProvider()
+        css.load_from_data(b"""
+            window, window > box, box { background-color: transparent; background-image: none; }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(self.drag_bar)
