@@ -39,6 +39,11 @@ class AppSettings(BaseModel):
     full_duplex: bool = False            # listen while she speaks (needs headphones or AEC)
     mic_device_id: str = ""              # "" = browser default; set to an AEC capture source
     mic_device_label: str = ""           # remembered for display; deviceIds are unstable
+    # --- Phase 6: desktop mode -------------------------------------------------
+    # Which character answers in the corner of the screen. "" = fall back to the
+    # most recently used session, which is only a guess -- the desktop shell has
+    # no UI for choosing, so this is where the choice lives.
+    desktop_card_id: str = ""
     disable_thinking: bool = False       # append /no_think so Qwen3 skips <think> reasoning (faster replies)
     # Long-term memory: rolling-summarizer tuning (services/memory.py).
     summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up

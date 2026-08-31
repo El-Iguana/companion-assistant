@@ -1377,7 +1377,7 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // starts with it (which also barges in). Fully local; no extra model. A true
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
-  full_duplex: false, mic_device_id: "", mic_device_label: "",
+  full_duplex: false, mic_device_id: "", mic_device_label: "", desktop_card_id: "",
   summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
   recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
   auto_facts_max_new: 3 };
@@ -1447,6 +1447,19 @@ async function hfOnUtterance() {
   selfHeardCount = 0;                                     // a genuine turn clears it
   const msg = applyWakeWord(raw);
   if (msg && !state.streaming) send(msg, false);
+}
+
+function fillDesktopCardSelect() {
+  const sel = $("#vc-desktop-card");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— most recent chat —</option>';
+  for (const c of (state.cards || [])) {
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.name + (c.has_vrm ? "  (3D avatar)" : "  (sprites)");
+    sel.appendChild(o);
+  }
+  sel.value = voiceSettings.desktop_card_id || "";
 }
 
 // ---- microphone selection (Phase 5) ---------------------------------------
@@ -1618,6 +1631,7 @@ $("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-duplex").checked = !!voiceSettings.full_duplex;
   await fillMicSelect();
   checkDuplexSanity();
+  fillDesktopCardSelect();
   $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
   const sa = voiceSettings.summarize_after ?? 24, kr = voiceSettings.keep_recent ?? 12,
         sc = voiceSettings.summary_max_tokens ?? 400;
@@ -1762,6 +1776,7 @@ $("#vc-save").addEventListener("click", async () => {
     full_duplex: $("#vc-duplex").checked,
     mic_device_id: $("#vc-mic").value,
     mic_device_label: ($("#vc-mic").selectedOptions[0] || {}).textContent || "",
+    desktop_card_id: $("#vc-desktop-card").value,
     disable_thinking: $("#vc-nothink").checked,
     summarize_after: Number($("#vc-sumafter").value),
     keep_recent: Number($("#vc-keeprecent").value),
@@ -1944,10 +1959,33 @@ async function init() {
   const msgs = $("#messages");
   if (msgs) bubbleObserver.observe(msgs, { childList: true, subtree: true, characterData: true });
 
-  // A desktop avatar with no character selected is a blank window; pick the
-  // last-used session automatically so the shell can just point at /desktop.
-  window.addEventListener("load", () => setTimeout(() => {
-    if (!state.session && state.sessions && state.sessions.length)
-      openSession(state.sessions[0].id);
-  }, 800));
+  // The shell just opens a URL, so the character has to be chosen here rather
+  // than by the user at launch. Order: ?card= override, then the configured
+  // desktop character, then the most recent chat as a last resort.
+  async function pickCharacter() {
+    if (state.session) return;
+    const want = new URLSearchParams(location.search).get("card")
+              || voiceSettings.desktop_card_id || "";
+    const sessions = state.sessions || [];
+    if (want) {
+      // Continue her most recent conversation rather than starting cold every
+      // launch -- a desktop companion that forgets on every boot is worse.
+      const mine = sessions.filter(s => s.character_id === want);
+      if (mine.length) return openSession(mine[0].id);
+      const card = (state.cards || []).find(c => c.id === want);
+      if (card) {
+        try {
+          const s = await api("/sessions", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ character_id: want }),
+          });
+          await loadSessions();
+          return openSession(s.id);
+        } catch (e) { console.warn("[desktop] could not start a chat:", e); }
+      }
+      console.warn("[desktop] configured character not found; falling back");
+    }
+    if (sessions.length) openSession(sessions[0].id);
+  }
+  window.addEventListener("load", () => setTimeout(pickCharacter, 900));
 })();
