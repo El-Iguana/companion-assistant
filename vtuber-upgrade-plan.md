@@ -270,15 +270,35 @@ channels. **3a and 3b together are what make the avatar read as alive** — 3b i
 - Failure fallbacks (what the avatar does if STT/TTS/LLM stalls — it must keep breathing).
 - Interaction: click/touch response, look-at-cursor tuning.
 
-### Phase 5 — Interruption *(promoted from a Phase 1 sub-bullet)*
-Currently deferred by request; **the largest remaining gap in the "live presence" goal.** Half-duplex
-means she cannot be interrupted in hands-free mode without reaching for push-to-talk. Options:
-- **Wake-word-gated barge-in** — transcribe short windows during playback, interrupt only on the wake word.
-- **Proper WebRTC AEC** — real acoustic echo cancellation instead of the half-duplex gate.
-- **Headphone path** — sidestep the echo problem entirely for headphone users.
+✅ **Phase 5 — Interruption (done)**
+She can now be interrupted mid-sentence in hands-free mode. Barge-in is symmetric with push-to-talk:
+speaking over her calls `stopSpeaking()` + `abortChat()`, the same pair the 🎤 button uses.
 
-openWakeWord (ONNX/CPU) and Silero-VAD are the accuracy upgrades for this. `echo_suppress` + `ttsLevel`
-remain in the code and settings, dormant, waiting for this phase.
+**The measurement that settled the design.** On the reference box (Logitech C920e webcam mic, line-out
+speakers), during her speech:
+
+| Capture path | Echo relative to the noise floor |
+|---|---|
+| Raw microphone | **+26.3 dB** |
+| PipeWire WebRTC AEC source | **−39.2 dB** (below the floor) |
+
+That ~65 dB gap is the whole story, and it explains the *superseded* attempt recorded in Phase 1: ducking
+the start gate by `echo_suppress × ttsLevel` could never have worked, because **no level threshold
+separates a signal that dominates by 26 dB.** So the fix is a hard switch plus a real canceller, never
+another knob — `echo_suppress` is now removed from the UI rather than left as a control that cannot work.
+
+- **`AppSettings.full_duplex`** — lifts the half-duplex gate. Correct *by construction* on headphones
+  (no acoustic path); needs an echo canceller over speakers. Off by default: wrong on speakers means she
+  hears herself and answers herself.
+- **`AppSettings.mic_device_id`** — pick an echo-cancelled capture source; falls back to the browser
+  default if the saved device disappears.
+- **`scripts/setup-aec.sh`** — loads PipeWire's `module-echo-cancel` (`aec_source` + `aec_sink`), with
+  `--default`, `--status`, `--unload`. Runtime only, so a reboot clears it.
+- **Both halves are required over speakers**: selecting `aec_source` while playing to the normal sink
+  does nothing, because the canceller needs the playback reference to subtract. The in-app help says so.
+
+◻ Remaining polish: openWakeWord (ONNX/CPU) and Silero-VAD are still the accuracy upgrades for the VAD
+and wake word; persisting the AEC module across reboots is a systemd/PipeWire-config job.
 
 ### Phase 6 — Desktop mode *(new goal)*
 
@@ -329,9 +349,9 @@ XWayland positioning or asking the user to write a KWin window rule.
 
 #### Dependency worth stating plainly
 
-**Phase 5 (interruption) stops being optional here.** Half-duplex is tolerable in a chat window you are
-already looking at; in a desktop assistant that talks at you and cannot be cut off without reaching for
-push-to-talk, it is the defining flaw. Desktop mode should not ship before it.
+**Phase 5 (interruption) was the gate here, and it is now done.** Half-duplex would have been the
+defining flaw in a desktop assistant that talks at you and cannot be cut off. Desktop mode inherits the
+full-duplex path — and a headset, which is the likely desktop setup anyway, needs no echo canceller at all.
 
 ## Track B — Content pipeline *(new; starts now, in parallel with Phase 2)*
 

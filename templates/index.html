@@ -326,10 +326,16 @@
           <label>End-of-speech silence: <output id="vc-silence-val"></output>
             <input id="vc-silence" type="range" min="300" max="2000" step="100">
             <span class="muted">How long a pause ends your turn.</span></label>
-          <label>Ignore her own voice: <output id="vc-echo-val"></output>
-            <input id="vc-echo" type="range" min="0" max="2" step="0.1">
-            <span class="muted">Higher = she won't hear herself while speaking (but you must be louder
-              to interrupt). 0 = off.</span></label>
+          <label>Microphone
+            <select id="vc-mic" class="field"></select>
+            <span class="muted">Pick an <b>echo-cancelled</b> source (e.g. <code>aec_source</code>) to
+              let her be interrupted while speaking. <a href="#" id="vc-mic-help">How?</a></span></label>
+          <label class="check"><input id="vc-duplex" type="checkbox"> Let me interrupt her while she speaks</label>
+          <span class="muted">Off (default) = the open mic stops listening while she talks, so she can
+            never hear herself — but you can only interrupt with push-to-talk 🎤. Turn this on
+            <b>only</b> with headphones or an echo-cancelling mic, or she will hear her own voice and
+            reply to herself.</span>
+          <div id="vc-mic-guide" class="muted" hidden></div>
           <label class="check"><input id="vc-nothink" type="checkbox"> Disable model thinking (faster replies)</label>
           <span class="muted">Skips Qwen3's hidden &lt;think&gt; reasoning so the whole reply budget goes to
             the actual message. Turn off if replies feel less thoughtful.</span>

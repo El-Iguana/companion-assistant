@@ -362,7 +362,14 @@ per-relationship **context override** (⚙).
   stage via a new `avatar:mood` event. **Pose composition rule: `resetPose()` returns every animated
   bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
   is what sent the arms wandering, and shoulders must stay in the rest set.
-  **All six channels of "fully animated" are now live.** Next: ◻ **Phase 5 interruption** ·
+  **All six channels of "fully animated" are now live.** ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
+  headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
+  `scripts/setup-aec.sh` loads PipeWire `module-echo-cancel` → `aec_source`/`aec_sink`.
+  **Measured, and it explains the failed earlier attempt:** during her speech the raw mic hears her at
+  **+26 dB** over the noise floor, the AEC source at **−39 dB** — no level threshold can bridge that, so
+  `echo_suppress` was a dead end and is gone from the UI. Over speakers BOTH halves are needed: pick
+  `aec_source` *and* play into `aec_sink`, or there is no reference to subtract. Next: ◻
   ◻ **Phase 6 desktop mode** — tray-resident avatar in the screen corner; a repackage, not a rebuild
   (backend already is the microservice; adds a `/desktop` avatar-only view + a thin native shell).
   Measured on this box: KWin advertises **`zwlr_layer_shell_v1` v5**, so a corner-anchored click-through

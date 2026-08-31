@@ -1372,6 +1372,7 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // starts with it (which also barges in). Fully local; no extra model. A true
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
+  full_duplex: false, mic_device_id: "", mic_device_label: "",
   summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
   recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
   auto_facts_max_new: 3 };
@@ -1411,6 +1412,59 @@ async function hfOnUtterance() {
   if (msg && !state.streaming) send(msg, false);
 }
 
+// ---- microphone selection (Phase 5) ---------------------------------------
+// Device labels are only exposed after a getUserMedia permission grant, so an
+// unprompted enumerate returns anonymous entries. Ask once, then list.
+async function fillMicSelect() {
+  const sel = $("#vc-mic");
+  sel.innerHTML = '<option value="">Browser default</option>';
+  let devices = [];
+  try {
+    devices = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === "audioinput");
+    if (devices.length && !devices[0].label) {         // no permission yet
+      const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tmp.getTracks().forEach(t => t.stop());
+      devices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(d => d.kind === "audioinput");
+    }
+  } catch { /* denied or unavailable — leave the default option only */ }
+  for (const d of devices) {
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label || d.deviceId.slice(0, 12);
+    if (/aec|echo|cancel/i.test(o.textContent)) o.textContent += "  ✅ echo-cancelled";
+    sel.appendChild(o);
+  }
+  const want = voiceSettings.mic_device_id;
+  sel.value = want && devices.some(d => d.deviceId === want) ? want : "";
+  if (want && sel.value !== want)                       // saved device is gone
+    sel.insertAdjacentHTML("beforeend",
+      `<option value="" disabled>(saved device "${voiceSettings.mic_device_label}" not found)</option>`);
+}
+
+$("#vc-mic-help").addEventListener("click", (e) => {
+  e.preventDefault();
+  const g = $("#vc-mic-guide");
+  g.hidden = !g.hidden;
+  if (g.innerHTML) return;
+  // Measured on the reference box: raw mic hears her at +26 dB over the noise
+  // floor, this AEC source at -39 dB. Level tricks cannot bridge that; a real
+  // canceller can.
+  g.innerHTML = `
+    <p><b>Interrupting her over speakers</b> needs an echo-cancelling capture source,
+    otherwise the mic hears her far louder than it hears you.</p>
+    <p>On PipeWire (Fedora / Bazzite / most modern Linux), create one:</p>
+    <pre>pactl load-module module-echo-cancel \
+  source_name=aec_source sink_name=aec_sink \
+  aec_method=webrtc</pre>
+    <p>Then pick <code>aec_source</code> above <b>and play audio through
+    <code>aec_sink</code></b> — the canceller needs to hear what is being played to
+    subtract it. Easiest is to set <code>aec_sink</code> as your default output.</p>
+    <p>To undo: <code>pactl unload-module module-echo-cancel</code>.
+    On <b>headphones</b> you need none of this — just tick the box.</p>`;
+});
+
 function hfTick() {
   if (!hfActive) return;
   const data = new Uint8Array(hfAnalyser.frequencyBinCount);
@@ -1421,14 +1475,19 @@ function hfTick() {
   const base = voiceSettings.vad_threshold ?? 0.015;
 
   if (!hfSpeaking) {
-    // Half-duplex — ignore herself: do NOT listen at all while she's speaking
-    // (or within the tail after). This fully eliminates self-hearing; the cost is
-    // no auto barge-in in hands-free mode (use push-to-talk 🎤 to interrupt).
-    // Interruption comes back later; `echo_suppress` is dormant until then.
-    const selfActive = !!ttsSource || now < ttsHangoverUntil;
+    // Phase 5. Half-duplex (default) refuses to listen while she speaks: no
+    // self-hearing, but no barge-in either. Full duplex lifts that gate — only
+    // correct when her voice cannot reach the mic at all, i.e. headphones or a
+    // system echo canceller. Measured on the reference box, the raw webcam mic
+    // hears her at +26 dB over the floor while a PipeWire WebRTC AEC source sits
+    // at -39 dB, which is why this is a hard switch and not another level knob:
+    // no threshold can separate a signal that dominates by 26 dB.
+    const selfActive = (!!ttsSource || now < ttsHangoverUntil) && !voiceSettings.full_duplex;
     if (!selfActive && rms > base) {
       hfStartUtterance();
       hfSpeaking = true; hfSilenceStart = 0;
+      // Barge-in: speaking over her cuts the reply, exactly as push-to-talk does.
+      if (ttsSource || state.streaming) { stopSpeaking(); abortChat(); }
     }
   } else {
     // Already capturing your speech: track end-of-turn with the plain threshold
@@ -1446,9 +1505,14 @@ function hfTick() {
 async function engageHandsFree() {
   if (hfActive) return true;
   try {
-    hfStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    });
+    const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    if (voiceSettings.mic_device_id) a.deviceId = { exact: voiceSettings.mic_device_id };
+    try {
+      hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
+    } catch {
+      delete a.deviceId;                       // saved device unplugged — fall back
+      hfStream = await navigator.mediaDevices.getUserMedia({ audio: a });
+    }
   } catch { return false; }
   hfCtx = new (window.AudioContext || window.webkitAudioContext)();
   hfAnalyser = hfCtx.createAnalyser(); hfAnalyser.fftSize = 512;
@@ -1488,14 +1552,14 @@ async function setHandsFree(on) {
 $("#hf-btn").addEventListener("click", () => setHandsFree(!voiceSettings.hands_free));
 
 // voice settings modal (wake word + VAD tuning)
-$("#voicecfg-btn").addEventListener("click", () => {
+$("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-wake").value = voiceSettings.wake_word || "";
   $("#vc-thresh").value = voiceSettings.vad_threshold ?? 0.015;
   $("#vc-thresh-val").textContent = Number(voiceSettings.vad_threshold ?? 0.015).toFixed(3);
   $("#vc-silence").value = voiceSettings.vad_silence_ms ?? 800;
   $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
-  $("#vc-echo").value = voiceSettings.echo_suppress ?? 0.8;
-  $("#vc-echo-val").textContent = Number(voiceSettings.echo_suppress ?? 0.8).toFixed(1);
+  $("#vc-duplex").checked = !!voiceSettings.full_duplex;
+  await fillMicSelect();
   $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
   const sa = voiceSettings.summarize_after ?? 24, kr = voiceSettings.keep_recent ?? 12,
         sc = voiceSettings.summary_max_tokens ?? 400;
@@ -1632,13 +1696,14 @@ function scheduleSweep() {
 }
 $("#vc-thresh").addEventListener("input", (e) => { $("#vc-thresh-val").textContent = Number(e.target.value).toFixed(3); });
 $("#vc-silence").addEventListener("input", (e) => { $("#vc-silence-val").textContent = e.target.value + " ms"; });
-$("#vc-echo").addEventListener("input", (e) => { $("#vc-echo-val").textContent = Number(e.target.value).toFixed(1); });
 $("#vc-save").addEventListener("click", async () => {
   await persistSettings({
     wake_word: $("#vc-wake").value.trim(),
     vad_threshold: Number($("#vc-thresh").value),
     vad_silence_ms: Number($("#vc-silence").value),
-    echo_suppress: Number($("#vc-echo").value),
+    full_duplex: $("#vc-duplex").checked,
+    mic_device_id: $("#vc-mic").value,
+    mic_device_label: ($("#vc-mic").selectedOptions[0] || {}).textContent || "",
     disable_thinking: $("#vc-nothink").checked,
     summarize_after: Number($("#vc-sumafter").value),
     keep_recent: Number($("#vc-keeprecent").value),

@@ -29,7 +29,16 @@ class AppSettings(BaseModel):
     wake_word: str = ""                  # optional; "" = pure open-mic (no gate)
     vad_silence_ms: int = 800            # trailing silence that ends an utterance
     vad_threshold: float = 0.015         # RMS gate (0–1): speech vs. silence
-    echo_suppress: float = 0.8           # ignore-herself: raise the start gate by this × her output level
+    echo_suppress: float = 0.8           # legacy level-ducking knob — superseded by full_duplex + AEC
+    # --- Phase 5: interruption -------------------------------------------------
+    # Half-duplex (the default) means the open mic simply does not listen while she
+    # speaks: no self-hearing, but no barge-in either. Full duplex lifts that gate,
+    # which is only safe when her voice cannot reach the mic — headphones, or a
+    # system echo canceller. Measured on the reference box: the raw webcam mic hears
+    # her at +26 dB over the noise floor, a PipeWire WebRTC AEC source at -39 dB.
+    full_duplex: bool = False            # listen while she speaks (needs headphones or AEC)
+    mic_device_id: str = ""              # "" = browser default; set to an AEC capture source
+    mic_device_label: str = ""           # remembered for display; deviceIds are unstable
     disable_thinking: bool = False       # append /no_think so Qwen3 skips <think> reasoning (faster replies)
     # Long-term memory: rolling-summarizer tuning (services/memory.py).
     summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
