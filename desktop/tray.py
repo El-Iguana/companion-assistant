@@ -175,14 +175,26 @@ class Tray:
             # still works, so say so and carry on.
             print(f"[tray] no StatusNotifierWatcher ({e}); continuing without a tray")
 
-    def update(self):
-        """Re-publish the menu after a checkbox changes."""
+    def update(self, parent: int | None = None):
+        """Tell the panel the menu changed.
+
+        `parent` matters. LayoutUpdated names the subtree that changed, and a
+        panel that has already cached a submenu will not re-read it just because
+        the root was invalidated -- which is why the character submenu stayed on
+        "loading…" while GetLayout was returning the real names all along.
+
+        With no argument, every submenu is announced as well as the root, since
+        a caller changing a nested item should not have to know its parent id.
+        """
         self.revision += 1
-        try:
-            self.bus.emit_signal(None, "/MenuBar", MENU_IFACE, "LayoutUpdated",
-                                 GLib.Variant("(ui)", (self.revision, 0)))
-        except Exception:                                 # noqa: BLE001
-            pass
+        parents = [parent] if parent is not None else \
+                  [0] + [i.id for i in self.items if i.children]
+        for pid in parents:
+            try:
+                self.bus.emit_signal(None, "/MenuBar", MENU_IFACE, "LayoutUpdated",
+                                     GLib.Variant("(ui)", (self.revision, pid)))
+            except Exception:                             # noqa: BLE001
+                pass
 
     # -- StatusNotifierItem ------------------------------------------------
     def _sni_get(self, _c, _s, _p, _i, prop):
@@ -278,6 +290,11 @@ class Tray:
                     self.update()
             inv.return_value(None)
         elif method == "AboutToShow":
-            inv.return_value(GLib.Variant("(b)", (False,)))
+            # Answering True asks the panel to re-read this subtree before it
+            # draws. Cheap here, and it makes a stale submenu self-correct the
+            # moment someone opens it rather than depending on a signal.
+            mid = params.unpack()[0]
+            item = next((i for i in self._all() if i.id == mid), None)
+            inv.return_value(GLib.Variant("(b)", (bool(item and item.children),)))
         else:
             inv.return_value(None)

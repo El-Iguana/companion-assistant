@@ -1457,9 +1457,14 @@ async function hfOnUtterance() {
   if (msg && !state.streaming) send(msg, false);
 }
 
-function fillDesktopCardSelect() {
+async function fillDesktopCardSelect() {
   const sel = $("#vc-desktop-card");
   if (!sel) return;
+  // Re-fetch rather than trusting state.cards. That list is only refreshed at
+  // boot and after a card edit, so a tab left open since before a character was
+  // created will not have it -- which is exactly when you go looking for a
+  // newly added character in this dropdown.
+  try { state.cards = await api("/cards"); } catch { /* keep what we have */ }
   sel.innerHTML = '<option value="">— most recent chat —</option>';
   for (const c of (state.cards || [])) {
     const o = document.createElement("option");
@@ -1738,7 +1743,7 @@ $("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-duplex").checked = !!voiceSettings.full_duplex;
   await fillMicSelect();
   checkDuplexSanity();
-  fillDesktopCardSelect();
+  await fillDesktopCardSelect();
   $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
   const sa = voiceSettings.summarize_after ?? 24, kr = voiceSettings.keep_recent ?? 12,
         sc = voiceSettings.summary_max_tokens ?? 400;
@@ -2131,10 +2136,18 @@ async function init() {
   // Hooks for the native shell's tray menu. The page is the authenticated side --
   // it holds the session cookie -- so the shell asks it for the character list and
   // tells it to switch, rather than trying to reach the API itself.
-  window.__desktopCharacters = () => (state.cards || []).map(c => ({
-    id: c.id, name: c.name, avatar: !!c.has_vrm,
-    current: !!(state.session && state.session.character_id === c.id),
-  }));
+  // Reads through to the API rather than returning the cached state.cards: the
+  // shell polls this every 30s precisely so a character added in the main window
+  // turns up without a restart, and a stale cache would defeat that. Kept cheap
+  // by only re-fetching when the count changed is not possible here (the count
+  // is what we are checking), so this is one small GET twice a minute.
+  window.__desktopCharacters = () => {
+    api("/cards").then(cards => { state.cards = cards; }).catch(() => {});
+    return (state.cards || []).map(c => ({
+      id: c.id, name: c.name, avatar: !!c.has_vrm,
+      current: !!(state.session && state.session.character_id === c.id),
+    }));
+  };
 
   // Listening is a persisted setting, not something desktop mode turns on for
   // you -- an assistant that starts recording because you opened it would be
