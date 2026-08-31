@@ -1833,3 +1833,63 @@ async function init() {
   try { user = (await (await fetch("/api/me")).json()).user; } catch {}
   if (user) await onAuthed(user); else showLogin();
 })();
+
+// ===========================================================================
+// Phase 6 — desktop mode HUD.
+//
+// Deliberately a thin skin over the controls that already exist: it clicks
+// #tts-btn and #hf-btn rather than reimplementing the voice loop, so desktop
+// mode cannot drift out of sync with the main window. Everything below is
+// inert unless the body carries .desktop-mode.
+// ===========================================================================
+(function desktopMode() {
+  if (!document.body.classList.contains("desktop-mode")) return;
+
+  const cap = $("#dt-caption"), st = $("#dt-state");
+  const btnMic = $("#dt-mic"), btnTts = $("#dt-tts");
+  let capTimer = null;
+
+  // Proxy the real buttons so behaviour, persistence and error handling are
+  // shared with the full window.
+  btnTts.addEventListener("click", () => $("#tts-btn").click());
+  btnMic.addEventListener("click", () => $("#hf-btn").click());
+
+  function caption(text, holdMs) {
+    clearTimeout(capTimer);
+    if (!text) { cap.classList.remove("show"); return; }
+    cap.textContent = text;
+    cap.classList.add("show");
+    if (holdMs) capTimer = setTimeout(() => cap.classList.remove("show"), holdMs);
+  }
+
+  // Reflect state rather than track it: the source of truth stays in app.js.
+  setInterval(() => {
+    btnTts.textContent = ttsEnabled ? "🔊" : "🔇";
+    btnTts.classList.toggle("active", ttsEnabled);
+    btnMic.classList.toggle("active", !!voiceSettings.hands_free);
+    st.textContent = state.streaming ? "thinking…"
+                   : hfSpeaking      ? "listening…"
+                   : ttsSource       ? "speaking…"
+                   : voiceSettings.hands_free ? "ready" : "idle";
+  }, 250);
+
+  // Her latest line, briefly. A face alone gives you no way to catch a missed
+  // word, but a permanent transcript is clutter on a desktop. Read from the real
+  // message list as it streams, then fade -- no hooks into the chat code.
+  const bubbleObserver = new MutationObserver(() => {
+    const msgs = $("#messages");
+    const last = msgs && msgs.lastElementChild;
+    if (!last) return;
+    const txt = (last.textContent || "").trim();
+    if (txt && txt !== "…") caption(txt.slice(-320), state.streaming ? 0 : 9000);
+  });
+  const msgs = $("#messages");
+  if (msgs) bubbleObserver.observe(msgs, { childList: true, subtree: true, characterData: true });
+
+  // A desktop avatar with no character selected is a blank window; pick the
+  // last-used session automatically so the shell can just point at /desktop.
+  window.addEventListener("load", () => setTimeout(() => {
+    if (!state.session && state.sessions && state.sessions.length)
+      openSession(state.sessions[0].id);
+  }, 800));
+})();

@@ -1,0 +1,30 @@
+[General]
+count=1
+rules=pantheon-desktop
+
+[pantheon-desktop]
+Description=Pantheon desktop avatar
+# Match the shell's window. wmclass matching also covers the XWayland path.
+wmclass=ai.jotunheim.pantheon.desktop
+wmclasscomplete=false
+wmclassmatch=1
+# Pin it bottom-right. A Wayland client cannot place itself under any toolkit,
+# so this is the compositor doing what layer-shell would otherwise do.
+position=1480,400
+positionrule=3
+size=420,620
+sizerule=3
+# Always visible, never in the way of window management.
+above=true
+aboverule=3
+skiptaskbar=true
+skiptaskbarrule=3
+skippager=true
+skippagerrule=3
+skipswitcher=true
+skipswitcherrule=3
+noborder=true
+noborderrule=3
+# Keep her on every virtual desktop.
+desktops=\0
+desktopsrule=3

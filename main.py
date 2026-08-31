@@ -314,6 +314,25 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {
         "css_v": _asset_ver("css/style.css"),
         "js_v": _asset_ver("js/app.js"),
+        "desktop": False,
+    })
+
+
+@app.get("/desktop", response_class=HTMLResponse)
+async def desktop(request: Request):
+    """Phase 6: the same SPA in avatar-only dress.
+
+    Deliberately the same template rather than a second one. Everything desktop
+    mode needs -- the voice loop, the TTS queue, the avatar bridge, the session
+    and card state -- already lives in app.js, wired to elements in this page.
+    A separate slimmer template would either duplicate that or spend the rest of
+    its life null-guarding against the elements it chose not to render. So the
+    chrome is hidden by CSS and the same code runs untouched.
+    """
+    return templates.TemplateResponse(request, "index.html", {
+        "css_v": _asset_ver("css/style.css"),
+        "js_v": _asset_ver("js/app.js"),
+        "desktop": True,
     })
 
 

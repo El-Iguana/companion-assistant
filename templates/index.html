@@ -6,7 +6,7 @@
   <title>Pantheon</title>
   <link rel="stylesheet" href="/static/css/style.css?v={{ css_v }}">
 </head>
-<body>
+<body class="{% if desktop %}desktop-mode{% endif %}">
   <div id="app">
     <aside id="sidebar">
       <header class="side-head">
@@ -573,6 +573,19 @@
     </form>
   </div>
 
+  {% if desktop %}
+  <!-- Desktop mode HUD. The full SPA is still present and running underneath,
+       hidden by CSS; this is the only surface. -->
+  <div id="dt-hud">
+    <div id="dt-caption"></div>
+    <div id="dt-bar">
+      <button id="dt-mic" class="dt-btn" title="Hands-free listening">🎙</button>
+      <button id="dt-tts" class="dt-btn" title="Voice output">🔊</button>
+      <span id="dt-state" class="dt-state"></span>
+      <a href="/" class="dt-btn" title="Open the full window" target="_blank">⤢</a>
+    </div>
+  </div>
+  {% endif %}
   <script src="/static/js/app.js?v={{ js_v }}"></script>
 
   <!-- Avatar renderer (Phase 3a). three.js is ESM-only, so it loads as a module

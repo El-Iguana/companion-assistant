@@ -298,3 +298,60 @@ body {
 #ce-vrm-info .bad  { color: #e0557a; }
 #ce-vrm-info .ok   { color: #5ac47a; }
 #ce-vrm-info code  { background: #0003; padding: 1px 5px; border-radius: 4px; }
+
+/* ===========================================================================
+   Phase 6 — desktop mode.
+   The whole SPA is still loaded and running; this reduces it to the avatar.
+   Everything is hidden rather than removed so app.js keeps finding the elements
+   it expects — no null-guarding, no forked code path.
+   =========================================================================== */
+body.desktop-mode { background: transparent; overflow: hidden; }
+body.desktop-mode #app { background: transparent; }
+
+/* Hide the chrome. */
+body.desktop-mode #sidebar,
+body.desktop-mode #chat-head,
+body.desktop-mode #rel-strip,
+body.desktop-mode #expr-panel,
+body.desktop-mode #messages,
+body.desktop-mode #composer { display: none !important; }
+
+/* The chat pane becomes the stage. */
+body.desktop-mode #chat-pane,
+body.desktop-mode #chat-body {
+  background: transparent; border: none; padding: 0; margin: 0;
+  width: 100vw; height: 100vh; position: relative; overflow: hidden;
+}
+
+/* Avatar fills the window — the shell decides where the window sits, so the
+   page must not also try to place her in a corner. */
+body.desktop-mode #avatar-canvas {
+  position: absolute; inset: 0; width: 100vw; height: 100vh;
+  right: auto; bottom: auto; filter: drop-shadow(0 6px 22px #000a);
+}
+/* Sprite tier still works here: same corner, scaled to the window. */
+body.desktop-mode #portrait {
+  position: absolute; right: 0; bottom: 0; max-height: 100%; max-width: 100%;
+}
+
+/* HUD: only visible on hover, so the desktop stays uncluttered. */
+#dt-hud { position: fixed; inset: auto 0 0 0; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+  opacity: 0; transition: opacity .18s ease; pointer-events: none; }
+body.desktop-mode:hover #dt-hud, #dt-hud:focus-within { opacity: 1; }
+#dt-hud > * { pointer-events: auto; }
+
+#dt-caption { max-width: 100%; font-size: 12px; line-height: 1.45;
+  background: #0b0b12cc; color: #e7e7ef; border-radius: 10px; padding: 7px 10px;
+  backdrop-filter: blur(6px); display: none; }
+#dt-caption.show { display: block; }
+
+#dt-bar { display: flex; gap: 6px; align-items: center;
+  background: #0b0b12cc; border-radius: 999px; padding: 4px 8px;
+  backdrop-filter: blur(6px); }
+.dt-btn { background: none; border: none; cursor: pointer; font-size: 15px;
+  line-height: 1; padding: 4px 6px; border-radius: 999px; color: #e7e7ef;
+  text-decoration: none; }
+.dt-btn:hover { background: #ffffff22; }
+.dt-btn.active { background: #5aa9e055; }
+.dt-state { font-size: 11px; color: #9a9aa8; min-width: 4.5em; }
