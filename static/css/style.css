@@ -377,3 +377,6 @@ body.desktop-mode:hover #dt-hud, #dt-hud:focus-within { opacity: 1; }
 .ce-voice-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px 14px;
   align-items: end; }
 .ce-voice-grid > label:nth-child(3), .ce-voice-grid > label:last-child { grid-column: 1 / -1; }
+
+/* Hands-free: awake (in conversation) vs merely armed. */
+#hf-btn.awake { box-shadow: 0 0 0 2px #5ac47a88; border-radius: 999px; }

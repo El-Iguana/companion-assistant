@@ -746,6 +746,7 @@ async function openCardEditor(card) {
   fillVoiceSelect($("#ce-voice"), ceBase.tts_voice);
   await refreshVrmSelect(ceBase.vrm || "");
   $("#ce-wake").value = ceBase.wake_word || "";
+  $("#ce-sleep").value = ceBase.sleep_phrase || "";
   const mode = ceBase.avatar_mode || (ceBase.vrm ? "vrm" : "sprite");
   $("#ce-mode-vrm").checked = mode === "vrm";
   $("#ce-mode-sprite").checked = mode !== "vrm";
@@ -900,6 +901,7 @@ function buildCardPayload() {
     vrm: $("#ce-vrm").value,
     avatar_mode: $("#ce-mode-vrm").checked ? "vrm" : "sprite",
     wake_word: $("#ce-wake").value.trim(),
+    sleep_phrase: $("#ce-sleep").value.trim(),
     image: ceImage !== undefined ? ceImage : (ceBase.image || null),
     character_book: ceEntries.length
       ? { ...(ceBase.character_book || {}),
@@ -1401,6 +1403,7 @@ mic.addEventListener("pointercancel", () => stopRecording());
 // wake-word engine (openWakeWord) + Silero-VAD are the documented upgrades.
 let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad_threshold: 0.015,
   full_duplex: false, mic_device_id: "", mic_device_label: "", desktop_card_id: "",
+  wake_mode: "phrase", sleep_phrase: "that will be all", sleep_after_s: 180,
   summarize_after: 24, keep_recent: 12, summary_max_tokens: 400,
   recall_enabled: true, recall_top_k: 4, auto_facts_enabled: true,
   auto_facts_max_new: 3 };
@@ -1445,12 +1448,85 @@ function activeWakeWord() {
   return ((card && card.wake_word) || voiceSettings.wake_word || "").trim();
 }
 
+function activeSleepPhrase() {
+  const card = currentCard();
+  return ((card && card.sleep_phrase) || voiceSettings.sleep_phrase || "").trim();
+}
+
+// ---- conversation state ----------------------------------------------------
+// In "phrase" mode every utterance must start with the wake word. That is fine
+// for one-shot commands and wrong for a conversation: answering a question she
+// just asked meant saying her name again.
+//
+// In "continuous" mode the wake word opens a conversation and follow-ups need no
+// prefix, until the sleep phrase or the idle timeout closes it. The timeout is
+// not a nicety -- an open mic that never closes keeps transcribing the room
+// after you walk away.
+let awake = false, awakeUntil = 0;
+
+function setAwake(on, why) {
+  if (awake === on) {
+    if (on) awakeUntil = Date.now() + wakeTimeoutMs();
+    return;
+  }
+  awake = on;
+  awakeUntil = on ? Date.now() + wakeTimeoutMs() : 0;
+  console.log(`[mic] ${on ? "awake" : "asleep"} (${why})`);
+  const dot = $("#hf-btn");
+  if (dot) dot.classList.toggle("awake", on);
+  if (on) showToast("Listening — say \u201c" + (activeSleepPhrase() || "stop") + "\u201d when done");
+}
+
+function wakeTimeoutMs() {
+  const s = voiceSettings.sleep_after_s;
+  return (s === 0 || s === undefined) ? Infinity : s * 1000;
+}
+
+function stripPrefix(text, phrase) {
+  const t = text.trim().replace(/^[^\w]+/, "");
+  return t.slice(phrase.length).replace(/^[\s,.:!?-]+/, "").trim();
+}
+
+function startsWith(text, phrase) {
+  if (!phrase) return false;
+  return text.toLowerCase().replace(/^[^\w]+/, "").startsWith(phrase.toLowerCase());
+}
+
+// Returns the text to send, or "" to ignore this utterance.
 function applyWakeWord(text) {
-  const w = activeWakeWord().toLowerCase();
+  const w = activeWakeWord();
+  const sleepPhrase = activeSleepPhrase();
+  const continuous = (voiceSettings.wake_mode || "phrase") === "continuous";
+
+  // No wake word at all: pure open-mic, nothing to gate and nothing to sleep.
   if (!w) return text.trim();
-  const low = text.toLowerCase().replace(/^[^\w]+/, "");     // ignore leading punctuation
-  if (!low.startsWith(w)) return "";                          // no wake word → drop this utterance
-  return text.trim().replace(/^[^\w]+/, "").slice(w.length).replace(/^[\s,.:!?-]+/, "").trim();
+
+  // The sleep phrase ends a conversation, with or without her name in front --
+  // "Jarvis, that will be all" and "that will be all" are the same instruction.
+  if (continuous && awake && sleepPhrase) {
+    const bare = startsWith(text, w) ? stripPrefix(text, w) : text.trim();
+    if (startsWith(bare, sleepPhrase) || startsWith(text, sleepPhrase)) {
+      setAwake(false, "sleep phrase");
+      return "";
+    }
+  }
+
+  if (startsWith(text, w)) {
+    const rest = stripPrefix(text, w);
+    if (continuous) setAwake(true, "wake word");
+    // "Jarvis" alone is a summons, not a message; opening the conversation is
+    // the whole response. In phrase mode there is nothing to open, so it drops.
+    if (!rest) return "";
+    return rest;
+  }
+
+  // No wake word. Heard only if a conversation is already open and still fresh.
+  if (continuous && awake) {
+    if (Date.now() > awakeUntil) { setAwake(false, "idle timeout"); return ""; }
+    awakeUntil = Date.now() + wakeTimeoutMs();      // each turn extends it
+    return text.trim();
+  }
+  return "";
 }
 
 function hfStartUtterance() {
@@ -1481,6 +1557,7 @@ async function hfOnUtterance() {
   }
   const raw = (await transcribeBlob(blob)).trim();
   console.log("[mic] transcript: " + JSON.stringify(raw));
+  if (awake) awakeUntil = Date.now() + wakeTimeoutMs();   // any speech keeps it open
   if (!raw) return;
   if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
   selfHeardCount = 0;                                     // a genuine turn clears it
@@ -1554,6 +1631,16 @@ function checkDuplexSanity() {
     box.hidden = true;
   }
 }
+// The sleep phrase and timeout only mean anything in continuous mode.
+function syncWakeMode() {
+  const box = $("#vc-continuous");
+  if (box) box.hidden = $("#vc-wakemode").value !== "continuous";
+}
+$("#vc-wakemode").addEventListener("change", syncWakeMode);
+$("#vc-sleepafter").addEventListener("input", (e) => {
+  const v = Number(e.target.value);
+  $("#vc-sleepafter-val").textContent = v ? v + " s" : "never";
+});
 $("#vc-duplex").addEventListener("change", checkDuplexSanity);
 $("#vc-mic").addEventListener("change", checkDuplexSanity);
 
@@ -1627,7 +1714,7 @@ function hfTick() {
 }
 
 let hfLastError = "";
-let hfPeak = 0, hfPeakAt = 0;
+let hfPeak = 0, hfPeakAt = 0, hfWakeTimer = null;
 
 // ---- PCM capture ----------------------------------------------------------
 // Not MediaRecorder. WebKitGTK's implementation constructs fine, reports
@@ -1714,6 +1801,12 @@ async function engageHandsFree() {
   const mute = hfCtx.createGain(); mute.gain.value = 0;
   hfProc.connect(mute); mute.connect(hfCtx.destination);
   hfActive = true; hfSpeaking = false; hfSilenceStart = 0;
+  // Expire on a timer rather than on the next utterance. Checking only when
+  // someone speaks means she stays awake indefinitely in an empty room, which
+  // is exactly the case the timeout exists for.
+  if (!hfWakeTimer) hfWakeTimer = setInterval(() => {
+    if (awake && Date.now() > awakeUntil) setAwake(false, "idle timeout");
+  }, 2000);
   console.log("[mic] hands-free engaged; ctx=" + hfCtx.state +
               " device=" + ((hfStream.getAudioTracks()[0] || {}).label || "?"));
   hfTick();
@@ -1722,6 +1815,8 @@ async function engageHandsFree() {
 
 function disengageHandsFree() {
   hfActive = false; hfSpeaking = false; hfCapturing = false;
+  if (hfWakeTimer) { clearInterval(hfWakeTimer); hfWakeTimer = null; }
+  setAwake(false, "mic off");
   if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
   // The ScriptProcessor keeps firing until it is disconnected, so dropping the
   // reference alone would leave an audio callback running against a closed
@@ -1771,6 +1866,12 @@ $("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-thresh-val").textContent = Number(voiceSettings.vad_threshold ?? 0.015).toFixed(3);
   $("#vc-silence").value = voiceSettings.vad_silence_ms ?? 800;
   $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
+  $("#vc-wakemode").value = voiceSettings.wake_mode || "phrase";
+  $("#vc-sleep").value = voiceSettings.sleep_phrase ?? "that will be all";
+  const slp = voiceSettings.sleep_after_s ?? 180;
+  $("#vc-sleepafter").value = slp;
+  $("#vc-sleepafter-val").textContent = slp ? slp + " s" : "never";
+  syncWakeMode();
   $("#vc-duplex").checked = !!voiceSettings.full_duplex;
   await fillMicSelect();
   checkDuplexSanity();
@@ -1916,6 +2017,9 @@ $("#vc-save").addEventListener("click", async () => {
     wake_word: $("#vc-wake").value.trim(),
     vad_threshold: Number($("#vc-thresh").value),
     vad_silence_ms: Number($("#vc-silence").value),
+    wake_mode: $("#vc-wakemode").value,
+    sleep_phrase: $("#vc-sleep").value.trim(),
+    sleep_after_s: Number($("#vc-sleepafter").value),
     full_duplex: $("#vc-duplex").checked,
     mic_device_id: $("#vc-mic").value,
     mic_device_label: ($("#vc-mic").selectedOptions[0] || {}).textContent || "",
@@ -2187,6 +2291,9 @@ async function init() {
   window.__desktopListening = () => ({
     on: !!voiceSettings.hands_free,
     wake: activeWakeWord(),          // whoever is loaded, not the global default
+    sleep: activeSleepPhrase(),
+    mode: voiceSettings.wake_mode || "phrase",
+    awake: !!awake,
     duplex: !!voiceSettings.full_duplex,
   });
 

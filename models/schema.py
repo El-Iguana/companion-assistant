@@ -27,6 +27,15 @@ class AppSettings(BaseModel):
     """Global, non-per-character settings. Voice / hands-free config lives here."""
     hands_free: bool = False             # continuous open-mic listening on/off
     wake_word: str = ""                  # optional; "" = pure open-mic (no gate)
+    # How the wake word gates listening.
+    #   "phrase"     every utterance must start with it (the original behaviour)
+    #   "continuous" it opens a conversation; everything after is heard until the
+    #                sleep phrase or the idle timeout, so follow-ups need no prefix
+    wake_mode: str = "phrase"            # "phrase" | "continuous"
+    sleep_phrase: str = "that will be all"   # ends a continuous conversation
+    # An open mic that never closes is a privacy problem, not just an annoyance:
+    # walk away mid-conversation and it would keep transcribing the room. 0 = never.
+    sleep_after_s: int = Field(180, ge=0, le=3600)
     vad_silence_ms: int = 800            # trailing silence that ends an utterance
     vad_threshold: float = 0.015         # RMS gate (0–1): speech vs. silence
     echo_suppress: float = 0.8           # legacy level-ducking knob — superseded by full_duplex + AEC
@@ -125,6 +134,8 @@ class CharacterCard(BaseModel):
     # so existing setups keep working; set it to give each character her own name
     # to answer to, which is the point of having several.
     wake_word: str = ""
+    # Per-character too: the phrase that ends her conversation. "" = the global one.
+    sleep_phrase: str = ""
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 

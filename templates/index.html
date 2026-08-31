@@ -223,6 +223,9 @@
                 <input id="ce-wake" class="field" placeholder="(uses the global wake word)">
                 <span class="muted">What she answers to in hands-free mode. Blank = the
                   global one in ⚙ Settings.</span></label>
+              <label>Sleep phrase
+                <input id="ce-sleep" class="field" placeholder="(uses the global sleep phrase)">
+                <span class="muted">Ends a continuous conversation with her.</span></label>
             </div>
           </div>
           <label class="ce-full">First message (greeting)<textarea id="ce-first_mes" class="field" rows="3"></textarea></label>
@@ -352,6 +355,21 @@
           <label>End-of-speech silence: <output id="vc-silence-val"></output>
             <input id="vc-silence" type="range" min="300" max="2000" step="100">
             <span class="muted">How long a pause ends your turn.</span></label>
+          <label>When you say the wake word
+            <select id="vc-wakemode" class="field">
+              <option value="phrase">Every time — each request starts with her name</option>
+              <option value="continuous">Start a conversation — follow up without repeating it</option>
+            </select></label>
+          <div id="vc-continuous" hidden>
+            <label>Sleep phrase
+              <input id="vc-sleep" class="field" placeholder="that will be all">
+              <span class="muted">Ends the conversation. Works with or without her name in
+                front. A character can override this in her card.</span></label>
+            <label>Stop listening after: <output id="vc-sleepafter-val"></output>
+              <input id="vc-sleepafter" type="range" min="0" max="900" step="30">
+              <span class="muted">Silence that closes the conversation on its own. 0 = never
+                — an open mic keeps transcribing the room after you walk away.</span></label>
+          </div>
           <label>Microphone
             <select id="vc-mic" class="field"></select>
             <span class="muted">Pick an <b>echo-cancelled</b> source (e.g. <code>aec_source</code>) to

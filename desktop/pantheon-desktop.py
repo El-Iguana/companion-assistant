@@ -362,12 +362,20 @@ class DesktopShell(Gtk.Application):
                 return
             self._mi_listen.checked = bool(d.get("on"))
             wake = (d.get("wake") or "").strip()
-            # Naming the wake word here saves a trip to Settings to find out why
-            # nothing happens when you talk.
-            self._mi_listen.label = (
-                f'Listening (say "{wake}")' if wake and d.get("on")
-                else "Listening" if d.get("on") else
-                f'Listening — off (wake word "{wake}")' if wake else "Listening — off")
+            sleep = (d.get("sleep") or "").strip()
+            # Naming the phrase saves a trip to Settings to find out why nothing
+            # happens when you talk -- and in continuous mode the label doubles as
+            # the only indication that she is mid-conversation and still hearing you.
+            if not d.get("on"):
+                self._mi_listen.label = (f'Listening — off (wake word "{wake}")'
+                                         if wake else "Listening — off")
+            elif d.get("mode") == "continuous" and d.get("awake"):
+                self._mi_listen.label = (f'In conversation — say "{sleep}" to end'
+                                         if sleep else "In conversation")
+            elif wake:
+                self._mi_listen.label = f'Listening (say "{wake}")'
+            else:
+                self._mi_listen.label = "Listening"
             if self.tray and (self._mi_listen.checked, self._mi_listen.label) != before:
                 self.tray.update()
         self.view.evaluate_javascript(
