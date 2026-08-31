@@ -1081,6 +1081,9 @@ let ttsLevel = 0, ttsHangoverUntil = 0;   // her live output RMS + a short tail 
 let speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
 // Inline [expr:x] beat state. Declared here, beside the speech queue it rides on, so it
 // is initialised before stopSpeaking() (below) can touch it.
+// What actually reached the speakers, for the self-hearing check below.
+let spokenRecent = [];
+let selfHeardCount = 0;
 let exprPending = null;      // beat waiting for a segment to attach to
 let exprLive = null;         // beat currently shown, so we don't re-fetch the same sprite
 let ttsVoicesList = [];
@@ -1223,6 +1226,8 @@ function enqueueSpeech(segment) {
   if (!ttsEnabled) return;
   const clean = cleanForTTS(segment);
   if (!clean) return;
+  spokenRecent.push({ text: clean.toLowerCase(), t: performance.now() });
+  if (spokenRecent.length > 40) spokenRecent.shift();
   speechQueue.push({ text: clean, run: ttsRun, expr: exprPending });
   exprPending = null;                      // consumed by this segment
   consumeSpeech();
@@ -1379,6 +1384,36 @@ let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
 let hfRec = null, hfChunks = [], hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
 
+// ---- self-hearing guard ---------------------------------------------------
+// full_duplex is only safe when her voice cannot reach the mic. If it is on
+// with speakers and no echo canceller, she hears herself, transcribes it, and
+// answers it -- a loop that looks like the app malfunctioning rather than like
+// a misconfiguration. Rather than trust the setup, check the symptom: does what
+// we just heard match what we just said?
+function looksSelfHeard(text) {
+  if (!voiceSettings.full_duplex) return false;           // half-duplex cannot self-hear
+  const now = performance.now();
+  const recent = spokenRecent.filter(s => now - s.t < 20000);
+  if (!recent.length) return false;
+  const said = recent.map(s => s.text).join(" ");
+  const words = String(text).toLowerCase().match(/[a-z']{3,}/g) || [];
+  if (words.length < 3) return false;                     // too short to judge
+  const hits = words.filter(w => said.includes(w)).length;
+  return hits / words.length > 0.7;                       // most of it came from her
+}
+
+function noteSelfHeard() {
+  selfHeardCount++;
+  if (selfHeardCount < 2) return;                         // one may be coincidence
+  // Two in a row is a configuration fault, not bad luck. Stop the loop, say why.
+  voiceSettings.full_duplex = false;
+  persistSettings({ full_duplex: false });
+  selfHeardCount = 0;
+  showToast("She was hearing herself — interruption turned off. " +
+            "Use headphones, or run scripts/setup-aec.sh --persist and pick " +
+            "aec_source in ⚙ Settings.");
+}
+
 function applyWakeWord(text) {
   const w = (voiceSettings.wake_word || "").trim().toLowerCase();
   if (!w) return text.trim();
@@ -1408,6 +1443,8 @@ async function hfOnUtterance() {
   if (!blob.size || !hfActive) return;
   const raw = (await transcribeBlob(blob)).trim();
   if (!raw) return;
+  if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
+  selfHeardCount = 0;                                     // a genuine turn clears it
   const msg = applyWakeWord(raw);
   if (msg && !state.streaming) send(msg, false);
 }
@@ -1442,6 +1479,26 @@ async function fillMicSelect() {
     sel.insertAdjacentHTML("beforeend",
       `<option value="" disabled>(saved device "${voiceSettings.mic_device_label}" not found)</option>`);
 }
+
+// Warn at the moment of choosing, not only after she starts answering herself.
+function checkDuplexSanity() {
+  const box = $("#vc-duplex-warn");
+  if (!box) return;
+  const on = $("#vc-duplex").checked;
+  const label = ($("#vc-mic").selectedOptions[0] || {}).textContent || "";
+  const cancelled = /aec|echo|cancel/i.test(label);
+  if (on && !cancelled) {
+    box.innerHTML = "⚠ Interruption is on but the selected microphone is not an " +
+      "echo-cancelled one. On <b>headphones</b> that is fine. On <b>speakers</b> she " +
+      "will hear herself and reply to her own voice — run " +
+      "<code>scripts/setup-aec.sh --persist</code> and pick <code>aec_source</code>.";
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+  }
+}
+$("#vc-duplex").addEventListener("change", checkDuplexSanity);
+$("#vc-mic").addEventListener("change", checkDuplexSanity);
 
 $("#vc-mic-help").addEventListener("click", (e) => {
   e.preventDefault();
@@ -1560,6 +1617,7 @@ $("#voicecfg-btn").addEventListener("click", async () => {
   $("#vc-silence-val").textContent = (voiceSettings.vad_silence_ms ?? 800) + " ms";
   $("#vc-duplex").checked = !!voiceSettings.full_duplex;
   await fillMicSelect();
+  checkDuplexSanity();
   $("#vc-nothink").checked = !!voiceSettings.disable_thinking;
   const sa = voiceSettings.summarize_after ?? 24, kr = voiceSettings.keep_recent ?? 12,
         sc = voiceSettings.summary_max_tokens ?? 400;

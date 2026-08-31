@@ -355,3 +355,9 @@ body.desktop-mode:hover #dt-hud, #dt-hud:focus-within { opacity: 1; }
 .dt-btn:hover { background: #ffffff22; }
 .dt-btn.active { background: #5aa9e055; }
 .dt-state { font-size: 11px; color: #9a9aa8; min-width: 4.5em; }
+
+/* Settings: full-duplex misconfiguration warning. */
+.vc-warn { font-size: 12px; line-height: 1.5; color: #e0a24a;
+  background: #e0a24a1a; border: 1px solid #e0a24a55; border-radius: 8px;
+  padding: 7px 10px; margin-top: 4px; }
+.vc-warn code { background: #0004; padding: 1px 5px; border-radius: 4px; }

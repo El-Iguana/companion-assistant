@@ -297,8 +297,22 @@ another knob — `echo_suppress` is now removed from the UI rather than left as 
 - **Both halves are required over speakers**: selecting `aec_source` while playing to the normal sink
   does nothing, because the canceller needs the playback reference to subtract. The in-app help says so.
 
+✅ **Persistence + a visible failure mode (done).** The canceller was runtime-only, so a reboot dropped
+hands-free silently back to half-duplex — a confusing way to lose a feature. `setup-aec.sh --persist`
+now installs a **PipeWire drop-in** (`~/.config/pipewire/pipewire.conf.d/`) that loads the native
+`libpipewire-module-echo-cancel` at start; `--unpersist` removes it. Verified: `aec_source`/`aec_sink`
+return after a PipeWire restart with no `pactl` call, and still cancel.
+
+Two guards, because the failure is otherwise silent:
+- **At configuration time** — ⚙ Settings warns if interruption is on while the chosen mic is not
+  echo-cancelled (fine on headphones, wrong on speakers).
+- **At runtime** — a *symptom* check rather than a trust check: what she just said is remembered, and a
+  transcript that is >70 % her own recent words while full-duplex is on is discarded. Twice in a row is
+  a configuration fault, not luck, so interruption switches itself off with a toast explaining the fix.
+  Unit-tested against echoes, partial echoes, genuine questions and genuine interruptions.
+
 ◻ Remaining polish: openWakeWord (ONNX/CPU) and Silero-VAD are still the accuracy upgrades for the VAD
-and wake word; persisting the AEC module across reboots is a systemd/PipeWire-config job.
+and wake word.
 
 ### Phase 6 — Desktop mode *(new goal)*
 

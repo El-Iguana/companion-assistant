@@ -365,7 +365,11 @@ per-relationship **context override** (⚙).
   **All six channels of "fully animated" are now live.** ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
-  `scripts/setup-aec.sh` loads PipeWire `module-echo-cancel` → `aec_source`/`aec_sink`.
+  `scripts/setup-aec.sh` loads PipeWire echo-cancel → `aec_source`/`aec_sink`; **`--persist`** installs a
+  drop-in in `~/.config/pipewire/pipewire.conf.d/` so it survives reboot (`--unpersist` removes it).
+  Because the failure is silent, two guards: Settings warns if full-duplex is on with a non-cancelled
+  mic, and at runtime a transcript that is >70% her own recent words is discarded — twice in a row
+  disables interruption with a toast.
   **Measured, and it explains the failed earlier attempt:** during her speech the raw mic hears her at
   **+26 dB** over the noise floor, the AEC source at **−39 dB** — no level threshold can bridge that, so
   `echo_suppress` was a dead end and is gone from the UI. Over speakers BOTH halves are needed: pick

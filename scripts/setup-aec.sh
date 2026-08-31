@@ -12,16 +12,33 @@
 #   aec_sink    playback reference     -- audio MUST go here or there is nothing
 #                                         to subtract
 #
-# Runtime only: nothing is written to disk, so a reboot undoes it.
+# --persist writes a PipeWire drop-in so this survives reboot; without it the
+# canceller is runtime-only and hands-free silently drops back to half-duplex
+# after a restart, which is a confusing way to lose a feature.
 # On headphones you need none of this -- just tick "Let me interrupt her".
 set -euo pipefail
 
-usage() { echo "usage: $0 [--default] [--status] [--unload]"; exit 0; }
+DROPIN="$HOME/.config/pipewire/pipewire.conf.d/10-pantheon-echo-cancel.conf"
+
+usage() {
+  cat <<'U'
+usage: setup-aec.sh [option]
+
+  (no option)  load the canceller for this session only
+  --persist    install a PipeWire drop-in so it loads at every boot  [recommended]
+  --unpersist  remove that drop-in
+  --default    also route all system audio through the canceller
+  --status     show what is loaded and what the defaults are
+  --unload     unload the runtime module
+U
+  exit 0
+}
 SET_DEFAULT=0
 case "${1:-}" in
   --help|-h) usage ;;
   --status)
-    echo "modules:"; pactl list short modules 2>/dev/null | grep echo-cancel || echo "  (none loaded)"
+    echo "drop-in:       $([ -f "$DROPIN" ] && echo "installed (survives reboot)" || echo "not installed -- runtime only")"
+    echo "modules:"; pactl list short modules 2>/dev/null | grep echo-cancel || echo "  (none via pactl; a drop-in loads it natively instead)"
     echo "sources:"; pactl list short sources 2>/dev/null | grep -E 'aec|Name' || true
     echo "default sink:   $(pactl get-default-sink 2>/dev/null)"
     echo "default source: $(pactl get-default-source 2>/dev/null)"
@@ -31,6 +48,51 @@ case "${1:-}" in
     [ -z "$ids" ] && { echo "nothing to unload"; exit 0; }
     for m in $ids; do pactl unload-module "$m"; done
     echo "unloaded; defaults revert on their own"; exit 0 ;;
+  --persist)
+    mkdir -p "$(dirname "$DROPIN")"
+    cat > "$DROPIN" <<'CONF'
+# Pantheon: echo-cancelled capture, loaded at PipeWire start.
+#
+# Without this the microphone hears her through the speakers far louder than it
+# hears you -- measured on the reference machine, +26 dB over the noise floor
+# versus fully cancelled through this. Hands-free interruption depends on it.
+#
+# aec_source is the mic to select in the app. aec_sink is the reference: audio
+# must be PLAYED there or the canceller has nothing to subtract, which is the
+# easy half of this to get wrong.
+context.modules = [
+  { name = libpipewire-module-echo-cancel
+    args = {
+      library.name = aec/libspa-aec-webrtc
+      capture.props   = { node.name = "effect_input.pantheon-aec",  node.passive = true }
+      source.props    = { node.name = "aec_source",
+                          node.description = "Echo-Cancelled Mic (Pantheon)" }
+      sink.props      = { node.name = "aec_sink",
+                          node.description = "Echo-Cancelled Out (Pantheon)" }
+      playback.props  = { node.name = "effect_output.pantheon-aec", node.passive = true }
+    }
+  }
+]
+CONF
+    echo "installed $DROPIN"
+    # Drop any runtime copy first, or the restart yields two of everything.
+    for m in $(pactl list short modules 2>/dev/null | awk '/echo-cancel/{print $1}'); do
+      pactl unload-module "$m" 2>/dev/null || true
+    done
+    systemctl --user restart pipewire pipewire-pulse wireplumber
+    sleep 3
+    if pactl list short sources 2>/dev/null | grep -q '\baec_source\b'; then
+      echo "aec_source is up and will return on every boot"
+    else
+      echo "WARNING: aec_source did not appear -- check: journalctl --user -u pipewire -n 40"
+      exit 1
+    fi
+    exit 0 ;;
+  --unpersist)
+    rm -f "$DROPIN" && echo "removed $DROPIN"
+    systemctl --user restart pipewire pipewire-pulse wireplumber
+    echo "restarted; the canceller is gone"
+    exit 0 ;;
   --default) SET_DEFAULT=1 ;;
   "") ;;
   *) usage ;;
