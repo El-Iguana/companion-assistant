@@ -1294,8 +1294,13 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             session.mood.mood = new_expr
 
         # Advance the persistent relationship (skip on re-rolls to avoid double-counting).
+        # Assistant-mode cards are skipped entirely: none of this reaches their prompt
+        # any more, so advancing it only accrued affection and attraction numbers for a
+        # character that has no relationship arc, and paid for a classify_activity()
+        # round-trip per reply to do it. Their stored file is left as it is rather than
+        # reset — inert while the card is an assistant, intact if it is ever switched back.
         milestone_toasts = []
-        if not req.regenerate:
+        if not req.regenerate and not assistant:
             relationship.update(rel, new_expr, power, social)
             # Escalation: once physical intimacy has begun and she's positively engaged, actually
             # doing acts nudges willingness toward the next rung (social acceptance modulates the pace).
@@ -1351,7 +1356,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         _save(session, cur.sessions)
         done_evt = {"done": True, "message_id": msg.id, "expression": msg.expression,
                     "mood": session.mood.mood, "valence": session.mood.valence,
-                    "relationship": relationship.summary(rel)}
+                    # Omitted for assistants — a strip that never moves again is worse
+                    # than no strip. The frontend hides it when the key is absent.
+                    **({} if assistant else {"relationship": relationship.summary(rel)})}
         if milestone_toasts:
             done_evt["milestones"] = milestone_toasts
         yield _sse(done_evt)

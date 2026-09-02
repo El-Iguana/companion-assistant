@@ -198,9 +198,12 @@ POST /api/chat                             SSE stream; done carries {expression,
   a **7-rung clinical ladder** (`PHYSICAL_TIERS`, cumulative, no cap). **Context** (`power_dynamic`,
   `social_acceptance`; card default + per-relationship override) **slows pace & adds caution — never
   compliance**; agency-preserving, consent enthusiastic/revocable. `descriptor()` injects all this into the character's prompt, in their own `pronouns`.
-  **Assistant-mode cards get none of it** — `chat()` passes empty `rel_note`/`boundary_note`,
-  because scene-and-feelings text under a "there is no scene" system prompt is what had
-  assistants narrating thoughts, gestures and self-description.
+  **Assistant-mode cards are outside the whole system** — `chat()` passes empty
+  `rel_note`/`boundary_note` (scene-and-feelings text under a "there is no scene" system prompt is
+  what had assistants narrating thoughts, gestures and self-description), skips `update()`/
+  `escalate()`/milestones entirely, and omits `relationship` from the done event; the frontend hides
+  the rel-strip for them. Their stored `{cid}__{pid}.json` is left intact, inert until the card is
+  switched back to roleplay.
   **Boundary phrasing is load-bearing** — `_physical_clause()`/`boundary_note()` name the concrete acts
   (`_TIER_ACTS`) and the FIRST refused rung, never just the abstract label. The old wording (`willing up
   to "none" … engages at or below this`) was a null instruction at tier 0 and small models complied with

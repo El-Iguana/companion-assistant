@@ -167,6 +167,9 @@ function showToast(msg) {
 async function loadRelationship() {
   const card = currentCard();
   if (!card) { $("#rel-strip").hidden = true; return; }
+  // Assistant cards have no relationship arc — the server neither injects nor
+  // advances one for them, so the strip would sit frozen at whatever it last read.
+  if ((card.chat_mode || "roleplay") === "assistant") { $("#rel-strip").hidden = true; return; }
   if (state.session && state.session.relationship_summary) {   // scenario session -> its own snapshot
     renderRelationship(state.session.relationship_summary); return;
   }
