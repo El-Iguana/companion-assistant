@@ -359,7 +359,12 @@ per-relationship **context override** (⚙).
   message before `boundary_note`), and the wording `emit a tag [expr:LABEL]` was copied verbatim, so the
   shape is now taught by the example line alone. Tag rate is ~4/6 and varies; the classifier still
   covers untagged replies. Occasional out-of-set labels (`curious`, `playful`) are dropped silently —
-  an alias map would recover them.
+  an alias map would recover them. **A label emitted WITHOUT its brackets** never reaches the
+  tag parser, so `expressions.strip_bare_labels()` drops one that stands alone on its own line
+  before the reply is stored (observed 3x; it was displayed and spoken aloud). Own-line only,
+  deliberately: the vocabulary is ordinary English, so a mid-prose rule would eat "Pride comes
+  before a fall". That case is handled in the prompt, which now states the brackets are part
+  of the tag.
   ✅ **Phase 3a done** — avatar renderer: `static/js/vtuber.mjs` **module island** (three.js +
   `@pixiv/three-vrm`, vendored in `static/vendor/`, no CDN) talking to the classic-script `app.js` over
   four CustomEvents (`avatar:card`/`:speak`/`:expr`/`:active`); `CharacterCard.vrm` picks the tier

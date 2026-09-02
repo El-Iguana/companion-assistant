@@ -60,7 +60,9 @@ def strip_bare_labels(text: str, labels) -> str:
     alt = "|".join(sorted((re.escape(l) for l in labels), key=len, reverse=True))
     # The `$` anchor is load-bearing: without it "Love is a strong word" matches at
     # the line start and loses its first word. The label must be the WHOLE line.
-    return re.sub(rf"(?im)^[ \t]*(?:{alt})[ \t]*$\r?\n?", "", text).strip()
+    text = re.sub(rf"(?im)^[ \t]*(?:{alt})[ \t]*$\r?\n?", "", text)
+    # Removing the line leaves the blank lines that surrounded it back to back.
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 # Visual descriptor added to the appearance prompt per emotion (covers both sets;
 # any label without an entry falls back to "<label> facial expression").
