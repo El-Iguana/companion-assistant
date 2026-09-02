@@ -40,6 +40,28 @@ FULL_EMOTIONS = [
 # Default label vocabulary used when a caller doesn't specify one.
 EMOTIONS = CORE_EMOTIONS
 
+
+def strip_bare_labels(text: str, labels) -> str:
+    """Drop an expression label the model emitted WITHOUT its [expr:...] wrapper.
+
+    Observed three times against the 9B: the model copies the label out of the
+    example and leaves the brackets behind, so `_strip_expr` never sees a tag and
+    the bare word lands in the transcript — displayed, stored, and spoken aloud.
+
+    ONLY a label alone on its own line is removed. Every other shape is left
+    alone on purpose: the vocabulary is ordinary English ("happy", "love",
+    "pride", "relief", "fear"), so a rule that also caught them mid-prose would
+    quietly eat real sentences — "Pride comes before a fall" is not a stray tag.
+    A label stranded mid-paragraph is handled in the prompt instead, by stating
+    that the brackets are part of the tag.
+    """
+    if not labels or not text:
+        return text
+    alt = "|".join(sorted((re.escape(l) for l in labels), key=len, reverse=True))
+    # The `$` anchor is load-bearing: without it "Love is a strong word" matches at
+    # the line start and loses its first word. The label must be the WHOLE line.
+    return re.sub(rf"(?im)^[ \t]*(?:{alt})[ \t]*$\r?\n?", "", text).strip()
+
 # Visual descriptor added to the appearance prompt per emotion (covers both sets;
 # any label without an entry falls back to "<label> facial expression").
 EMOTION_PROMPTS = {

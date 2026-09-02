@@ -1264,7 +1264,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             yield _sse({"error": str(e)})
             return
 
-        reply = acc.strip()
+        # A label the model emitted without its brackets never reached the tag
+        # parser, so scrub it here before it is stored and re-spoken on reload.
+        reply = expressions.strip_bare_labels(acc.strip(), card.expressions.keys())
         swipes = (_pending_swipes + [reply]) if _pending_swipes else [reply]
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
                           swipe_index=len(swipes) - 1)

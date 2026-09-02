@@ -187,8 +187,10 @@ def expression_note(labels: List[str], assistant: bool = False) -> str:
             f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
             f"Example: I did look into that. [expr:{eg}] It is not as simple as it sounds.\n"
             "Use at most a few per reply, only on a real change. The tag is the ONLY thing "
-            "that marks the change — never narrate or describe yourself alongside it. The "
-            "tags are stripped before the reader sees them, so never mention or explain them."
+            "that marks the change — never narrate or describe yourself alongside it. Always "
+            "write the whole tag, brackets and expr: included; a bare label word on its own is "
+            "never valid. The tags are stripped before the reader sees them, so never mention "
+            "or explain them."
         )
     # Never spell out a placeholder tag here. An earlier wording said 'emit a tag
     # [expr:LABEL]' and the model copied it verbatim — it read LABEL as the label.
@@ -198,8 +200,9 @@ def expression_note(labels: List[str], assistant: bool = False) -> str:
         "at that exact point, then carry on writing normally.\n"
         f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
         f'Example: She looked away. [expr:{eg}] "That is not what I meant."\n'
-        "Use at most a few per reply, only on a real change. The tags are stripped "
-        "before the reader sees them, so never mention or explain them."
+        "Use at most a few per reply, only on a real change. Always write the whole tag, "
+        "brackets and expr: included; a bare label word on its own is never valid. The tags "
+        "are stripped before the reader sees them, so never mention or explain them."
     )
 
 
