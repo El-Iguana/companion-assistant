@@ -128,6 +128,15 @@ Login-gated, role-based, per-user isolated libraries.
 - **Relationship** — persistent per (character, persona): axes `affection/trust/attraction/tension`,
   `emotional_intimacy`, `physical_willingness`, optional `power_dynamic`/`social_acceptance` overrides,
   `milestones`.
+- **AssistantMemory** — the assistant-mode store, `data/u/<uid>/assistant/{cid}__{pid}.json`.
+  `directives[]` (standing instructions, OBEYED), `facts[]` (things known), `notes[]` (terse task
+  state, rewritten whole each fold), `swept_sessions`. **No summary, no relationship, no scene.**
+  Served by `services/assistant_memory.py`, which is a separate module and not a branch in
+  `memory.py` — every leak found so far was roleplay framing reaching an assistant through a shared
+  path that forgot to branch, and a branch is a place the next feature forgets. Injection puts
+  directives FIRST and never truncates them: they are instructions, so dropping one to fit a budget
+  changes behaviour silently. Notes that restate a directive are dropped in CODE (the prompt is told
+  not to repeat them and does not comply — same finding as the companion dedupe).
 - **CharacterMemory** — persistent per (character, persona), like Relationship: `facts[]`
   (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
   `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
@@ -170,6 +179,7 @@ GET  /api/relationship?character_id=&persona_id=     summary (axes, stage, intim
 PUT  /api/relationship                     override context {power_dynamic, social_acceptance} (null clears -> card default)
 # sessions + chat
 GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
+GET/PUT /api/assistant-memory?character_id=&persona_id=   assistant store (directives[] + facts[] + notes[]); round-trip by id
 POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
 GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages

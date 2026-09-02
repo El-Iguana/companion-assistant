@@ -2129,10 +2129,42 @@ function renderMemory() {
   (mem.pinned || []).forEach(addPinnedRow);
   $("#mem-summary").value = mem.summary || "";
 }
+function addLtDirectiveRow(d = {}) {
+  const li = document.createElement("li");
+  li.innerHTML = `<input class="field mem-fact" type="text" value="" placeholder="e.g. Address me as Sir">` +
+    (d.origin === "auto" ? `<span class="mem-origin" title="Written automatically from a chat — edit or remove it">auto</span>` : "") +
+    `<button class="btn-mini danger mem-del" title="Remove">✕</button>`;
+  const input = li.querySelector(".mem-fact");
+  input.value = d.text || "";
+  input.dataset.factId = d.id || "";
+  li.querySelector(".mem-del").onclick = () => li.remove();
+  $("#mem-lt-directives").appendChild(li);
+}
+// An assistant's store is a different shape, not a relabelled one: instructions
+// it must obey, facts it merely knows, and task state instead of a history.
+function ltIsAssistant() {
+  return ((currentCard() || {}).chat_mode || "roleplay") === "assistant";
+}
 function renderLongterm() {
+  const asst = ltIsAssistant();
+  $("#mem-lt-directives-wrap").hidden = !asst;
   $("#mem-lt-facts").innerHTML = "";
-  ((ltMem && ltMem.facts) || []).forEach(addLtFactRow);
-  $("#mem-lt-summary").value = (ltMem && ltMem.summary) || "";
+  $("#mem-lt-directives").innerHTML = "";
+  $("#mem-lt-facts-label").firstChild.textContent =
+    asst ? "Things it knows about you" : "Remembered facts";
+  $("#mem-lt-summary-label").firstChild.textContent =
+    asst ? "Where things stand" : "History across chats";
+  $("#mem-lt-summary").placeholder = asst
+    ? "Open threads and decisions — one per line. Empty is correct when nothing is outstanding."
+    : "Nothing remembered yet — this builds up as you finish conversations.";
+  if (asst) {
+    ((ltMem && ltMem.directives) || []).forEach(addLtDirectiveRow);
+    ((ltMem && ltMem.facts) || []).forEach(addLtFactRow);
+    $("#mem-lt-summary").value = ((ltMem && ltMem.notes) || []).join("\n");
+  } else {
+    ((ltMem && ltMem.facts) || []).forEach(addLtFactRow);
+    $("#mem-lt-summary").value = (ltMem && ltMem.summary) || "";
+  }
 }
 function memTab(which) {
   const long = which === "long";
@@ -2157,7 +2189,8 @@ $("#mem-btn").addEventListener("click", async () => {
   $("#memory").hidden = false;
   if (!pair) return;
   try {
-    ltMem = await api(`/memories?character_id=${encodeURIComponent(pair.cid)}&persona_id=${encodeURIComponent(pair.pid)}`);
+    const path = ltIsAssistant() ? "/assistant-memory" : "/memories";
+    ltMem = await api(`${path}?character_id=${encodeURIComponent(pair.cid)}&persona_id=${encodeURIComponent(pair.pid)}`);
     renderLongterm();
   } catch (e) {
     $("#mem-tab-long").hidden = true;                         // couldn't load it -> don't offer to save over it
@@ -2169,6 +2202,7 @@ $("#mem-close").addEventListener("click", () => { $("#memory").hidden = true; })
 $("#memory").addEventListener("click", (e) => { if (e.target.id === "memory") $("#memory").hidden = true; });
 $("#mem-add").addEventListener("click", () => addPinnedRow(""));
 $("#mem-lt-add").addEventListener("click", () => addLtFactRow({}));
+$("#mem-lt-dir-add").addEventListener("click", () => addLtDirectiveRow({}));
 $("#mem-save").addEventListener("click", async () => {
   if (!state.session) return;
   const pinned = [...document.querySelectorAll("#mem-pinned .mem-fact")]
@@ -2183,13 +2217,19 @@ $("#mem-save").addEventListener("click", async () => {
   // let an empty form overwrite real remembered history.
   const pair = ltPairing();
   if (ltMem && pair) {
-    const facts = [...document.querySelectorAll("#mem-lt-facts .mem-fact")]
+    const rows = (sel) => [...document.querySelectorAll(sel)]
       .map(i => ({ id: i.dataset.factId || "", text: i.value.trim() }))
       .filter(f => f.text);
-    ltMem = await api("/memories", {
+    const facts = rows("#mem-lt-facts .mem-fact");
+    const body = ltIsAssistant()
+      ? { character_id: pair.cid, persona_id: pair.pid, facts,
+          directives: rows("#mem-lt-directives .mem-fact"),
+          notes: $("#mem-lt-summary").value.split("\n").map(l => l.trim()).filter(Boolean) }
+      : { character_id: pair.cid, persona_id: pair.pid, facts,
+          summary: $("#mem-lt-summary").value.trim() };
+    ltMem = await api(ltIsAssistant() ? "/assistant-memory" : "/memories", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ character_id: pair.cid, persona_id: pair.pid,
-                             facts, summary: $("#mem-lt-summary").value.trim() }),
+      body: JSON.stringify(body),
     });
   }
   $("#memory").hidden = true;

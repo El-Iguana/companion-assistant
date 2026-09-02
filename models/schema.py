@@ -239,6 +239,37 @@ class CharacterMemory(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
 
+class AssistantMemory(BaseModel):
+    """Memory for a task-driven assistant. The deliberate sibling of CharacterMemory.
+
+    A companion remembers a *history*; an assistant must remember *how to behave*
+    and *what is true*, and must not drift. So the two halves are stored apart:
+
+      `directives` are standing instructions — "address me as Sir", "always give
+      times in Eastern". They are obeyed, never merely known, and they are the
+      last thing dropped when the injection budget runs short: silently dropping
+      one changes behaviour with no error.
+
+      `facts` are things that are true about the user. Known, not obeyed.
+
+      `notes` replace the rolling narrative summary entirely. Terse task state —
+      decisions, open threads — rewritten whole on each fold so a resolved item
+      disappears instead of accumulating.
+
+    There is no summary, no relationship, no scene, and no emotional arc, because
+    an assistant has none of those and every one of them leaked into a reply the
+    moment a shared code path forgot to branch.
+    """
+    character_id: str = ""
+    persona_id: str = ""
+    directives: List[MemoryFact] = []
+    facts: List[MemoryFact] = []
+    notes: List[str] = []
+    swept_sessions: Dict[str, int] = {}
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
+
+
 class Relationship(BaseModel):
     """Persistent per (character, persona) relationship state. Multi-axis, 0-100 each."""
     character_id: str = ""

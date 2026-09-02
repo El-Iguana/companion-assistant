@@ -334,11 +334,17 @@
               placeholder="No summary yet — this builds up automatically as the chat grows."></textarea>
           </div>
           <div id="mem-pane-long" hidden>
-            <label>Remembered facts
+            <div id="mem-lt-directives-wrap" hidden>
+              <label>Standing instructions
+                <span class="muted">— followed in every reply, e.g. "always give times in Eastern"</span></label>
+              <ul id="mem-lt-directives" class="list"></ul>
+              <button id="mem-lt-dir-add" class="btn-mini">+ Add instruction</button>
+            </div>
+            <label id="mem-lt-facts-label" style="margin-top:.9rem">Remembered facts
               <span class="muted">— carried into every chat with this character</span></label>
             <ul id="mem-lt-facts" class="list"></ul>
             <button id="mem-lt-add" class="btn-mini">+ Add fact</button>
-            <label style="margin-top:.9rem">History across chats
+            <label id="mem-lt-summary-label" style="margin-top:.9rem">History across chats
               <span class="muted">— written when a chat is swept; edit to correct it</span></label>
             <textarea id="mem-lt-summary" rows="8" class="field"
               placeholder="Nothing remembered yet — this builds up as you finish conversations."></textarea>

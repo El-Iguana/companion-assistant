@@ -28,11 +28,11 @@ from fastapi.templating import Jinja2Templates
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
-    AppSettings, CharacterMemory, MemoryFact, User,
+    AppSettings, AssistantMemory, CharacterMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from services import card_io, prompt_builder, memory, expressions, relationship, tts, stt, auth, vrm
+from services import card_io, prompt_builder, memory, assistant_memory, expressions, relationship, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
@@ -41,7 +41,7 @@ AUTH = DATA / "auth"
 USERS = AUTH / "users"
 UROOT = DATA / "u"                       # per-user library roots: data/u/<uid>/<subdir>/
 SUBDIRS = ("characters", "personas", "sessions", "relationships", "presets", "settings",
-           "memories")
+           "memories", "assistant")
 # Old flat single-user dirs — migrated into the first admin on first run.
 LEGACY = {name: DATA / name for name in SUBDIRS}
 for d in (AUTH, USERS, UROOT):
@@ -125,6 +125,7 @@ class Ctx:
     presets: Path
     settings: Path
     memories: Path
+    assistant: Path
 
 
 def _user_root(uid: str) -> Path:
@@ -137,7 +138,8 @@ def _user_root(uid: str) -> Path:
 def _ctx_for(user: User) -> Ctx:
     r = _user_root(user.id)
     return Ctx(user, r / "characters", r / "personas", r / "sessions",
-               r / "relationships", r / "presets", r / "settings", r / "memories")
+               r / "relationships", r / "presets", r / "settings", r / "memories",
+               r / "assistant")
 
 
 async def current_user(request: Request) -> User:
@@ -276,6 +278,24 @@ def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
         mem.model_dump_json(indent=2))
 
 
+def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str) -> AssistantMemory:
+    """Assistant memory for a pairing. Same {cid}__{pid} convention as the others,
+    a different directory — an assistant's store must not be reachable by anything
+    reading the companion one, which is the whole reason the pipeline is split."""
+    p = cur.assistant / f"{character_id}__{persona_id}.json"
+    if p.exists():
+        try:
+            return AssistantMemory.model_validate_json(p.read_text())
+        except Exception:
+            pass          # unreadable/older shape -> start fresh rather than 500 a chat turn
+    return AssistantMemory(character_id=character_id, persona_id=persona_id)
+
+
+def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
+    (cur.assistant / f"{mem.character_id}__{mem.persona_id}.json").write_text(
+        mem.model_dump_json(indent=2))
+
+
 def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
     """Drop `session`'s fold high-water mark from its pairing's long-term store.
 
@@ -292,6 +312,13 @@ def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
     if session.relationship is not None or not session.character_id:
         return                    # scenario sessions are never swept (see chat())
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    card = _load(cur.cards, session.character_id, CharacterCard)
+    if card and getattr(card, "chat_mode", "roleplay") == "assistant":
+        am = _load_assistant_memory(cur, session.character_id, persona.id)
+        if am.swept_sessions.pop(session.id, None) is not None:
+            am.updated_at = datetime.now().isoformat()
+            _save_assistant_memory(cur, am)
+        return
     mem = _load_character_memory(cur, session.character_id, persona.id)
     if mem.swept_sessions.pop(session.id, None) is not None:
         mem.updated_at = datetime.now().isoformat()
@@ -1088,6 +1115,59 @@ async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
     return mem.model_dump()
 
 
+@app.get("/api/assistant-memory")
+async def get_assistant_memory(character_id: str, persona_id: str, cur: Ctx = Depends(get_ctx)):
+    """Standing instructions, facts and task notes for one assistant pairing."""
+    return _load_assistant_memory(cur, character_id, persona_id).model_dump()
+
+
+@app.put("/api/assistant-memory")
+async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
+    """Edit them. Directives and facts round-trip BY ID so editing through the
+    modal cannot relabel an auto-written entry as hand-written — the origin tag is
+    the whole reason auto-extraction is allowed to write here at all."""
+    cid = str(body.get("character_id") or "")
+    pid = str(body.get("persona_id") or "")
+    if not cid or not pid:
+        raise HTTPException(400, "character_id and persona_id are required")
+    mem = _load_assistant_memory(cur, cid, pid)
+
+    for field, cap in (("directives", assistant_memory.MAX_DIRECTIVES),
+                       ("facts", assistant_memory.MAX_FACTS)):
+        if field not in body:
+            continue
+        raw = body.get(field) or []
+        if not isinstance(raw, list):
+            raise HTTPException(400, f"{field} must be a list")
+        known = {f.id: f for f in getattr(mem, field)}
+        kept: list[MemoryFact] = []
+        for item in raw:
+            if isinstance(item, str):
+                item = {"text": item}
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()[:assistant_memory.FACT_MAX_CHARS]
+            if not text:
+                continue
+            prev = known.get(str(item.get("id") or ""))
+            if prev:
+                prev.text = text
+                kept.append(prev)
+            else:
+                kept.append(MemoryFact(text=text, origin="user"))
+        setattr(mem, field, kept[-cap:])
+
+    if "notes" in body:
+        raw = body.get("notes") or []
+        if isinstance(raw, str):
+            raw = [l for l in raw.splitlines()]
+        mem.notes = [str(n).strip()[:assistant_memory.NOTE_MAX_CHARS]
+                     for n in raw if str(n).strip()][:assistant_memory.MAX_NOTES]
+    mem.updated_at = datetime.now().isoformat()
+    _save_assistant_memory(cur, mem)
+    return mem.model_dump()
+
+
 @app.post("/api/sessions/{session_id}/sweep")
 async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     """Idle trigger: fold a finished conversation into long-term memory.
@@ -1108,6 +1188,18 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
         return {"ok": True, "swept": False, "reason": "session has no character"}
 
     st = _load_settings(cur)
+    if getattr(card, "chat_mode", "roleplay") == "assistant":
+        am = _load_assistant_memory(cur, session.character_id, persona.id)
+        changed = await assistant_memory.fold(
+            kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
+            extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new)
+        if changed:
+            _save_assistant_memory(cur, am)
+            session.memory.last_summarized_index = am.swept_sessions.get(
+                session.id, session.memory.last_summarized_index)
+            _save(session, cur.sessions)
+        return {"ok": True, "swept": changed, "pipeline": "assistant"}
+
     mem = _load_character_memory(cur, session.character_id, persona.id)
     changed = await memory.fold_into_longterm(
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
@@ -1137,6 +1229,13 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
 # --------------------------------------------------------------------------
 # Chat — SSE streaming
 # --------------------------------------------------------------------------
+class _AssistantMemoryDone(Exception):
+    """Control-flow marker: the assistant memory pass ran, skip the companion one.
+
+    A sentinel rather than restructuring the block, so the companion path keeps
+    its exact shape and its best-effort `except Exception: pass` around it."""
+
+
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
@@ -1191,7 +1290,14 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # Cross-session memory is skipped for scenario sessions, exactly like `rel` above:
     # a scenario is a deliberate alternate premise seeded from a preset, so the main
     # timeline's remembered history would contradict the state it was just given.
-    char_mem = None if scenario else _load_character_memory(cur, session.character_id, persona.id)
+    # Two pipelines, chosen once. An assistant never touches services/memory.py:
+    # no narrative summary, no companion facts, no semantic recall over roleplay
+    # turns — see services/assistant_memory.py for why that is a module and not a
+    # branch.
+    char_mem = None if (scenario or assistant) else _load_character_memory(
+        cur, session.character_id, persona.id)
+    asst_mem = _load_assistant_memory(cur, session.character_id, persona.id) \
+        if (assistant and not scenario) else None
     settings = _load_settings(cur)
 
     # Semantic recall (Phase 4): the long-term summary is lossy by design, so pull
@@ -1217,6 +1323,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     lt_note = memory.longterm_block(char_mem, card.name, persona.name, lt_budget) if char_mem else ""
     recall_note = memory.recall_block(
         hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note) if hits else ""
+    if asst_mem is not None:
+        lt_note = assistant_memory.block(asst_mem, card.name, persona.name)
     if hits and not recall_note and char_mem is not None:
         # Every hit was already in the long-term block — give the space back
         # rather than shrinking her memory for a block that isn't there.
@@ -1334,6 +1442,24 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # Best-effort long-term memory maintenance (thresholds are user-tunable).
         try:
             st = _load_settings(cur)
+            if assistant:
+                # The window still has to advance or the prompt grows without
+                # bound, but nothing narrative comes out of it: the fold writes
+                # directives, facts and task notes, and session.memory.summary is
+                # left empty on purpose so there is no prose to inject.
+                keep = min(st.keep_recent, st.summarize_after - 1)
+                fold_end = len(session.messages) - keep
+                if (memory.needs_summary(session, st.summarize_after)
+                        and fold_end > session.memory.last_summarized_index and not scenario):
+                    am = _load_assistant_memory(cur, session.character_id, persona.id)
+                    if await assistant_memory.fold(
+                            kobold, am, session, card, persona, upto=fold_end,
+                            max_tokens=st.summary_max_tokens,
+                            extract_items=st.auto_facts_enabled,
+                            max_new=st.auto_facts_max_new):
+                        _save_assistant_memory(cur, am)
+                        session.memory.last_summarized_index = fold_end
+                raise _AssistantMemoryDone
             await memory.summarize(kobold, session, card, persona,
                                    summarize_after=st.summarize_after,
                                    keep_recent=st.keep_recent,
@@ -1352,6 +1478,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                         index_path=_memory_index_path(cur, session.character_id, persona.id),
                         extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new):
                     _save_character_memory(cur, cm)
+        except _AssistantMemoryDone:
+            pass          # assistant path finished above; the companion path is skipped
         except Exception:
             pass
 
