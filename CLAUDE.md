@@ -375,6 +375,18 @@ per-relationship **context override** (⚙).
   **All six channels of "fully animated" are now live.** ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
+  **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone
+  cannot tell your voice from hers returning through the speakers, and the only check that can
+  (`looksSelfHeard`) needs a transcript — so the abort used to fire an STT round-trip before the
+  evidence arrived, and any echo cut her off mid-reply. It now runs in `hfOnUtterance()` once the
+  transcript clears both the self-hearing check and the wake word, then waits for `state.streaming`
+  to fall (`abortChat()` only signals the fetch). Costs one STT round-trip of barge-in latency, and
+  only where echo is possible; when she is silent it still cuts instantly.
+  **AEC needs BOTH halves** — capturing from `aec_source` while playback goes anywhere but
+  `aec_sink` leaves the canceller nothing to subtract. The app cannot see playback routing, so its
+  duplex sanity check passes in that state (observed live: Brave recording from `aec_source`, playing
+  to the raw analog sink). `scripts/setup-aec.sh --default`, or `pactl move-sink-input <id> aec_sink`
+  for one app, is the other half.
   `scripts/setup-aec.sh` loads PipeWire echo-cancel → `aec_source`/`aec_sink`; **`--persist`** installs a
   drop-in in `~/.config/pipewire/pipewire.conf.d/` so it survives reboot (`--unpersist` removes it).
   Because the failure is silent, two guards: Settings warns if full-duplex is on with a non-cancelled

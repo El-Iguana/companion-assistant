@@ -1465,6 +1465,9 @@ let voiceSettings = { hands_free: false, wake_word: "", vad_silence_ms: 800, vad
   auto_facts_max_new: 3 };
 let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null;
 let hfSpeaking = false, hfSilenceStart = 0, hfActive = false;
+// Set when an utterance opened while she was audible: the barge-in is held back
+// until the transcript proves it was not her own voice. See hfTick / hfOnUtterance.
+let hfPendingBargeIn = false;
 
 // ---- self-hearing guard ---------------------------------------------------
 // full_duplex is only safe when her voice cannot reach the mic. If it is on
@@ -1656,6 +1659,10 @@ function hfStopUtterance() {
 }
 
 async function hfOnUtterance() {
+  // Read and clear together: every early return below must leave no stale
+  // barge-in armed for the next utterance.
+  const pendingBargeIn = hfPendingBargeIn;
+  hfPendingBargeIn = false;
   const rate = (hfCtx && hfCtx.sampleRate) || 48000;
   const blob = hfWav(hfPcm, rate);
   console.log(`[mic] utterance: ${hfPcm.length} block(s), ${blob.size} bytes @${rate}Hz, ` +
@@ -1673,7 +1680,18 @@ async function hfOnUtterance() {
   if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
   selfHeardCount = 0;                                     // a genuine turn clears it
   const msg = applyWakeWord(raw);
-  if (msg && !state.streaming) send(msg, false);
+  if (!msg) return;                        // wake word not satisfied — nothing was said to her
+  if (pendingBargeIn) {
+    // Held back at the energy gate; the transcript has now cleared both the
+    // self-hearing check and the wake word, so this is a real interruption.
+    stopSpeaking();
+    abortChat();
+    // abortChat() only signals the fetch — state.streaming clears in the stream's
+    // own finally block a tick or two later. Wait for it, or send() below would
+    // refuse the very message that just cut the reply.
+    for (let i = 0; i < 40 && state.streaming; i++) await new Promise(r => setTimeout(r, 25));
+  }
+  if (!state.streaming) send(msg, false);
 }
 
 async function fillDesktopCardSelect() {
@@ -1844,12 +1862,27 @@ function hfTick() {
     // hears her at +26 dB over the floor while a PipeWire WebRTC AEC source sits
     // at -39 dB, which is why this is a hard switch and not another level knob:
     // no threshold can separate a signal that dominates by 26 dB.
-    const selfActive = (!!ttsSource || now < ttsHangoverUntil) && !voiceSettings.full_duplex;
+    const audible = !!ttsSource || now < ttsHangoverUntil;
+    const selfActive = audible && !voiceSettings.full_duplex;
     if (!selfActive && rms > base) {
       hfStartUtterance();
       hfSpeaking = true; hfSilenceStart = 0;
       // Barge-in: speaking over her cuts the reply, exactly as push-to-talk does.
-      if (ttsSource || state.streaming) { stopSpeaking(); abortChat(); }
+      //
+      // But energy alone cannot tell your voice from hers coming back through the
+      // speakers, and aborting here is destructive and immediate while the only
+      // check that CAN tell them apart (looksSelfHeard) needs a transcript. So the
+      // abort used to fire a whole STT round-trip before the evidence arrived: any
+      // echo cut her off mid-reply and the guard could only notice afterwards.
+      // Measured cause on this box: an echo-cancelled capture source with playback
+      // routed around aec_sink, leaving the canceller nothing to subtract.
+      //
+      // While she is audible the abort is therefore deferred to hfOnUtterance, which
+      // runs it once the transcript clears. Costs one STT round-trip of barge-in
+      // latency, and only in the window where echo is possible — when she is silent
+      // there is nothing to mistake for you, so that path still cuts instantly.
+      if (audible && voiceSettings.full_duplex) hfPendingBargeIn = true;
+      else if (ttsSource || state.streaming) { stopSpeaking(); abortChat(); }
     }
   } else {
     // Already capturing your speech: track end-of-turn with the plain threshold
@@ -1962,7 +1995,10 @@ async function engageHandsFree() {
   // through a silent gain so nothing is played back.
   const mute = hfCtx.createGain(); mute.gain.value = 0;
   hfProc.connect(mute); mute.connect(hfCtx.destination);
-  hfActive = true; hfSpeaking = false; hfSilenceStart = 0;
+  // Clear any barge-in armed by a previous session: an utterance interrupted by
+  // hands-free being switched off never reaches hfOnUtterance to clear it, and a
+  // stale flag would cut the first reply after switching back on.
+  hfActive = true; hfSpeaking = false; hfSilenceStart = 0; hfPendingBargeIn = false;
   // Expire on a timer rather than on the next utterance. Checking only when
   // someone speaks means she stays awake indefinitely in an empty room, which
   // is exactly the case the timeout exists for.
@@ -1976,7 +2012,7 @@ async function engageHandsFree() {
 }
 
 function disengageHandsFree() {
-  hfActive = false; hfSpeaking = false; hfCapturing = false;
+  hfActive = false; hfSpeaking = false; hfCapturing = false; hfPendingBargeIn = false;
   if (hfWakeTimer) { clearInterval(hfWakeTimer); hfWakeTimer = null; }
   setAwake(false, "mic off");
   if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
