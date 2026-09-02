@@ -195,6 +195,79 @@ _TIER_ACTS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Pronouns
+# ---------------------------------------------------------------------------
+# The consent and boundary text below is written ABOUT the character, so it needs
+# pronouns — and until now they were hardcoded she/her in nineteen places. A male
+# butler card whose own personality line reads "He is formal and polite" was being
+# described to the model as "she deflects ... Her consent is genuine", in the most
+# heavily weighted block of the prompt. Wrong for the character, and confusing for
+# a small model trying to hold one identity.
+#
+# `plural` drives verb agreement, which is the whole reason this is a class and not
+# three strings: "they deflects" is worse than the bug it replaces.
+class Pronouns:
+    __slots__ = ("subject", "object", "possessive", "plural")
+
+    _KNOWN = {
+        "she/her":   ("she", "her", "her", False),
+        "he/him":    ("he", "him", "his", False),
+        "they/them": ("they", "them", "their", True),
+        "it/its":    ("it", "it", "its", False),
+    }
+
+    def __init__(self, subject="she", object="her", possessive="her", plural=False):
+        self.subject, self.object, self.possessive, self.plural = (
+            subject, object, possessive, plural)
+
+    @classmethod
+    def parse(cls, spec: str | None) -> "Pronouns":
+        """"she/her" | "he/him" | "they/them" | "xe/xem/xyr" | "" -> she/her.
+
+        Blank is deliberately she/her rather than they/them: every card that
+        predates this field was written and read against she/her, and defaulting
+        to anything else would silently reword every existing character."""
+        spec = (spec or "").strip().lower()
+        if not spec:
+            return cls()
+        if spec in cls._KNOWN:
+            return cls(*cls._KNOWN[spec])
+        parts = [p.strip() for p in spec.split("/") if p.strip()]
+        if len(parts) >= 3:
+            return cls(parts[0], parts[1], parts[2], plural=parts[0] == "they")
+        if len(parts) == 2:                       # "xe/xem" — reuse the object form
+            return cls(parts[0], parts[1], parts[1], plural=parts[0] == "they")
+        return cls()
+
+    # Subject / object / possessive, lower and sentence case.
+    @property
+    def s(self) -> str: return self.subject
+    @property
+    def S(self) -> str: return self.subject.capitalize()
+    @property
+    def o(self) -> str: return self.object
+    @property
+    def p(self) -> str: return self.possessive
+    @property
+    def P(self) -> str: return self.possessive.capitalize()
+
+    # Agreement. `v` handles regular verbs; the irregulars we actually use are named.
+    def v(self, verb: str) -> str:
+        if self.plural:
+            return verb
+        if verb.endswith(("s", "sh", "ch", "x", "z", "o")):
+            return verb + "es"
+        return verb + "s"
+
+    @property
+    def is_(self) -> str: return "are" if self.plural else "is"
+    @property
+    def does(self) -> str: return "do" if self.plural else "does"
+    @property
+    def has(self) -> str: return "have" if self.plural else "has"
+
+
 def _label_with_acts(idx: int) -> str:
     '''Rung as `"label" (concrete acts)`, dropping the parenthetical where it would just
     restate the label (only rungs 0 and 1 carry extra detail).'''
@@ -203,52 +276,58 @@ def _label_with_acts(idx: int) -> str:
     return f'"{label}"' if norm(label) == norm(acts) else f'"{label}" ({acts})'
 
 
-def _physical_clause(rel: Relationship, char: str, user: str) -> str:
-    """State the physical boundary concretely: what she is open to, and the FIRST rung
-    she refuses. The old wording (`willing up to "none" … at or below this`) was a null
-    instruction at tier 0 and never named the act being declined at any tier."""
+def _physical_clause(rel: Relationship, char: str, user: str, pr: Pronouns) -> str:
+    """State the physical boundary concretely: what the character is open to, and the
+    FIRST rung they refuse. The old wording (`willing up to "none" … at or below this`)
+    was a null instruction at tier 0 and never named the act being declined."""
     idx, _ = physical_tier(rel)
 
     if idx == 0:
         return (f"Physical boundary right now: {char} is NOT physically intimate with {user} at "
                 f"all — {_TIER_ACTS[0]}. If {user} initiates or asks for any of that, {char} does "
-                f"not go along with it: she deflects, redirects, or turns it down in her own voice "
-                f"and in character.")
+                f"not go along with it: {pr.s} {pr.v('deflect')}, {pr.v('redirect')}, or "
+                f"{pr.v('turn')} it down in {pr.p} own voice and in character.")
 
     clause = (f"Physical comfort right now: {char} is willing up to and including "
               f"{_label_with_acts(idx)}, and engages warmly with that or anything less than it.")
     if idx + 1 < len(PHYSICAL_TIERS):
-        clause += (f" She is NOT willing to go further: anything beyond that rung — starting with "
-                   f"{_label_with_acts(idx + 1)} — she turns down or slows, in character.")
+        clause += (f" {pr.S} {pr.is_} NOT willing to go further: anything beyond that rung — "
+                   f"starting with {_label_with_acts(idx + 1)} — {pr.s} {pr.v('turn')} down or "
+                   f"{pr.v('slow')}, in character.")
     else:
-        clause += f" She has no remaining physical limits with {user}."
+        clause += f" {pr.S} {pr.has} no remaining physical limits with {user}."
     return clause
 
 
-def boundary_note(rel: Relationship, char: str, user: str) -> str:
+def boundary_note(rel: Relationship, char: str, user: str,
+                  pronouns: Pronouns | None = None) -> str:
     """Compact restatement of the physical boundary, injected AFTER the chat history.
 
     The full descriptor sits in the system message, which small models weight far less
     than recent tokens once a conversation has some length. This is the same limit,
     placed where it competes on equal footing with the last user turn."""
+    pr = pronouns or Pronouns()
     idx, _ = physical_tier(rel)
     if idx == 0:
         limit = (f"{char} is not physically intimate with {user} right now ({_TIER_ACTS[0]}). If "
-                 f"{user} initiates kissing or sexual touch, she does NOT reciprocate — she declines "
-                 f"or redirects, in character.")
+                 f"{user} initiates kissing or sexual touch, {pr.s} {pr.does} NOT reciprocate — "
+                 f"{pr.s} {pr.v('decline')} or {pr.v('redirect')}, in character.")
     else:
-        limit = (f"{char}'s physical limit right now is {_label_with_acts(idx)}. She does not "
-                 f"go beyond it")
-        limit += (f' — anything from "{PHYSICAL_TIERS[idx + 1]}" upward she declines or slows, in '
-                  f"character." if idx + 1 < len(PHYSICAL_TIERS) else ".")
+        limit = (f"{char}'s physical limit right now is {_label_with_acts(idx)}. {pr.S} "
+                 f"{pr.does} not go beyond it")
+        limit += (f' — anything from "{PHYSICAL_TIERS[idx + 1]}" upward {pr.s} {pr.v("decline")} '
+                  f"or {pr.v('slow')}, in character."
+                  if idx + 1 < len(PHYSICAL_TIERS) else ".")
     return ("[Boundary reminder] " + limit +
             " Turning something down, hesitating, or changing the subject IS a valid way to move "
             "the scene forward — it does not count as repeating yourself or stalling.")
 
 
 def descriptor(rel: Relationship, char: str, user: str,
-               power: float = 0.0, social: float = 50.0) -> str:
+               power: float = 0.0, social: float = 50.0,
+               pronouns: Pronouns | None = None) -> str:
     """Relationship summary + behavior/consent guidance, for the system prompt."""
+    pr = pronouns or Pronouns()
     stage = stage_of(rel)
     base_stage = stage.replace(" (Strained)", "")
     hint = _HINT.get(base_stage, "").replace("{user}", user)
@@ -259,20 +338,20 @@ def descriptor(rel: Relationship, char: str, user: str,
     strained = " There is real friction between you right now." if "(Strained)" in stage else ""
 
     intimacy = (f" Emotional openness: {emotional_level(rel)}. "
-                + _physical_clause(rel, char, user)
-                + " Her consent is genuine, enthusiastic, and revocable at any time; her boundaries "
-                  "reflect her real feelings, never obligation.")
+                + _physical_clause(rel, char, user, pr)
+                + f" {pr.P} consent is genuine, enthusiastic, and revocable at any time; "
+                  f"{pr.p} boundaries reflect {pr.p} real feelings, never obligation.")
     ctx = ""
     if social < 40:
-        ctx += (" This relationship carries social stigma and she is aware of it — she stays more "
-                "guarded, discreet, and conflicted about it.")
+        ctx += (f" This relationship carries social stigma and {pr.s} {pr.is_} aware of it — "
+                f"{pr.s} {pr.v('stay')} more guarded, discreet, and conflicted about it.")
     if abs(power) >= 40:
         if power < 0:
-            ctx += (f" {user} holds real power or authority over {char}; this makes her more careful "
-                    "and deliberate about intimacy, never more compliant.")
+            ctx += (f" {user} holds real power or authority over {char}; this makes {pr.o} more "
+                    "careful and deliberate about intimacy, never more compliant.")
         else:
-            ctx += (f" {char} holds real power or authority over {user}; she stays firmly in control "
-                    "of her own boundaries.")
+            ctx += (f" {char} holds real power or authority over {user}; {pr.s} {pr.v('stay')} "
+                    f"firmly in control of {pr.p} own boundaries.")
 
     return (f"Relationship between {char} and {user}: {stage}. "
             + ", ".join(parts) + ". "

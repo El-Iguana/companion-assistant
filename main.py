@@ -1176,8 +1176,11 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # its own wording says "move the scene forward". Gated exactly the way the
     # date/time line is gated the other way in build_messages().
     assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
+    # The descriptor and boundary note are written ABOUT the character, so they need
+    # the card's pronouns; blank keeps the she/her these strings used to hardcode.
+    pronouns = relationship.Pronouns.parse(getattr(card, "pronouns", ""))
     rel_note = "" if assistant else relationship.descriptor(
-        rel, card.name, persona.name, power, social)
+        rel, card.name, persona.name, power, social, pronouns=pronouns)
     if not req.regenerate and session.pending_milestone:
         # Consumed either way. An assistant has no milestone to announce, and leaving
         # it pending would let it pile up and then fire at whatever moment the card
@@ -1222,7 +1225,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
-        boundary_note="" if assistant else relationship.boundary_note(rel, card.name, persona.name),
+        boundary_note="" if assistant else relationship.boundary_note(
+            rel, card.name, persona.name, pronouns=pronouns),
         longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
         # Only ask for beats we can actually render a sprite for.
         expr_labels=sorted(card.expressions.keys()) if card.expressions else [])

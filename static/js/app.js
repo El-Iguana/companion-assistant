@@ -741,6 +741,10 @@ async function openCardEditor(card) {
   v("first_mes", ceBase.first_mes); v("mes_example", ceBase.mes_example);
   v("system_prompt", ceBase.system_prompt); v("phi", ceBase.post_history_instructions);
   $("#ce-chat_mode").value = ceBase.chat_mode || "roleplay";
+  // A card with custom pronouns the dropdown doesn't list keeps them: fall back to
+  // the blank (she/her) option for display rather than silently rewriting the card.
+  const pr = ceBase.pronouns || "";
+  $("#ce-pronouns").value = [...$("#ce-pronouns").options].some(o => o.value === pr) ? pr : "";
   v("greetings", (ceBase.alternate_greetings || []).join("\n"));
   v("tags", (ceBase.tags || []).join(", "));
   $("#ce-power").value = ceBase.power_dynamic ?? 0;
@@ -900,6 +904,7 @@ function buildCardPayload() {
     first_mes: g("first_mes"), mes_example: g("mes_example"),
     alternate_greetings: lines($("#ce-greetings").value),
     system_prompt: g("system_prompt"), chat_mode: $("#ce-chat_mode").value,
+    pronouns: $("#ce-pronouns").value || ceBase.pronouns || "",
     post_history_instructions: g("phi"),
     tags: csv($("#ce-tags").value),
     power_dynamic: Number($("#ce-power").value),

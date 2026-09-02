@@ -151,6 +151,11 @@ class CharacterCard(BaseModel):
     creator_notes: str = ""
     system_prompt: str = ""              # overrides default system prompt if set
     chat_mode: str = "roleplay"          # "roleplay" (scene/world) | "assistant" (personality, no scene); picks the default system prompt
+    # Pronouns used when the app writes ABOUT the character — the relationship
+    # descriptor and boundary note. "she/her" | "he/him" | "they/them", or a custom
+    # "subject/object/possessive". Blank keeps she/her, which is what every card
+    # written before this field existed was silently getting.
+    pronouns: str = ""
     post_history_instructions: str = ""  # injected after chat history (jailbreak/UJB)
     alternate_greetings: List[str] = []
     tags: List[str] = []

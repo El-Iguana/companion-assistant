@@ -107,6 +107,10 @@ Login-gated, role-based, per-user isolated libraries.
   **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
   system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
   invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
+  **`pronouns`** (`""`|`she/her`|`he/him`|`they/them`|`it/its`|custom `subject/object/possessive`) — used
+  where the app writes *about* the character: the relationship descriptor and boundary note. Parsed by
+  `relationship.Pronouns`, which also carries verb agreement (`they are`/`they turn`, not `they is`).
+  Blank = she/her, which is what every card written before the field existed was silently getting.
   **`DEFAULT_ASSISTANT` composes for the ear** — spoken prose, no markdown/tables/lists, numbers as
   words — because assistant replies are spoken. A custom `system_prompt` drops that too; say it there.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);
@@ -193,7 +197,10 @@ POST /api/chat                             SSE stream; done carries {expression,
   (capped by trust) + `physical_willingness` (gated by trust×attraction, `WRATE`, suppressed by tension) →
   a **7-rung clinical ladder** (`PHYSICAL_TIERS`, cumulative, no cap). **Context** (`power_dynamic`,
   `social_acceptance`; card default + per-relationship override) **slows pace & adds caution — never
-  compliance**; agency-preserving, consent enthusiastic/revocable. `descriptor()` injects all this into her prompt.
+  compliance**; agency-preserving, consent enthusiastic/revocable. `descriptor()` injects all this into the character's prompt, in their own `pronouns`.
+  **Assistant-mode cards get none of it** — `chat()` passes empty `rel_note`/`boundary_note`,
+  because scene-and-feelings text under a "there is no scene" system prompt is what had
+  assistants narrating thoughts, gestures and self-description.
   **Boundary phrasing is load-bearing** — `_physical_clause()`/`boundary_note()` name the concrete acts
   (`_TIER_ACTS`) and the FIRST refused rung, never just the abstract label. The old wording (`willing up
   to "none" … engages at or below this`) was a null instruction at tier 0 and small models complied with
