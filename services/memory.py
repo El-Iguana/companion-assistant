@@ -320,7 +320,15 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             mem.facts = ([f for i, f in enumerate(mem.facts) if i not in drop]
                          if drop else mem.facts[-LONGTERM_MAX_FACTS:])
         if new_facts and index_path is not None:
-            index_add(index_path, [{"text": t, "kind": "fact"} for t in new_facts])
+            # Index what SURVIVED the eviction above, not what was extracted. A
+            # fact dropped at the cap would otherwise stay in the index as
+            # kind="fact" and keep being recalled into prompts, while the Memory
+            # modal shows no such fact for the user to correct or delete —
+            # invisible memory is exactly what `origin` exists to prevent.
+            alive = {f.text for f in mem.facts if f.origin == "auto"}
+            indexable = [t for t in new_facts if t in alive]
+            if indexable:
+                index_add(index_path, [{"text": t, "kind": "fact"} for t in indexable])
 
     # USER turns only. Her own replies restate what the user just said, wrapped in
     # personality — indexing them duplicates the signal and, worse, drags the
@@ -371,8 +379,8 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
     for f in reversed(facts):                     # newest first; oldest are the ones dropped
         line = f"- {f.text.strip()}"
         if len(line) + 1 > remaining:
-            break
-        kept.append(line)
+            continue                              # skip THIS one, don't stop: a single
+        kept.append(line)                         # oversized fact must cost only itself
         remaining -= len(line) + 1
     kept.reverse()                                # back to the order the user wrote them
 

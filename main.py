@@ -276,6 +276,28 @@ def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
         mem.model_dump_json(indent=2))
 
 
+def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
+    """Drop `session`'s fold high-water mark from its pairing's long-term store.
+
+    `swept_sessions[id]` is an INDEX into session.messages, so it only means
+    anything while that list is intact. Clearing a chat leaves a mark pointing
+    past the new end: every later fold sees `upto <= start`, silently records
+    nothing, and once the chat grows back past the old length it resumes
+    mid-conversation, permanently skipping everything before that point.
+    Deleting a session leaves the mark behind forever instead.
+
+    What was already folded into `summary` stays — long-term memory is durable
+    across chats by design, and clearing one chat is not a request to forget it.
+    """
+    if session.relationship is not None or not session.character_id:
+        return                    # scenario sessions are never swept (see chat())
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    mem = _load_character_memory(cur, session.character_id, persona.id)
+    if mem.swept_sessions.pop(session.id, None) is not None:
+        mem.updated_at = datetime.now().isoformat()
+        _save_character_memory(cur, mem)
+
+
 def _clear_other_default_personas(cur: Ctx, keep_id: str) -> None:
     for p in _list(cur.personas, Persona):
         if p.id != keep_id and p.is_default:
@@ -944,6 +966,9 @@ async def get_session(session_id: str, cur: Ctx = Depends(get_ctx)):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, cur: Ctx = Depends(get_ctx)):
+    s = _load(cur.sessions, session_id, ChatSession)
+    if s:
+        _forget_swept_session(cur, s)
     p = cur.sessions / f"{session_id}.json"
     if p.exists():
         p.unlink()
@@ -1038,7 +1063,9 @@ async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
                 item = {"text": item}
             if not isinstance(item, dict):
                 continue
-            text = str(item.get("text") or "").strip()
+            # Clamped like an extracted fact: unbounded text here would eat the
+            # whole injection budget and push every other fact out of the block.
+            text = str(item.get("text") or "").strip()[:memory.LONGTERM_FACT_MAX_CHARS]
             if not text:
                 continue
             prev = known.get(str(item.get("id") or ""))
@@ -1101,6 +1128,9 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     s.memory.summary = ""
     s.memory.last_summarized_index = 0
     _save(s, cur.sessions)
+    # The pairing's long-term store tracks this chat by position too; resetting
+    # the session's own indices without that one leaves folding stuck.
+    _forget_swept_session(cur, s)
     return {"ok": True}
 
 
