@@ -111,6 +111,14 @@ Login-gated, role-based, per-user isolated libraries.
   where the app writes *about* the character: the relationship descriptor and boundary note. Parsed by
   `relationship.Pronouns`, which also carries verb agreement (`they are`/`they turn`, not `they is`).
   Blank = she/her, which is what every card written before the field existed was silently getting.
+  Assistant cards also get a trailing **`ASSISTANT_FORMAT_NOTE`** after the history — the system
+  block loses to the transcript, and a session whose history already contains narrated replies keeps
+  producing them however firmly the system prompt forbids it (measured on a live 139-message session:
+  3/6 replies narrated without the note, 0/6 with). It names the transcript's style as a habit to
+  ignore, which is the part that works. `memory.summarize()` is mode-aware for the same reason — the
+  roleplay prompt's "third person, present tense" prose was being injected as "Story so far:" and read
+  as a worked example of narrating; assistants get notes, labelled "Notes from earlier in this
+  conversation".
   **`DEFAULT_ASSISTANT` composes for the ear** — spoken prose, no markdown/tables/lists, numbers as
   words — because assistant replies are spoken. A custom `system_prompt` drops that too; say it there.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);

@@ -100,12 +100,25 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
         session.memory.last_summarized_index = fold_end
         return
 
+    # Mode-aware, because this block is injected into every later prompt and so
+    # teaches a format by example. "Summarize the roleplay ... third person, present
+    # tense" produced pages of narrative prose that then sat above an assistant's
+    # history as a worked demonstration of narrating. Assistants get notes.
+    instruction = (
+        "Summarize the conversation so far into concise notes. Preserve decisions made, "
+        "facts established, open questions, and anything asked to be remembered. Plain "
+        "notes only: no scene, no narration, no description of anyone, and do not write "
+        "it as a story."
+        if getattr(card, "chat_mode", "roleplay") == "assistant" else
+        "Summarize the roleplay so far into a concise memory (a few paragraphs). "
+        "Preserve key facts, relationship developments, promises, and unresolved threads. "
+        "Write in third person, present tense."
+    )
+
     for end, transcript in chunks:
         prev = session.memory.summary
         prompt = (
-            "Summarize the roleplay so far into a concise memory (a few paragraphs). "
-            "Preserve key facts, relationship developments, promises, and unresolved threads. "
-            "Write in third person, present tense.\n\n"
+            instruction + "\n\n"
             + (f"Existing memory:\n{prev}\n\n" if prev else "")
             + f"New events to fold in:\n{transcript}\n\nUpdated memory:"
         )

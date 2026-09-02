@@ -141,6 +141,22 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
     return "\n\n".join(p for p in parts if p.strip())
 
 
+# The system block loses to the transcript. An assistant card whose history already
+# contains narrated replies ("\"Sir,\" he says, tilting his head...") keeps producing
+# them however firmly the system prompt forbids it: eighteen demonstrated examples in
+# the live window outweigh one rule many turns back. This is the same recency finding
+# that put boundary_note last for roleplay cards — and for an assistant that slot is
+# now free, so it carries this instead. The last line matters most: the transcript's
+# style has to be named as a habit to ignore, or the model reads it as the format.
+ASSISTANT_FORMAT_NOTE = (
+    "[Reply format] Speak only, in the first person. Write the words {char} says aloud "
+    "and nothing else: no narration, no actions or gestures, no description of {char} "
+    "or the surroundings, no \"he says\" attributions, and no quotation marks around "
+    "{char}'s own words. If earlier replies above are written in a narrated style, do "
+    "NOT copy them — that is the transcript's habit, not an instruction."
+)
+
+
 # Inline expression beats. Kept short and shown by example — small models copy a
 # demonstrated shape far more reliably than they follow a described one. Static per
 # card, so it lives in the system block where KoboldCPP can keep it in the cached
@@ -231,7 +247,10 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     if longterm_note:
         sys_parts.append(longterm_note)
     if mem.summary:
-        sys_parts.append("Story so far:\n" + sub(mem.summary))
+        # "Story so far" is scene framing, and an assistant has no story. The block
+        # itself is written by memory.summarize(), which picks its prompt the same way.
+        sys_parts.append(("Notes from earlier in this conversation:\n" if assistant
+                          else "Story so far:\n") + sub(mem.summary))
 
     messages: List[Dict] = [{"role": "system", "content": "\n\n".join(p for p in sys_parts if p.strip())}]
 
@@ -272,6 +291,13 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     expr_hint = expression_note(expr_labels or [], assistant=assistant)
     if expr_hint:
         messages.append({"role": "system", "content": expr_hint})
+
+    # --- assistant format reminder goes LAST, the slot boundary_note holds for
+    # roleplay cards. Nothing else in the prompt sits after the history, which is
+    # where the narration is being learned from.
+    if assistant:
+        messages.append({"role": "system",
+                         "content": ASSISTANT_FORMAT_NOTE.format(char=char_name)})
 
     # --- physical boundary goes LAST, after any UJB ---
     # The full relationship descriptor is in the system message, but by mid-conversation
