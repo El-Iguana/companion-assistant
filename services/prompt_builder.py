@@ -35,11 +35,21 @@ DEFAULT_ASSISTANT = (
     "You are {{char}}, talking directly with {{user}} in a plain, ongoing conversation. "
     "There is no physical setting or scene: do NOT invent surroundings, locations, events, or a "
     "world, and do not narrate a scene. Reply as {{char}} in first person with full personality "
-    "and voice — opinions, wit, knowledge, tone; focus on what {{char}} thinks and says. Keep "
-    "*action* narration minimal or absent. Write ONLY {{char}}'s single next reply and then stop; "
-    "be reasonably concise and reactive to what {{user}} just said. Do NOT repeat phrasing you have "
-    "already used. Never speak, act, or decide for {{user}}. Stay fully in character and never "
-    "mention being an AI.\n"
+    "and voice — opinions, wit, knowledge, tone.\n"
+    # "Keep *action* narration minimal or absent" licensed exactly what it was meant to
+    # stop — "minimal" is permission — and "focus on what {{char}} thinks and says" invited
+    # narrated inner monologue. Assistants were replying with gestures, described
+    # expressions, and third-person description of themselves. Forbidden outright now,
+    # with the specific forms named: a small model obeys a named form far better than a
+    # general prohibition.
+    "Write ONLY the words {{char}} says out loud. Nothing else: no action narration, no "
+    "gestures, no asterisks or stage directions, no description of {{char}}'s expression, "
+    "posture, or surroundings, and no narrated thoughts or feelings. Never write about "
+    "{{char}} in the third person. Feeling belongs in word choice, never in a sentence that "
+    "describes the feeling. Write {{char}}'s single next reply and then stop; be reasonably "
+    "concise and reactive to what {{user}} just said. Do NOT repeat phrasing you have "
+    "already used. Never speak, act, or decide for {{user}}. Stay fully in character and "
+    "never mention being an AI.\n"
     # Assistant replies are spoken aloud (per-character TTS voice), and the answer that reads
     # best is not the answer that HEARS best. Asked for Dunbar's number, the 9B fine-tune
     # produced a markdown table, ran out of tokens mid-row, and the auto-continue restarted
@@ -135,14 +145,35 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
 # demonstrated shape far more reliably than they follow a described one. Static per
 # card, so it lives in the system block where KoboldCPP can keep it in the cached
 # prefix; a per-turn string here would invalidate the cache every turn.
-def expression_note(labels: List[str]) -> str:
+def expression_note(labels: List[str], assistant: bool = False) -> str:
     if not labels:
         return ""
     # The example must use a label the card actually has. Demonstrating one that is
     # not in the valid list invites the model to copy it, and we would drop the beat.
     ok = sorted(labels)
-    eg = next((l for l in ("embarrassment", "embarrassed", "surprise", "surprised",
-                           "sad", "sadness", "happy", "joy") if l in labels), ok[0])
+    preferred = (("thoughtful", "neutral", "happy", "joy", "surprised", "surprise")
+                 if assistant else
+                 ("embarrassment", "embarrassed", "surprise", "surprised",
+                  "sad", "sadness", "happy", "joy"))
+    eg = next((l for l in preferred if l in labels), ok[0])
+
+    # Same mechanism, different demonstration. The roleplay example below is a
+    # third-person action beat plus quoted dialogue ("She looked away. [expr:x] ..."),
+    # and per the note above, a demonstrated shape gets copied far more reliably than a
+    # described rule is followed — so on an assistant card it was teaching precisely the
+    # narration the assistant system prompt forbids. Shown inside plain first-person
+    # speech instead. Beats still have to work here: an assistant with a VRM drives its
+    # face from them.
+    if assistant:
+        return (
+            "Expression beats: when your tone genuinely changes mid-reply, mark it inline "
+            "at that exact point, then carry on speaking normally.\n"
+            f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
+            f"Example: I did look into that. [expr:{eg}] It is not as simple as it sounds.\n"
+            "Use at most a few per reply, only on a real change. The tag is the ONLY thing "
+            "that marks the change — never narrate or describe yourself alongside it. The "
+            "tags are stripped before the reader sees them, so never mention or explain them."
+        )
     # Never spell out a placeholder tag here. An earlier wording said 'emit a tag
     # [expr:LABEL]' and the model copied it verbatim — it read LABEL as the label.
     # The shape is taught by example only; the list is the sole source of labels.
@@ -162,6 +193,7 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    expr_labels: List[str] | None = None) -> List[Dict]:
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
+    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
 
     def sub(t: str) -> str:
         return substitute_macros(t, char_name, user_name)
@@ -224,7 +256,7 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # changed token — in the system block that would re-process the entire history every
     # turn. Trailing also puts it where small models weight it most, the same finding that
     # drove boundary_note's placement.
-    if getattr(card, "chat_mode", "roleplay") == "assistant":
+    if assistant:
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "12"
         messages.append({"role": "system", "content": (
@@ -237,7 +269,7 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # 6 replies (and invented a label); moved here it tagged 3 of 6 with none invalid.
     # The system block is many turns back by mid-conversation and the trailing boundary
     # reminder was out-weighting it. Placed before boundary_note so that still goes last.
-    expr_hint = expression_note(expr_labels or [])
+    expr_hint = expression_note(expr_labels or [], assistant=assistant)
     if expr_hint:
         messages.append({"role": "system", "content": expr_hint})
 

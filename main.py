@@ -1167,9 +1167,23 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     rel = session.relationship if scenario else _load_relationship(cur, session.character_id, persona.id)
     power = rel.power_dynamic if rel.power_dynamic is not None else card.power_dynamic
     social = rel.social_acceptance if rel.social_acceptance is not None else card.social_acceptance
-    rel_note = relationship.descriptor(rel, card.name, persona.name, power, social)
+    # Assistant-mode characters get NO relationship framing. The descriptor and the
+    # boundary note are scene-and-feelings text — affection, attraction, emotional
+    # openness, physical consent — and injecting them beneath a system prompt that
+    # says "there is no physical setting or scene" is what had assistants replying
+    # with narrated thoughts, gestures and self-description. The boundary note was
+    # the worst of it: it lands LAST, the slot small models weight most heavily, and
+    # its own wording says "move the scene forward". Gated exactly the way the
+    # date/time line is gated the other way in build_messages().
+    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
+    rel_note = "" if assistant else relationship.descriptor(
+        rel, card.name, persona.name, power, social)
     if not req.regenerate and session.pending_milestone:
-        rel_note += " MILESTONE MOMENT — " + session.pending_milestone
+        # Consumed either way. An assistant has no milestone to announce, and leaving
+        # it pending would let it pile up and then fire at whatever moment the card
+        # was next switched to roleplay.
+        if not assistant:
+            rel_note += " MILESTONE MOMENT — " + session.pending_milestone
         session.pending_milestone = ""
     # Cross-session memory is skipped for scenario sessions, exactly like `rel` above:
     # a scenario is a deliberate alternate premise seeded from a preset, so the main
@@ -1208,7 +1222,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
-        boundary_note=relationship.boundary_note(rel, card.name, persona.name),
+        boundary_note="" if assistant else relationship.boundary_note(rel, card.name, persona.name),
         longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
         # Only ask for beats we can actually render a sprite for.
         expr_labels=sorted(card.expressions.keys()) if card.expressions else [])
