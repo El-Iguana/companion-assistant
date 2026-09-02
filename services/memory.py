@@ -33,6 +33,24 @@ LONGTERM_FACT_MAX_CHARS = 200 # one fact must not be able to dominate the block
 LONGTERM_BUDGET_CHARS = 2400  # ceiling on the injected block, at 8192 context
 LONGTERM_SUMMARY_SHARE = 0.6  # of that budget, the share the cumulative history may take
 
+# How much transcript one fold pass may carry. KoboldCPP's default context is
+# 8192 tokens and this app never probes the real value (PROMPT_BUDGET.md). A
+# range larger than this is folded in successive passes rather than truncated —
+# see _fold_chunks() for why truncation is not an option here.
+#
+# Budgeted at 4.0 chars/token even though PROMPT_BUDGET.md measured ~5.0: that
+# figure is an average over one corpus, not a floor, and the whole point of this
+# cap is the case where it is wrong. The reserve covers the instructions, the
+# existing memory (LONGTERM_BUDGET_CHARS) or the Known-facts list quoted back to
+# extract_auto_facts (up to 40 x 200 chars — the binding case), and the reply
+# being generated (summary_max_tokens, up to 1200). At 4.0 the worst prompt of
+# either kind lands ~6% under the window; at the measured 5.0 it is ~25% under.
+# The cost of being wrong the other way is one extra pass, so err low.
+FOLD_CONTEXT_TOKENS = 8192
+FOLD_CHARS_PER_TOKEN = 4.0
+FOLD_RESERVE_TOKENS = 3000
+FOLD_TRANSCRIPT_CHARS = int((FOLD_CONTEXT_TOKENS - FOLD_RESERVE_TOKENS) * FOLD_CHARS_PER_TOKEN)
+
 
 def needs_summary(session: ChatSession, summarize_after: int = SUMMARIZE_AFTER) -> bool:
     unsummarized = len(session.messages) - session.memory.last_summarized_index
@@ -64,31 +82,46 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
 
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
+    start = session.memory.last_summarized_index
     fold_end = len(session.messages) - keep_recent
-    if fold_end <= session.memory.last_summarized_index:
+    if fold_end <= start:
         return
 
-    to_fold = session.messages[session.memory.last_summarized_index:fold_end]
-    transcript = _transcript(to_fold, char_name, user_name)
-
-    prev = session.memory.summary
-    prompt = (
-        "Summarize the roleplay so far into a concise memory (a few paragraphs). "
-        "Preserve key facts, relationship developments, promises, and unresolved threads. "
-        "Write in third person, present tense.\n\n"
-        + (f"Existing memory:\n{prev}\n\n" if prev else "")
-        + f"New events to fold in:\n{transcript}\n\nUpdated memory:"
-    )
-
-    try:
-        summary = await kobold.generate_answer(prompt, {
-            "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
-    except Exception:
-        return  # summarization is best-effort; never block the chat
-
-    if summary.strip():
-        session.memory.summary = summary.strip()
+    # Chunked for the same reason as the long-term fold (see _fold_chunks): this
+    # window is bounded by turn COUNT and never by length — `summarize_after`
+    # reaches 200 on the settings slider — so a long-turn roleplay renders a
+    # transcript that overflows the context and, truncated from the front, takes
+    # these instructions with it. Each pass folds into the summary the one before
+    # it produced, which is what the threshold already does across turns.
+    chunks = _fold_chunks(session.messages, start, fold_end, char_name, user_name)
+    if not chunks:
+        # Nothing summarizable in the range (system-only turns) — still advance the
+        # mark so it isn't rescanned on every later turn.
         session.memory.last_summarized_index = fold_end
+        return
+
+    for end, transcript in chunks:
+        prev = session.memory.summary
+        prompt = (
+            "Summarize the roleplay so far into a concise memory (a few paragraphs). "
+            "Preserve key facts, relationship developments, promises, and unresolved threads. "
+            "Write in third person, present tense.\n\n"
+            + (f"Existing memory:\n{prev}\n\n" if prev else "")
+            + f"New events to fold in:\n{transcript}\n\nUpdated memory:"
+        )
+
+        try:
+            summary = await kobold.generate_answer(prompt, {
+                "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
+        except Exception:
+            return  # summarization is best-effort; never block the chat. Passes that
+                    # already landed stand — last_summarized_index records exactly
+                    # them, and the turns after it simply stay verbatim for now.
+        if not summary.strip():
+            return
+
+        session.memory.summary = summary.strip()
+        session.memory.last_summarized_index = end
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +278,39 @@ async def extract_auto_facts(kobold: KoboldClient, mem: CharacterMemory,
     return _dedupe_facts(candidates[:max_new], known)
 
 
+def _fold_chunks(messages, start: int, upto: int, char_name: str, user_name: str,
+                 budget: int = FOLD_TRANSCRIPT_CHARS) -> list[tuple[int, str]]:
+    """Split [start, upto) into (end_index, transcript) passes that each fit `budget`.
+
+    A long backlog — the first idle sweep of a finished chat, or a session that
+    ran well past the threshold — renders a transcript that can exceed the whole
+    context window. KoboldCPP truncates from the FRONT with no error, so the
+    casualty is LONGTERM_PROMPT itself: the fold runs with none of the rules
+    above it, which is precisely the tuning MEMORY.md records as hard-won.
+
+    Truncating the transcript instead would be worse than useless — it drops
+    events without saying so, and the fold is the ONLY thing standing between
+    those turns and being forgotten. Successive passes keep every rule in every
+    pass and lose nothing; it is what repeated threshold folds already do.
+    """
+    chunks: list[tuple[int, str]] = []
+    lo = start
+    while lo < upto:
+        hi, size = lo, 0
+        while hi < upto:
+            line = len(_transcript(messages[hi:hi + 1], char_name, user_name)) + 1
+            if size and size + line > budget:
+                break
+            size += line
+            hi += 1
+        hi = max(hi, lo + 1)          # one turn longer than the whole budget: take it alone
+        text = _transcript(messages[lo:hi], char_name, user_name)[:budget]
+        if text.strip():              # skip system-only stretches
+            chunks.append((hi, text))
+        lo = hi
+    return chunks
+
+
 async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              session: ChatSession, card: CharacterCard, persona: Persona,
                              upto: int | None = None,
@@ -270,66 +336,80 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
 
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
-    transcript = _transcript(session.messages[start:upto], char_name, user_name)
-    if not transcript.strip():
+    # One pass per context-sized slice of the range, oldest first, each folded into
+    # the memory the pass before it produced. A single pass is still the normal
+    # case; more than one only happens on a backlog that could not have fitted.
+    chunks = _fold_chunks(session.messages, start, upto, char_name, user_name)
+    if not chunks:
         # Nothing foldable in the range (system-only turns) — still advance the
         # mark so the same empty range isn't rescanned on every later sweep.
         mem.swept_sessions[session.id] = upto
         mem.updated_at = datetime.now().isoformat()
         return True
 
-    prompt = (
-        LONGTERM_PROMPT.format(char=char_name, user=user_name,
-                               max_bullets=LONGTERM_MAX_BULLETS) + "\n\n"
-        + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
-        + f"New events:\n{transcript}\n\nUpdated memory:"
-    )
+    done = start                  # how far the folding actually got
+    facts_left = max_new_facts    # the per-fold cap is for the WHOLE range, not per pass
+    for end, transcript in chunks:
+        prompt = (
+            LONGTERM_PROMPT.format(char=char_name, user=user_name,
+                                   max_bullets=LONGTERM_MAX_BULLETS) + "\n\n"
+            + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
+            + f"New events:\n{transcript}\n\nUpdated memory:"
+        )
 
-    try:
-        summary = await kobold.generate_answer(prompt, {
-            "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
-    except Exception:
-        return False  # best-effort; never block or fail the chat turn
+        try:
+            summary = await kobold.generate_answer(prompt, {
+                "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
+        except Exception:
+            break     # best-effort; never block or fail the chat turn. Keep the
+                      # passes that did land — `done` records exactly those, so
+                      # the next sweep resumes from there instead of redoing them.
+        if not summary.strip():
+            break
 
-    if not summary.strip():
+        mem.summary = summary.strip()
+        done = end
+
+        # Auto-facts (Phase 5) — promote the stable, atomic things out of the
+        # summary, which is rewritten wholesale on every fold and can quietly drop
+        # them. Only ever ADDS, and only with origin="auto"; user-written facts are
+        # never touched.
+        if extract_facts and facts_left > 0:
+            new_facts = await extract_auto_facts(kobold, mem, transcript, char_name,
+                                                 user_name, max_new=facts_left)
+            for text in new_facts:
+                mem.facts.append(MemoryFact(text=text, origin="auto"))
+            if new_facts:
+                facts_left -= len(new_facts)
+                print(f"[auto-facts] +{len(new_facts)} for {mem.character_id[:8]}", flush=True)
+            # Evict oldest AUTO facts if over the cap — a curated fact must never be
+            # pushed out by something the app decided to remember on its own.
+            if len(mem.facts) > LONGTERM_MAX_FACTS:
+                over = len(mem.facts) - LONGTERM_MAX_FACTS
+                drop = {i for i, f in enumerate(mem.facts) if f.origin == "auto"}
+                drop = set(sorted(drop)[:over])
+                mem.facts = ([f for i, f in enumerate(mem.facts) if i not in drop]
+                             if drop else mem.facts[-LONGTERM_MAX_FACTS:])
+            if new_facts and index_path is not None:
+                # Index what SURVIVED the eviction above, not what was extracted. A
+                # fact dropped at the cap would otherwise stay in the index as
+                # kind="fact" and keep being recalled into prompts, while the Memory
+                # modal shows no such fact for the user to correct or delete —
+                # invisible memory is exactly what `origin` exists to prevent.
+                alive = {f.text for f in mem.facts if f.origin == "auto"}
+                indexable = [t for t in new_facts if t in alive]
+                if indexable:
+                    index_add(index_path, [{"text": t, "kind": "fact"} for t in indexable])
+
+    if done <= start:
         return False
-
-    mem.summary = summary.strip()
-    mem.swept_sessions[session.id] = upto
+    mem.swept_sessions[session.id] = done
     mem.updated_at = datetime.now().isoformat()
 
-    # Index the same turns for semantic recall (Phase 4). Done HERE, inside the
+    # Index the folded turns for semantic recall (Phase 4). Done HERE, inside the
     # fold, so the threshold and idle triggers can't drift apart on what got
     # indexed; best-effort, and index_add() swallows its own failures.
-    # Auto-facts (Phase 5) — promote the stable, atomic things out of the summary,
-    # which is rewritten wholesale on every fold and can quietly drop them. Only
-    # ever ADDS, and only with origin="auto"; user-written facts are never touched.
-    if extract_facts:
-        new_facts = await extract_auto_facts(kobold, mem, transcript, char_name,
-                                             user_name, max_new=max_new_facts)
-        for text in new_facts:
-            mem.facts.append(MemoryFact(text=text, origin="auto"))
-        if new_facts:
-            print(f"[auto-facts] +{len(new_facts)} for {mem.character_id[:8]}", flush=True)
-        # Evict oldest AUTO facts if over the cap — a curated fact must never be
-        # pushed out by something the app decided to remember on its own.
-        if len(mem.facts) > LONGTERM_MAX_FACTS:
-            over = len(mem.facts) - LONGTERM_MAX_FACTS
-            drop = {i for i, f in enumerate(mem.facts) if f.origin == "auto"}
-            drop = set(sorted(drop)[:over])
-            mem.facts = ([f for i, f in enumerate(mem.facts) if i not in drop]
-                         if drop else mem.facts[-LONGTERM_MAX_FACTS:])
-        if new_facts and index_path is not None:
-            # Index what SURVIVED the eviction above, not what was extracted. A
-            # fact dropped at the cap would otherwise stay in the index as
-            # kind="fact" and keep being recalled into prompts, while the Memory
-            # modal shows no such fact for the user to correct or delete —
-            # invisible memory is exactly what `origin` exists to prevent.
-            alive = {f.text for f in mem.facts if f.origin == "auto"}
-            indexable = [t for t in new_facts if t in alive]
-            if indexable:
-                index_add(index_path, [{"text": t, "kind": "fact"} for t in indexable])
-
+    #
     # USER turns only. Her own replies restate what the user just said, wrapped in
     # personality — indexing them duplicates the signal and, worse, drags the
     # median similarity up, which is exactly what index_search's margin gate is
@@ -340,7 +420,7 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     if index_path is not None:
         index_add(index_path, [
             {"text": f"{user_name}: {m.content}", "kind": "turn"}
-            for m in session.messages[start:upto]
+            for m in session.messages[start:done]
             if m.role == "user" and m.content
             and len(m.content.strip()) >= RECALL_MIN_TEXT
         ])
@@ -411,6 +491,15 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
 RECALL_TOP_K = 4
 RECALL_MAX_VECTORS = 2000      # per pairing; ~3 MB at 384 dims, oldest turns evicted first
 RECALL_MAX_CHARS = 240         # per stored entry, so one long turn can't dominate
+
+# Recall shares LONGTERM_BUDGET_CHARS rather than adding to it, but long-term goes
+# on filling that budget as facts accumulate — which left recall exactly nothing
+# in precisely the mature pairings it exists to serve, the opposite of the point.
+# So long-term yields this slice, and ONLY on a turn where recall actually
+# retrieved something: ~2 full-length snippets, or 3-4 typical ones, against a
+# long-term block that still has 1800 of its 2400 characters. The margin gate is
+# conservative, so most turns retrieve nothing and long-term keeps all 2400.
+RECALL_RESERVE_CHARS = 600
 
 # Relevance gate. BGE's absolute cosine scores are NOT calibrated — measured on a
 # companion-shaped corpus, "hello" scored 0.541 while the genuinely relevant

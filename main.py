@@ -1176,15 +1176,17 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # timeline's remembered history would contradict the state it was just given.
     char_mem = None if scenario else _load_character_memory(cur, session.character_id, persona.id)
     settings = _load_settings(cur)
-    lt_note = memory.longterm_block(char_mem, card.name, persona.name) if char_mem else ""
 
     # Semantic recall (Phase 4): the long-term summary is lossy by design, so pull
     # back the specifics that relate to what was just said. Retrieval SHARES
     # longterm_block's character budget rather than adding to it — turning recall
     # on must not silently double the memory footprint of every prompt.
+    # Searched BEFORE the long-term block is rendered so that block can make room:
+    # it fills the whole budget once facts accumulate, which used to starve recall
+    # to nothing exactly when the pairing had enough history to need it.
     # Offloaded to a thread: onnxruntime is sync and would block the event loop,
     # stalling every other session's stream for the duration.
-    recall_note = ""
+    hits = []
     if char_mem is not None and settings.recall_enabled:
         last_user = next((m.content for m in reversed(session.messages)
                           if m.role == "user" and m.content), "")
@@ -1193,8 +1195,15 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                 memory.index_search,
                 _memory_index_path(cur, session.character_id, persona.id),
                 last_user, settings.recall_top_k)
-            recall_note = memory.recall_block(
-                hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note)
+
+    lt_budget = memory.LONGTERM_BUDGET_CHARS - (memory.RECALL_RESERVE_CHARS if hits else 0)
+    lt_note = memory.longterm_block(char_mem, card.name, persona.name, lt_budget) if char_mem else ""
+    recall_note = memory.recall_block(
+        hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note) if hits else ""
+    if hits and not recall_note and char_mem is not None:
+        # Every hit was already in the long-term block — give the space back
+        # rather than shrinking her memory for a block that isn't there.
+        lt_note = memory.longterm_block(char_mem, card.name, persona.name)
 
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
