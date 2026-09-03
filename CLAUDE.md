@@ -119,6 +119,11 @@ Login-gated, role-based, per-user isolated libraries.
   roleplay prompt's "third person, present tense" prose was being injected as "Story so far:" and read
   as a worked example of narrating; assistants get notes, labelled "Notes from earlier in this
   conversation".
+  The same note also bans closing offers of help, initiative questions, and any mention of a body,
+  senses, hardware or location. `prompt_builder.strip_initiative_question()` then removes a
+  trailing courtesy question in code — measured, the prompt rule alone moved it 9/15 -> 8/15 and
+  the strip took it to 1/15 (`eval/assistant_replies/`). Clarification questions survive; only
+  "anything else?" forms are removed.
   **`DEFAULT_ASSISTANT` composes for the ear** — spoken prose, no markdown/tables/lists, numbers as
   words — because assistant replies are spoken. A custom `system_prompt` drops that too; say it there.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);

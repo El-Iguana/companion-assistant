@@ -1375,6 +1375,11 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # A label the model emitted without its brackets never reached the tag
         # parser, so scrub it here before it is stored and re-spoken on reload.
         reply = expressions.strip_bare_labels(acc.strip(), card.expressions.keys())
+        if assistant:
+            # Questions are for clarification only; a courtesy question tacked onto
+            # a finished answer is the assistant making conversation, which is not
+            # the job. See prompt_builder for why this is code and not just a rule.
+            reply = prompt_builder.strip_initiative_question(reply)
         swipes = (_pending_swipes + [reply]) if _pending_swipes else [reply]
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
                           swipe_index=len(swipes) - 1)

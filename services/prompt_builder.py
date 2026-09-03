@@ -69,6 +69,38 @@ DEFAULT_ASSISTANT = (
 DEFAULT_SYSTEM = DEFAULT_ROLEPLAY
 
 
+# Courtesy questions an assistant tacks onto a finished answer. The prompt rule
+# above moved this from 9 replies in 15 to 8: a strong conversational habit does
+# not yield to being told, which is the same finding as the narration fix.
+#
+# So a trailing question is dropped in code — but ONLY these forms, and only when
+# it is the last sentence and something else was actually said. A question is
+# legitimate when the assistant cannot act without the answer, and no regex can
+# tell that apart; what it CAN tell is "is there anything else?", which is never
+# clarification. Anything not on this list survives.
+_COURTESY_Q = re.compile(
+    r"(?:(?<=[.!?])\s+|^)[^.!?]*?\b("
+    r"anything (?:else|further|more)|is there (?:anything|something)|"
+    r"how (?:may|can|might) i (?:assist|help|be of)|what (?:else )?can i (?:do|help)|"
+    r"would you (?:like|care|prefer)|shall i|do you (?:need|want|require) anything|"
+    r"how (?:is|are|was|has) (?:your|you)|and yourself|"
+    r"anything (?:i can|you would like)"
+    r")\b[^.!?]*\?\s*$", re.I)
+
+
+def strip_initiative_question(text: str) -> str:
+    """Drop a trailing courtesy question from an assistant reply.
+
+    Returns `text` unchanged when the question is the whole reply — an assistant
+    that genuinely only asked something is either clarifying or has nothing else
+    to say, and deleting that leaves an empty turn.
+    """
+    if not text or "?" not in text:
+        return text
+    trimmed = _COURTESY_Q.sub("", text).strip()
+    return trimmed if trimmed else text
+
+
 def default_system_for(card) -> str:
     """Pick the built-in system prompt for a card's chat_mode."""
     return DEFAULT_ASSISTANT if getattr(card, "chat_mode", "roleplay") == "assistant" else DEFAULT_ROLEPLAY
@@ -153,7 +185,18 @@ ASSISTANT_FORMAT_NOTE = (
     "and nothing else: no narration, no actions or gestures, no description of {char} "
     "or the surroundings, no \"he says\" attributions, and no quotation marks around "
     "{char}'s own words. If earlier replies above are written in a narrated style, do "
-    "NOT copy them — that is the transcript's habit, not an instruction."
+    "NOT copy them — that is the transcript's habit, not an instruction.\n"
+    # Measured 2/15 clean before this paragraph: 9 replies in 15 ended by asking the
+    # user something, and 3 closed with an offer of further help. An assistant that
+    # volleys a question back on every turn is making conversation, which is not the
+    # job. Questions are for clarification only — the test is whether the assistant
+    # can act without the answer.
+    "Answer what was asked and stop. No closing offer of further help, no \"at your "
+    "disposal\", no \"anything else?\" — {user} will ask if there is more. Ask a "
+    "question ONLY when you cannot carry out the request without the answer; never "
+    "to be polite, to offer more, or to keep the conversation going. You have no "
+    "body, senses, hardware or location, so never mention temperature, rooms, "
+    "lighting, fans, circuits or how anything feels."
 )
 
 
@@ -300,7 +343,8 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # where the narration is being learned from.
     if assistant:
         messages.append({"role": "system",
-                         "content": ASSISTANT_FORMAT_NOTE.format(char=char_name)})
+                         "content": ASSISTANT_FORMAT_NOTE.format(
+                             char=char_name, user=user_name)})
 
     # --- physical boundary goes LAST, after any UJB ---
     # The full relationship descriptor is in the system message, but by mid-conversation
