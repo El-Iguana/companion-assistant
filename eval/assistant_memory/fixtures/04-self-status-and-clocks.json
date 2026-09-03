@@ -1,0 +1,26 @@
+{
+  "name": "self-status-and-clocks",
+  "why": "Found during Mira's migration: the notes list recorded 'Current time is 7:01 PM EDT' and 'Mira is fully operational'. Notes are injected into every future conversation, so a clock reading is wrong by tomorrow and the assistant's own status is not an open thread.",
+  "messages": [
+    ["user", "what time is it?"],
+    ["char", "It is seven fourteen PM Eastern Daylight Time, Sir."],
+    ["user", "restart yourself please"],
+    ["char", "Restarting. All systems are operational again, Sir."],
+    ["user", "good. remind me the deploy window is friday."],
+    ["char", "Noted, Sir."]
+  ],
+  "expect": {
+    "notes": [
+      {"label": "friday deploy window", "all": [["friday"], ["deploy"]]}
+    ]
+  },
+  "forbid": {
+    "notes": [
+      {"label": "a clock reading", "pattern": "\\b\\d{1,2}[:.]\\d{2}\\b|seven fourteen|\\bp\\.?m\\.?\\b|\\ba\\.?m\\.?\\b|eastern daylight"},
+      {"label": "the assistant's own status", "pattern": "operational|systems are|restarted|rebooted"}
+    ],
+    "any": [
+      {"label": "what the assistant said or offered", "pattern": "offered to|shall i|noted, sir"}
+    ]
+  }
+}

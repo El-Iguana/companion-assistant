@@ -1,0 +1,27 @@
+{
+  "name": "directive-vs-fact",
+  "why": "The split this pipeline exists for. The old shared pipeline filed 'prefers to be addressed as Sir' as a FACT, where nothing tells the assistant to do it. An instruction that is merely known is an instruction that gets ignored.",
+  "messages": [
+    ["user", "From now on always address me as Sir."],
+    ["char", "Understood, Sir."],
+    ["user", "And give every time in Eastern, never UTC."],
+    ["char", "Noted. Eastern from here on, Sir."],
+    ["user", "My brother Dan runs the observatory over on the ridge."],
+    ["char", "Very good, Sir."]
+  ],
+  "expect": {
+    "directives": [
+      {"label": "address as Sir", "all": [["address", "call"], ["sir"]]},
+      {"label": "times in Eastern", "all": [["eastern"], ["time", "times", "clock"]]}
+    ],
+    "facts": [
+      {"label": "Dan runs the observatory", "all": [["dan"], ["observatory"]]}
+    ]
+  },
+  "misfile": {
+    "directives_as_facts": [
+      {"label": "address as Sir", "all": [["address", "call"], ["sir"]]},
+      {"label": "times in Eastern", "all": [["eastern"], ["time", "times"]]}
+    ]
+  }
+}

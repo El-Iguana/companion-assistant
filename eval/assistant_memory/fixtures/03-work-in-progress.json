@@ -1,0 +1,24 @@
+{
+  "name": "work-in-progress-is-not-a-fact",
+  "why": "Recorded but NOT fixed at the time this fixture was written: 'We still need to finish the middleware' was filed as a durable fact, where it outlives its truth. Task state belongs in notes, which get rewritten; facts persist until someone deletes them.",
+  "messages": [
+    ["user", "We still need to finish the middleware before the demo."],
+    ["char", "It remains outstanding, Sir."],
+    ["user", "I'm working on the skill registry tonight, should be done soon."],
+    ["char", "Understood."],
+    ["user", "Also I'm left-handed, in case that ever matters for the layout."],
+    ["char", "Noted, Sir."]
+  ],
+  "expect": {
+    "facts": [
+      {"label": "is left-handed", "all": [["left-handed", "left handed"]]}
+    ]
+  },
+  "forbid": {
+    "facts": [
+      {"label": "middleware as a durable fact", "pattern": "middleware"},
+      {"label": "skill registry as a durable fact", "pattern": "skill registry"},
+      {"label": "in-progress phrasing", "pattern": "still need|working on|should be done"}
+    ]
+  }
+}

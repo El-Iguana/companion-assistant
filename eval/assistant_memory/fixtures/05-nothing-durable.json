@@ -1,0 +1,16 @@
+{
+  "name": "nothing-durable",
+  "why": "NONE has to be a reachable answer. A pipeline that always finds something will fill the store with noise, and every item it invents is injected into every later prompt.",
+  "messages": [
+    ["user", "morning"],
+    ["char", "Good morning, Sir."],
+    ["user", "just checking you're awake"],
+    ["char", "Quite awake, Sir."],
+    ["user", "ok carry on"],
+    ["char", "Very good."]
+  ],
+  "expect": {},
+  "forbid": {
+    "any": [{"label": "anything at all", "pattern": ".+"}]
+  }
+}
