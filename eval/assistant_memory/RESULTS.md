@@ -111,3 +111,37 @@ removed a wrong penalty, not a real one.
   can say it again or add it in the modal.
 - `self-status` 2/3 — "System rebooted successfully." has no subject, so a
   subject-anchored filter does not see it. An honest limit of the approach.
+
+
+---
+
+# Run 3 — 2026-09-03
+
+```
+                baseline(2772fbc)   run 3
+clean                      12/15    13/15
+misfiled                    0/15     0/15
+forbidden                   1/15     1/15
+missed                      2/15     1/15
+```
+
+Two changes were measured; one survived.
+
+**Kept — the subjectless status filter.** `self-status-and-clocks` went 2/3 to
+3/3. "System rebooted successfully." has no subject, so the subject-anchored rule
+could not see it. This is a deterministic filter with unit tests covering both the
+strings it must remove and the ones it must not ("System migration still pending"
+survives), so its correctness does not rest on the eval.
+
+**Reverted — the worked example.** The same-sentence carve-out was rewritten from
+a described rule into a demonstrated one, on the theory that a shown shape gets
+copied more reliably than a described rule. That is true of the expression beats;
+it is not true here. Measured **0/6** against 1/9 for the description — no better,
+and one more thing in the prompt. Reverted, with the finding recorded in the
+module so it is not retried on the same reasoning.
+
+**The same-sentence fixture is unstable, not merely failing.** Across runs it has
+scored 0/3, 0/3, 1/3, 0/6 and 2/3 on essentially the same code. Its rate is the
+noisiest thing in this suite, and any conclusion drawn from three runs of it —
+including yesterday's — is worth very little. It needs more runs per verdict than
+the rest.

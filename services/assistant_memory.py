@@ -54,6 +54,13 @@ EXTRACT_PROMPT = (
     "address, formats, units, defaults, what to do or never do.\n"
     "FACT: something that is true about {user} or their setup, which {char} should "
     "know but is not told to act on.\n\n"
+    # TRIED AND REVERTED 2026-09-03: replacing the description below with a worked
+    # two-line example ("Said: my sister Ana is flying in on Friday / FACT: Ana is
+    # {user}'s sister") on the theory that a demonstrated shape gets copied more
+    # reliably than a described rule — which is true of the expression beats. Here
+    # it measured 0/6 against 1/9 for the description, i.e. no better and one more
+    # thing in the prompt. The same-sentence split is simply not solved; do not
+    # retry the example without a different idea behind it.
     "A sentence can carry both kinds at once, and the durable half still counts: "
     "\"my friends Tom and Bill are visiting next month\" contains the durable FACT "
     "that Tom and Bill are their friends, and a visit that is not durable. Record "
@@ -151,7 +158,15 @@ def _drop_status_notes(notes: list[str], char: str, user: str) -> list[str]:
     logged = re.compile(rf"^\s*{u}\s+(?:said|asked|confirmed|issued|gave|told|"
                         rf"requested|stated|mentioned|greeted|has (?:issued|said|asked|"
                         rf"confirmed|given|told|requested))\b", re.I)
-    return [n for n in notes if not status.match(n) and not logged.match(n)]
+    # "System rebooted successfully." has no subject, so the rules above cannot see
+    # it — measured, it survived into notes. Verb list kept tight so a real thread
+    # starting with the same noun lives: "System migration still pending" is not
+    # matched, because `migration` is not a state.
+    bare = re.compile(r"^\s*(?:all\s+)?(?:system|systems|everything|diagnostics?)\s+"
+                      r"(?:is|are|was|were|rebooted|restarted|online|operational|"
+                      r"nominal|stable|ready|green|normal|functioning)\b", re.I)
+    return [n for n in notes
+            if not status.match(n) and not logged.match(n) and not bare.match(n)]
 
 
 def _drop_restated(notes: list[str], entries: list[str]) -> list[str]:

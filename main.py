@@ -1380,6 +1380,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             # a finished answer is the assistant making conversation, which is not
             # the job. See prompt_builder for why this is code and not just a rule.
             reply = prompt_builder.strip_initiative_question(reply)
+            reply = prompt_builder.strip_closing_offer(reply)
         swipes = (_pending_swipes + [reply]) if _pending_swipes else [reply]
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
                           swipe_index=len(swipes) - 1)

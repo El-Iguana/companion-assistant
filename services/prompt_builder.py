@@ -88,6 +88,33 @@ _COURTESY_Q = re.compile(
     r")\b[^.!?]*\?\s*$", re.I)
 
 
+# The declarative half of the same habit: "I shall remain at your command should
+# you require anything further." Not a question, so the strip below never sees it.
+# Narrower list than the questions on purpose — a declarative sentence carries
+# real content far more often than "anything else?" does, so only these fixed
+# courtesy formulas go, and only as the final sentence.
+_CLOSER = re.compile(
+    r"(?:(?<=[.!?])\s+|^)[^.!?]*?\b("
+    r"at your (?:command|disposal|service)|should you (?:require|need)|"
+    r"do not hesitate|don't hesitate|stand(?:ing)? by (?:for|to|until)|"
+    r"here (?:if|whenever|should) you need|remain (?:at|available|on hand)|"
+    r"call (?:out |upon me |on me )?(?:if|should|whenever)"
+    # Terminator optional: a reply cut off at max_tokens ends mid-sentence, and the
+    # one closer that survived 25 measured replies was exactly that — "There is
+    # further information available should you require it" with no full stop.
+    r")\b[^.!?]*[.!?]?\s*$", re.I)
+
+
+def strip_closing_offer(text: str) -> str:
+    """Drop a trailing courtesy sign-off. Same guard as the question strip: if it
+    is the whole reply, keep it — an assistant whose entire answer was a sign-off
+    has nothing left to say, and an empty turn is worse than a florid one."""
+    if not text:
+        return text
+    trimmed = _CLOSER.sub("", text).strip()
+    return trimmed if trimmed else text
+
+
 def strip_initiative_question(text: str) -> str:
     """Drop a trailing courtesy question from an assistant reply.
 

@@ -55,3 +55,37 @@ an eval that does not run the real path measures the wrong thing.
   command should you require anything further"), not a question, so the strip does
   not touch it. Stripping declaratives is riskier and wants its own measurement.
 - Five prompts is enough to catch these. It is not enough to tune against.
+
+
+---
+
+# Run 2 — 2026-09-03, n raised to 30
+
+```
+                          baseline    run 2
+clean                    13/15 87%   27/30 90%
+padding-closer            1/15 6.7%   2/30 6.7%
+initiative-question       1/15 6.7%   1/30 3.3%
+everything else              0           0
+```
+
+`strip_closing_offer()` was added for the declarative half of the habit, then
+corrected: the one closer that survived 25 measured replies was **truncated** —
+"There is further information available should you require it", cut off at
+`max_tokens` with no full stop — and the pattern required a sentence-final
+`.?!`. The terminator is now optional.
+
+**The strip is kept, and it is unproven.** It is deterministic and unit-tested
+against the exact string that survived, and it can only ever delete a fixed
+courtesy formula. But the aggregate rate did not move: 6.7% before, 6.7% after.
+
+That is a limitation of the probe, not evidence that the strip does nothing. At a
+~7% event rate, thirty replies cannot resolve a change to 3% — the confidence
+interval swamps the difference. Anything claimed about `padding-closer` from this
+sample, in either direction, is over-reading it.
+
+## Next
+
+- Raise n substantially, or add prompts that provoke closers specifically, before
+  making any further claim about that row.
+- `initiative-question` at 1/30 and everything else at 0/30 are in good shape.
