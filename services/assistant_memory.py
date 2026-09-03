@@ -89,7 +89,10 @@ NOTES_PROMPT = (
     "two copies of an instruction can drift apart.\n"
     "- DROP anything finished, answered, or no longer true. A shorter list is a "
     "better list, and an empty list is correct when nothing is outstanding.\n"
-    "- Never record what {char} said or offered.\n"
+    "- Never record what {char} said, offered, knows, or its own status. "
+    "\"{char} is operational\" and \"{char} knows X\" are not open threads.\n"
+    "- Never record a time, a date, or a clock reading. This list is injected into "
+    "every future conversation, where a timestamp from tonight is simply wrong.\n"
     "- At most {max_notes} lines.\n\n"
     "Current list:\n{notes}\n\nNew activity:\n{transcript}\n\nUpdated list:"
 )
