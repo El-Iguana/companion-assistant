@@ -130,6 +130,30 @@ def _content(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z']{2,}", text.lower()) if w not in _STOP}
 
 
+def _drop_status_notes(notes: list[str], char: str, user: str) -> list[str]:
+    """Drop notes that report the assistant's own state, or log what was said.
+
+    Notes are OPEN THREADS. "Jarvis is fully awake and operational" is not one; it
+    is a status line that will still be sitting in the prompt next week. Neither is
+    "El Iguana has issued the command to proceed", which is a transcript entry
+    wearing a note's clothes — the exact shape the companion summary produced.
+
+    The prompt forbids both and does not comply, which is now the expected result;
+    this is the deterministic half. Matching is anchored to the SUBJECT: a note
+    that opens with the assistant's name plus a state verb, or the user's name plus
+    a speech verb. That leaves real threads about the assistant alone — "Jarvis
+    needs the API key" and "Jarvis has not finished the migration" both survive,
+    because `needs` and `has not finished` are not states of being.
+    """
+    c, u = re.escape(char), re.escape(user)
+    status = re.compile(rf"^\s*(?:{c}|it|he|she)\s+(?:is|was|are|were|remains|stands|"
+                        rf"feels|has been|had been|will be)\b", re.I)
+    logged = re.compile(rf"^\s*{u}\s+(?:said|asked|confirmed|issued|gave|told|"
+                        rf"requested|stated|mentioned|greeted|has (?:issued|said|asked|"
+                        rf"confirmed|given|told|requested))\b", re.I)
+    return [n for n in notes if not status.match(n) and not logged.match(n)]
+
+
 def _drop_restated(notes: list[str], entries: list[str]) -> list[str]:
     """Remove notes that restate a directive or a fact.
 
@@ -211,7 +235,7 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
         mem.updated_at = datetime.now().isoformat()
         return True
 
-    done, left = start, max_new
+    done, left, lo = start, max_new, start
     for end, transcript in chunks:
         prompt = NOTES_PROMPT.format(char=char, user=user, max_notes=MAX_NOTES,
                                      notes="\n".join(f"- {n}" for n in mem.notes) or "(empty)",
@@ -228,12 +252,29 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
         notes = [n for n in notes if n and not n.upper().startswith("NONE")]
         # Extraction runs after this, so the check is against what is already
         # stored; a directive learned in this same pass is caught on the next fold.
+        notes = _drop_status_notes(notes, char, user)
         mem.notes = _drop_restated(
             notes, [d.text for d in mem.directives] + [f.text for f in mem.facts])[:MAX_NOTES]
         done = end
 
         if extract_items and left > 0:
-            new_d, new_f = await extract(kobold, mem, transcript, char, user, max_new=left)
+            # USER turns only, and this is the fix for the worst failure the eval
+            # found: on a transcript of pure small talk ("morning" / "just checking
+            # you're awake" / "ok carry on") the extractor stored "Address El Iguana
+            # as Sir" as a standing instruction in ALL THREE runs. Nobody said it —
+            # the assistant says "Sir" in its own replies, and its own politeness got
+            # mined into an instruction to itself. An invented directive is then
+            # injected into every later prompt.
+            #
+            # The prompt already forbids recording what the assistant said and did
+            # not comply, which by now is the expected outcome. Removing the material
+            # is deterministic: it cannot mine what it cannot see. Same shape as the
+            # companion pipeline indexing user turns only, for the same reason —
+            # the assistant's replies restate the user wrapped in personality.
+            said = _transcript([m for m in session.messages[lo:end] if m.role == "user"],
+                               char, user)
+            new_d, new_f = ((await extract(kobold, mem, said, char, user, max_new=left))
+                            if said.strip() else ([], []))
             for t in new_d:
                 mem.directives.append(MemoryFact(text=t, origin="auto"))
             for t in new_f:
@@ -248,6 +289,7 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
                 while len(bucket) > cap:
                     idx = next((i for i, f in enumerate(bucket) if f.origin == "auto"), 0)
                     bucket.pop(idx)
+        lo = end
 
     if done <= start:
         return False

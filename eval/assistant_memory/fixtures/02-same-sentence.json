@@ -1,21 +1,59 @@
 {
   "name": "same-sentence-carve-out",
-  "why": "One sentence carrying a durable half and a scheduled half. Measured failure: the whole sentence was discarded and 'Tom and Bill are my friends' was lost with the visit. The companion pipeline hit this too and carries an explicit carve-out.",
+  "why": "One sentence carrying a durable half and a scheduled half. Measured failure: the whole sentence was discarded and 'Tom and Bill are my friends' was lost with the visit. The companion pipeline hit this too and carries an explicit carve-out. Correction 2026-09-02: the visit was forbidden everywhere, which mislabelled a legitimate note as a violation \u2014 a dated commitment is an open thread. It is forbidden as a FACT only, which is the failure that actually costs something.",
   "messages": [
-    ["user", "My two friends Tom and Bill are coming to look at the ship next month."],
-    ["char", "Very good, Sir."],
-    ["user", "Bill is the one who welds; Tom just watches and drinks the coffee."],
-    ["char", "Noted."]
+    [
+      "user",
+      "My two friends Tom and Bill are coming to look at the ship next month."
+    ],
+    [
+      "char",
+      "Very good, Sir."
+    ],
+    [
+      "user",
+      "Bill is the one who welds; Tom just watches and drinks the coffee."
+    ],
+    [
+      "char",
+      "Noted."
+    ]
   ],
   "expect": {
     "facts": [
-      {"label": "Tom and Bill are friends", "all": [["tom"], ["bill"], ["friend"]]},
-      {"label": "Bill welds", "all": [["bill"], ["weld"]]}
+      {
+        "label": "Tom and Bill are friends",
+        "all": [
+          [
+            "tom"
+          ],
+          [
+            "bill"
+          ],
+          [
+            "friend"
+          ]
+        ]
+      },
+      {
+        "label": "Bill welds",
+        "all": [
+          [
+            "bill"
+          ],
+          [
+            "weld"
+          ]
+        ]
+      }
     ]
   },
   "forbid": {
-    "any": [
-      {"label": "the scheduled visit itself", "pattern": "next month|visiting next|coming to look"}
+    "facts": [
+      {
+        "label": "the scheduled visit as a durable fact",
+        "pattern": "next month|visiting next|coming to look"
+      }
     ]
   }
 }
