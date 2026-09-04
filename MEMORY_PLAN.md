@@ -177,6 +177,13 @@ copy when one of them next needs changing.
     (kept, 3/3, and unit-tested so its correctness doesn't rest on the eval) and **reverted** a worked
     example that measured 0/6 against 1/9 for the described rule — recorded in the module so it is
     not retried on the same reasoning.
+  - **Splitting the pipeline did not clean up the data it left behind.** A card switched to
+    assistant mode keeps its sessions' roleplay summaries, and `summarize()` — their only writer —
+    no longer runs, so the prose froze and kept being injected under a friendlier header. Two
+    changes, deliberately at both ends: the read path skips it (immediate, and immune to however a
+    summary got there) and the fold clears it (so it cannot return), gated on the fold having
+    covered what the summary covered. The general lesson is the one this phase keeps teaching:
+    changing which code runs does not change what is already on disk.
   - **One fixture was corrected, which is worth saying out loud.** `same-sentence` forbade a dated
     visit in *any* bucket, but a dated commitment is exactly what `notes` are for; it is now forbidden
     as a durable *fact* only. Moving a label to make a failure disappear is how an eval stops being

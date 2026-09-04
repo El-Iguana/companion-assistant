@@ -310,6 +310,19 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
         return False
     mem.swept_sessions[session.id] = done
     mem.updated_at = datetime.now().isoformat()
+
+    # A session migrated from roleplay arrives carrying `session.memory.summary` —
+    # narrative prose that `memory.summarize()` wrote and, since the pipelines
+    # split, will never rewrite: it is frozen at whatever the roleplay summarizer
+    # last produced, timestamps and all. `build_messages` no longer injects it for
+    # an assistant, and this drops the stored copy so it cannot come back.
+    #
+    # Cleared HERE, and only once the fold has passed the point the summary covered,
+    # so nothing is discarded that was not recorded first: those same turns have
+    # just been read into directives, facts and notes. `session.messages` is
+    # untouched either way — this deletes a recap, not history.
+    if session.memory.summary and done >= session.memory.last_summarized_index:
+        session.memory.summary = ""
     return True
 
 

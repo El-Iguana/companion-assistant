@@ -1451,8 +1451,10 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             if assistant:
                 # The window still has to advance or the prompt grows without
                 # bound, but nothing narrative comes out of it: the fold writes
-                # directives, facts and task notes, and session.memory.summary is
-                # left empty on purpose so there is no prose to inject.
+                # directives, facts and task notes, and leaves session.memory.summary
+                # empty — clearing a roleplay-era one if the card was switched, since
+                # nothing rewrites that field for an assistant and a stale narrative
+                # would sit in every prompt forever.
                 keep = min(st.keep_recent, st.summarize_after - 1)
                 fold_end = len(session.messages) - keep
                 if (memory.needs_summary(session, st.summarize_after)

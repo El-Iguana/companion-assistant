@@ -319,11 +319,19 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         sys_parts.append("Important facts:\n" + "\n".join(f"- {sub(p)}" for p in mem.pinned))
     if longterm_note:
         sys_parts.append(longterm_note)
-    if mem.summary:
-        # "Story so far" is scene framing, and an assistant has no story. The block
-        # itself is written by memory.summarize(), which picks its prompt the same way.
-        sys_parts.append(("Notes from earlier in this conversation:\n" if assistant
-                          else "Story so far:\n") + sub(mem.summary))
+    if mem.summary and not assistant:
+        # Roleplay only. "Story so far" is scene framing, and an assistant has no
+        # story — but the stronger reason is that `memory.summarize()` is the sole
+        # writer of this field and, since the pipelines split, never runs for an
+        # assistant. So a non-empty summary on an assistant session is roleplay-era
+        # residue from before its card was switched: third-person narration, frozen,
+        # because nothing will ever rewrite it. Injecting it under a friendlier
+        # header still put a worked example of narrating above an assistant's
+        # history, which is the exact leak the split exists to stop. Measured on a
+        # live 51-turn session: 1851 chars of it, opening with a hardcoded date.
+        # `assistant_memory.fold()` clears the stored copy once that material is
+        # safely in directives/facts/notes; this skips it in the meantime.
+        sys_parts.append("Story so far:\n" + sub(mem.summary))
 
     messages: List[Dict] = [{"role": "system", "content": "\n\n".join(p for p in sys_parts if p.strip())}]
 

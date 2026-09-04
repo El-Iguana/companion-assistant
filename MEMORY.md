@@ -19,7 +19,7 @@ the other. A companion remembers a *history*; an assistant must remember *how to
 | Module | `services/memory.py` | `services/assistant_memory.py` |
 | Store | `CharacterMemory` — facts + a cumulative narrative summary | `AssistantMemory` — directives + facts + task notes |
 | File | `data/u/<uid>/memories/{cid}__{pid}.json` | `data/u/<uid>/assistant/{cid}__{pid}.json` |
-| Per-session summary | rolling `Story so far` | none — `session.memory.summary` is left empty on purpose |
+| Per-session summary | rolling `Story so far` | none — `session.memory.summary` stays empty, and a roleplay-era one is skipped on read and cleared on the next fold |
 | Semantic recall | yes (`.vec.npz` sibling) | no |
 | Route | `GET/PUT /api/memories` | `GET/PUT /api/assistant-memory` |
 
@@ -181,8 +181,19 @@ in the transcript to explain it.
 domain-independent and already paid for — but writes directives, facts and notes, never a narrative.
 The same two triggers fire it: the chat flow at the `summarize_after` threshold (advancing
 `session.memory.last_summarized_index` so the prompt cannot grow without bound, while
-`session.memory.summary` stays **empty on purpose** — there must be no prose to inject) and the idle
-sweep. `max_new` (`auto_facts_max_new`) is spent across **both** categories together.
+`session.memory.summary` stays **empty** — there must be no prose to inject) and the idle sweep.
+`max_new` (`auto_facts_max_new`) is spent across **both** categories together.
+
+**A session migrated from roleplay arrives carrying a summary, and it is dealt with in two places.**
+`memory.summarize()` is the only writer of that field and never runs for an assistant, so the text is
+*frozen* at whatever the roleplay summarizer last produced — third-person narration that nothing will
+ever rewrite, injected into every turn. Found on a live 51-turn session: 1851 characters of it,
+opening with a hardcoded date and time, which is exactly what `NOTES_PROMPT` forbids `notes` from
+containing. So `build_messages` **skips `mem.summary` entirely for an assistant** (it no longer has a
+gentler header — there is no case where injecting it is right), and `fold()` **clears the stored
+copy**, but only once the fold has passed the point the summary covered, so nothing is discarded that
+was not just read into directives, facts and notes. `session.messages` is untouched either way: this
+deletes a recap, not history.
 
 Unlike the companion summary, an **empty result is valid** and does not stop the fold; only a hard
 failure does.
