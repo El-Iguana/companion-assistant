@@ -1,6 +1,7 @@
 # Memory system — plan and decision log
 
-Ideas and decisions for what the companion remembers. Revised after reviewing Lumina's memory design
+Ideas and decisions for what the app remembers — the companion in phases 1-5, and the assistant
+it grew a second pipeline for in phase 6. Revised after reviewing Lumina's memory design
 (a third-party agentic assistant with a "MemPalace" layered store) as a possible alternative:
 **keep this plan**, take two ideas from it, reject its centrepiece. See "Evaluated and rejected" at
 the bottom so that doesn't get re-litigated later.
@@ -9,10 +10,12 @@ the bottom so that doesn't get re-litigated later.
 extraction, the budgets and every constant live in `MEMORY.md`, which is the file to edit when
 behavior changes. This one records the *reasons* — what was open, what was decided, and what shipped.
 
-Code: `services/memory.py`, `services/embeddings.py`, `models/schema.py` (`MemoryState`,
-`CharacterMemory`), `prompt_builder.build_messages`, and the chat flow in `main.py`.
+Code: `services/memory.py`, `services/assistant_memory.py`, `services/embeddings.py`,
+`models/schema.py` (`MemoryState`, `CharacterMemory`, `AssistantMemory`),
+`prompt_builder.build_messages`, and the chat flow in `main.py`.
 
-Phases 1–5 have all shipped.
+Phases 1–6 have all shipped. Phases 1–5 built the companion's memory; Phase 6 split a second
+pipeline out of it for assistant-mode cards.
 
 ## Settled design decisions
 
@@ -60,6 +63,35 @@ Recorded here because each was an open question and each now has a reason, not j
   summarization degrade to "no block" and leave the chat turn untouched. Nothing in the memory path
   may raise into the hot path.
 
+Added with Phase 6, for the assistant pipeline:
+
+- **A separate module, not a branch.** The two pipelines *were* one, with `if chat_mode ==
+  "assistant"` added as each leak was found: the relationship descriptor, then the narration example,
+  then the "summarize the roleplay so far" prompt whose narrative prose was injected into every
+  assistant turn as a worked example of narrating. Each fix was correct and each left another branch
+  for the next feature to forget. A module with no roleplay framing in it has nothing to leak. The
+  cost is deliberate duplication of the fold bookkeeping; that is the cheaper half.
+- **An assistant has no story, so it gets no summary.** `notes` replace the rolling narrative
+  entirely and are rewritten whole on each fold, so a finished item leaves. The companion summary may
+  accrete because prose does; task state should shrink as work completes, and an empty list is the
+  goal state, not a failed pass.
+- **Instructions and facts are stored apart.** Asked for "durable facts" as one bucket, the model
+  filed a form-of-address preference as a fact — true, and stored where nothing tells the assistant
+  to *do* it. An instruction that is merely known is an instruction that gets ignored. An unprefixed
+  extraction line is dropped rather than guessed at, since guessing reintroduces exactly this.
+- **Directives are never dropped to fit a budget.** Facts and notes yield; instructions do not.
+  Silently dropping one changes behaviour with no error and nothing in the transcript to explain it.
+- **Assistant dedupe is string-level, not embeddings.** Directives are short, literal and few, and an
+  assistant behaving correctly must not depend on an optional model being loaded. The companion
+  pipeline compares embeddings because its facts are prose and get reworded.
+- **Prompt rules that don't hold get enforced in code — now the default expectation.** Extraction
+  reads user turns only; status notes and restated notes are filtered deterministically. That is five
+  occasions in this codebase where a rule was present in a prompt, ignored, and had to be moved into
+  code. Write the rule, measure it, and budget for enforcing it.
+- **Tuning is measured, not eyeballed.** `eval/assistant_memory` exists because reading single runs
+  gave the opposite verdict to three runs, in both directions. A rate that moves is evidence; a run
+  that looks better is not.
+
 ## The fold prompt is tuned against observed failures
 
 Every rule in `LONGTERM_PROMPT` is there because the 9B fine-tune broke that way in testing: "a few
@@ -73,6 +105,11 @@ emphatic rule about dates and seasons separated them.
 
 **Retune the prompts rather than lowering the budgets** — truncating mid-sentence is worse than
 generating short.
+
+Everything above was tuned by reading runs, which is how it was done before there was a harness. It
+is also how two assistant-side fixes came to be recorded backwards (Phase 6). The companion prompts
+have no fixture set yet, and the same risk applies to them: `eval/assistant_memory` is the pattern to
+copy when one of them next needs changing.
 
 ## Phases
 
@@ -115,13 +152,56 @@ generating short.
   every fold. Reluctant by construction, deduped in code, evicted auto-first, tunable and switchable
   off in ⚙ Settings, and reviewable in the Memory modal — all as decided above.
 
+- **Phase 6 — The assistant pipeline. ✅ DONE.** *(Not planned as a phase; forced by a bug class.)*
+  `AssistantMemory` + `services/assistant_memory.py`, chosen by `card.chat_mode` in `chat()` and in
+  the sweep endpoint. Directives, facts and task notes; no summary, no relationship, no scene, no
+  recall. Mechanics in `MEMORY.md`.
+  - **It started as branches and stopped being them.** Three leaks were fixed one at a time inside
+    the shared path before it was clear the shared path *was* the bug. Splitting the module was the
+    fourth fix and the only one that removes the class.
+  - **`d4a51f3` shipped it, `70b9827` migrated Mira onto it.** The old companion store for a
+    reclassified card is left on disk, intact and inert — reversible, and no migration to get wrong.
+  - **The fold bookkeeping is reused, the output is not.** `_fold_chunks` and the high-water mark are
+    domain-independent and already paid for; what comes out of a pass is directives, facts and notes,
+    never a narrative. `session.memory.summary` is left empty on purpose so there is no prose to
+    inject even by accident, while `last_summarized_index` still advances so the prompt stays bounded.
+  - **The eval came before the last two fixes, and immediately contradicted me** (`9baf953`). Five
+    labelled fixtures × 3 runs: `clean 7/15 · misfiled 0/15 · forbidden 7/15 · missed 4/15`. It found
+    that the extractor **invents standing instructions out of nothing** — on pure small talk it stored
+    "Address El Iguana as Sir" in all three runs, mined from the assistant's own politeness — and that
+    of my two eyeball fixes the one I declared fixed scored 0/3 while the one I recorded as unfixed
+    scored 3/3.
+  - **Both repairs were deterministic, and both were rules the prompt already contained**
+    (`2772fbc`): extraction reads user turns only, and status notes are dropped in code. Result
+    `clean 12/15 · forbidden 1/15`. A third pass (`127690d`) added the subjectless status filter
+    (kept, 3/3, and unit-tested so its correctness doesn't rest on the eval) and **reverted** a worked
+    example that measured 0/6 against 1/9 for the described rule — recorded in the module so it is
+    not retried on the same reasoning.
+  - **One fixture was corrected, which is worth saying out loud.** `same-sentence` forbade a dated
+    visit in *any* bucket, but a dated commitment is exactly what `notes` are for; it is now forbidden
+    as a durable *fact* only. Moving a label to make a failure disappear is how an eval stops being
+    worth running, so the test was that the fact-side expectation was untouched and the fixture still
+    fails. It does.
+
 ## Open decisions
 
 - Whether long-term `facts` should ever expire/decay, or stay until the user removes them.
   (Lumina has no decay and its store grows unbounded — a caution, not a model to copy.)
 - **Total prompt budget** — the long-term block is capped, but the prompt as a whole is not, and on
   overflow KoboldCPP truncates from the front, silently deleting the memory blocks. Measured and
-  written up in `PROMPT_BUDGET.md`; the fix is proposed, not built.
+  written up in `PROMPT_BUDGET.md`; the fix is proposed, not built. Directives make this sharper: the
+  injector never truncates them, but nothing stops the *context* from doing it.
+- **How to catch a stale assistant fact.** Work in progress still lands in `facts` ("we still need to
+  finish the middleware"), where it outlives its truth. Two prompt revisions improved the split and a
+  third without a new idea would be guessing; the alternatives are a durability re-check on fold, an
+  age-out for `auto` entries, or accepting the modal as the correction surface. Related to the decay
+  question above, and probably the same answer.
+- **Whether the companion prompts get fixtures too.** `eval/assistant_memory` demonstrated that
+  reading runs gives wrong answers; `LONGTERM_PROMPT`, `AUTO_FACT_PROMPT` and the recall gate
+  (calibrated on 8 documents and 13 queries) were all tuned that way.
+- **Runs per verdict.** Five fixtures × 3 runs separates a broken pipeline from a working one but not
+  a prompt change from noise — `same-sentence` alone has scored 0/3, 0/3, 1/3, 0/6 and 2/3 on
+  essentially the same code. More fixtures, and more runs for the unstable ones.
 
 ### Closed since (recorded here so they don't re-open)
 
@@ -143,7 +223,13 @@ generating short.
 - `memory.summarize()` is the place to also update long-term memory / embeddings / extract facts.
 - `_load_relationship`/`_save_relationship` + `GET/PUT /api/relationship` are the template for the
   per-pairing load/save/route trio.
-- `Ctx` + `SUBDIRS` is how a new per-user data folder gets created and isolated.
+- `Ctx` + `SUBDIRS` is how a new per-user data folder gets created and isolated (`memories`,
+  then `assistant`, both added this way — an existing user gets the dir on their next request).
+- `services/assistant_memory.py` reuses `_fold_chunks`/`_transcript` from `memory.py` and nothing
+  else. Keep it that way: the import direction is one-way on purpose, and anything pulled the other
+  way is a path a roleplay concept can travel down.
+- `eval/assistant_memory/{fixtures,run.py,RESULTS.md}` is the template for measuring any prompt in
+  this subsystem. `eval/` is deliberately not baked into the image — `podman cp eval companion:/app/eval`.
 - Keep it **local-first** (no cloud), consistent with the rest of the stack.
 
 ## Evaluated and rejected
