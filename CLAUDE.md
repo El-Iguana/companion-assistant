@@ -279,7 +279,9 @@ power/social) · ✅ ComfyUI expression sprites (img2img same-character, transpa
 fallback · ✅ delete chats/characters · ✅ **relationship system** (multi-axis, per char+persona, behavior
 injection, rel-strip) · ✅ **intimacy/consent** (split willingness, 7-rung ladder, power/social context,
 agency-preserving) · ✅ **milestones** (toast + injected beat) · ✅ **stage-gated lorebook** · ✅
-per-relationship **context override** (⚙).
+per-relationship **context override** (⚙) · ✅ **persona editor modal** · ✅ **semantic recall**
+(int8 BGE, CPU) · ✅ local **TTS + STT** (Kokoro/Piper, faster-whisper) · ✅ **assistant memory**
+(directives/facts/notes, separate pipeline).
 
 ## Conventions & gotchas
 
@@ -450,6 +452,5 @@ per-relationship **context override** (⚙).
   standing up Navidrome (Subsonic API) there. Hard part is audio coexistence: music breaks the
   half-duplex mic gate in both directions.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
-- Group chats · persona editor modal · embedding memory · TTS · faster inference backend.
+- ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
 - Tuning knobs: `relationship.RATE/WRATE/ESC_RATE/_TIER_THRESHOLDS`, `expressions` img2img denoise, `GenerationConfig`.
-```
