@@ -49,7 +49,8 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note + date/time
-  memory.py             # per-session summary + cross-session long-term memory + recall + auto-facts
+  memory.py             # COMPANION memory: session summary + cross-session store + recall + auto-facts
+  assistant_memory.py   # ASSISTANT memory: directives + facts + task notes. Separate module, not a branch
   embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
@@ -58,7 +59,7 @@ services/
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
-data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/  # per-user isolated library
+data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
@@ -66,10 +67,13 @@ models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
 models/embed/           # baked: bge-small-en-v1.5 int8 ONNX + tokenizer — semantic recall
 RELATIONSHIP.md         # relationship system reference — axes, ladder, boundary injection
 RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 done)
-MEMORY.md               # memory system reference — the four scopes, recall gate, auto-facts
-MEMORY_PLAN.md          # memory design + decision log (phases 1-5 done)
+MEMORY.md               # memory reference — BOTH pipelines, the layers, recall gate, auto-facts, the eval
+MEMORY_PLAN.md          # memory design + decision log (phases 1-6 done) + open questions
 PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (NOT built)
 SKILLS_PLAN.md          # assistant skills via tool calling: System Info + DJ/NAS music (Phase 0 done)
+eval/                   # NOT baked into the image — `podman cp eval companion:/app/eval` to run
+  assistant_memory/     # 5 labelled fixtures + runner + RESULTS.md (see MEMORY.md § The eval)
+  assistant_replies/    # probe set for assistant reply style (narration, closing offers)
 ```
 
 ## Auth / multi-user (privacy)
@@ -136,16 +140,14 @@ Login-gated, role-based, per-user isolated libraries.
 - **AssistantMemory** — the assistant-mode store, `data/u/<uid>/assistant/{cid}__{pid}.json`.
   `directives[]` (standing instructions, OBEYED), `facts[]` (things known), `notes[]` (terse task
   state, rewritten whole each fold), `swept_sessions`. **No summary, no relationship, no scene.**
-  Served by `services/assistant_memory.py`, which is a separate module and not a branch in
-  `memory.py` — every leak found so far was roleplay framing reaching an assistant through a shared
-  path that forgot to branch, and a branch is a place the next feature forgets. Injection puts
-  directives FIRST and never truncates them: they are instructions, so dropping one to fit a budget
-  changes behaviour silently. Notes that restate a directive are dropped in CODE (the prompt is told
-  not to repeat them and does not comply — same finding as the companion dedupe).
+  Served by `services/assistant_memory.py`, a separate module and not a branch in `memory.py` — every
+  leak found so far was roleplay framing reaching an assistant through a shared path that forgot to
+  branch, and a branch is a place the next feature forgets. Injection puts directives FIRST and never
+  truncates them. **→ `MEMORY.md` for the mechanics, `MEMORY_PLAN.md` Phase 6 for why.**
 - **CharacterMemory** — persistent per (character, persona), like Relationship: `facts[]`
   (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
   `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
-  "What {{char}} remembers about {{user}}"; **not** used in scenario sessions.
+  "What {{char}} remembers about {{user}}"; **not** used in scenario sessions. **→ `MEMORY.md`.**
 - **ChatSession** — `messages`, `memory` (MemoryState), `mood` (MoodState), `generation`
   (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
   (scenario mode), `character_id`, `persona_id`.
@@ -242,13 +244,16 @@ POST /api/chat                             SSE stream; done carries {expression,
   beat injected next turn (`session.pending_milestone`), recorded so it never repeats. Lorebook entries can
   be **stage-gated** (`LorebookEntry.min_stage`, filtered by `stage_rank`); context is **overridable per
   relationship** (⚙ on rel-strip → `PUT /api/relationship`).
-- **Memory:** three scopes. Per-session pinned facts + a rolling summary (older turns fold in once
-  ~24 accumulate, tunable in ⚙ Settings). Across sessions, `CharacterMemory` per (character, persona):
-  written by two triggers — the chat flow folds forward whatever the session summary just absorbed, and
-  `POST /sessions/{id}/sweep` (frontend 5-min idle timer) folds a finished chat. Injected between the
-  pinned facts and "Story so far", budget-capped (history truncated to its share, facts dropped
-  oldest-first — an oversized entry costs only itself). Facts capped at 40. Both scopes are editable in
-  the 📌 Memory modal's two tabs; auto-written facts carry an `auto` badge and can be reverted.
+- **Memory: `MEMORY.md` is the reference and `MEMORY_PLAN.md` the decision log — edit those, not this
+  bullet, when memory behaviour changes.** In outline: **two pipelines**, picked once per turn by
+  `chat_mode`, sharing no code path. *Companion* — per-session pinned facts + a rolling summary (folds
+  once ~24 turns accumulate, tunable in ⚙ Settings), cross-session `CharacterMemory` per (character,
+  persona) written by two triggers (the chat flow folds forward what the summary just absorbed;
+  `POST /sessions/{id}/sweep` on a 5-min idle timer folds a finished chat), plus margin-gated semantic
+  recall over an int8 BGE index. *Assistant* — `AssistantMemory`: directives, facts, task notes; no
+  summary, no recall. Both are budget-capped and drop oldest rather than truncating, both evict
+  auto-written entries before curated ones, and both are editable in the 📌 Memory modal, which
+  renders the assistant's different shape rather than a relabelled one.
 - **Storage:** plain JSON under `data/`, UUID ids.
 
 ## Frontend map (static/js/app.js)
