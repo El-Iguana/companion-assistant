@@ -70,7 +70,7 @@ RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 
 MEMORY.md               # memory reference — BOTH pipelines, the layers, recall gate, auto-facts, the eval
 MEMORY_PLAN.md          # memory design + decision log (phases 1-6 done) + open questions
 PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (NOT built)
-SKILLS_PLAN.md          # assistant skills via tool calling: System Info + DJ/NAS music (Phase 0 done)
+SKILLS_PLAN.md          # assistant skills via tool calling: System Info + Media via Orpheus (Phase 0 done)
 eval/                   # NOT baked into the image — `podman cp eval companion:/app/eval` to run
   assistant_memory/     # 5 labelled fixtures + runner + RESULTS.md (see MEMORY.md § The eval)
   assistant_replies/    # probe set for assistant reply style (narration, closing offers)
@@ -447,10 +447,11 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   **Verified live:** KoboldCPP + this Qwen3.5 fine-tune support OpenAI `tools` **including over
   streaming SSE**, with correct arguments, no spurious calls, and no loss of character voice — so
   skills use real tool calling, not `[tag]` scraping. Then ◻ System Info (`get_system_status`:
-  uptime/disk/**GPU VRAM**/services) and ◻ **DJ** (NAS music). NAS identified: UGREEN NASync DH2300
-  @ `192.168.1.219` (UGOS Pro `:9999`, SMB 445) — **no music API is listening yet**; plan starts by
-  standing up Navidrome (Subsonic API) there. Hard part is audio coexistence: music breaks the
-  half-duplex mic gate in both directions.
+  uptime/disk/**GPU VRAM**/services) and ◻ **Media** — find and play music/video through **Orpheus**,
+  our own media server (on Homelab) + Flutter player, with Pantheon paired as a `controller` device.
+  Replaced the Navidrome/DJ plan on 2026-09-15; design in `../orpheus/docs/architecture.md`. NAS: UGREEN
+  NASync DH2300 @ `192.168.1.219` (SMB 445), mounted by the Orpheus server, not by Pantheon. Hard part
+  is still audio coexistence: music breaks the half-duplex mic gate in both directions.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
 - Tuning knobs: `relationship.RATE/WRATE/ESC_RATE/_TIER_THRESHOLDS`, `expressions` img2img denoise, `GenerationConfig`.

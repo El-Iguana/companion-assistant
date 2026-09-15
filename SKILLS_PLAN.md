@@ -1,10 +1,11 @@
 # Skills — plan
 
-Give **assistant-mode characters** real capabilities: read the host system, and run the music.
+Give **assistant-mode characters** real capabilities: read the host system, and run the media.
 A skill is a set of tool definitions plus the code behind them, attached to a character card.
 
-First two skills: **System Info** (host date/time + machine status) and **DJ** (NAS music library —
-catalog, metadata, playback by voice).
+First two skills: **System Info** (host date/time + machine status) and **Media** (the Orpheus media
+server — find music and video by voice and play them on any Orpheus player). *Media was the "DJ"
+skill, built on Navidrome, until 2026-09-15 — see Skill 2.*
 
 Status: **mostly not built.** The date/time half of System Info shipped early (2026-08-17) without
 needing any of the skill machinery — see below, it changed what the skill is for. Everything marked
@@ -40,7 +41,7 @@ malformed-argument handling that the API already handles.
   | Payload | Added tokens (every turn) |
   |---|---|
   | System Info (1 tool) | **+51** |
-  | DJ (5 tools) | **+218** |
+  | DJ (5 tools; the Media skill keeps the same count) | **+218** |
   | Both (6 tools) | **+256** |
 
   For scale, the relationship descriptor is ~149 tok and the boundary note ~84. So enabling both
@@ -170,7 +171,12 @@ For the host facts, in preference order:
 Option 2 is more capable and is where GPU/service status has to live; it's also a new daemon. **Start
 with option 1 plus the TZ fix**, and only add the endpoint when GPU/service status is actually wanted.
 
-## Skill 2 — DJ
+## Skill 2 — Media (Orpheus)
+
+> **Plan changed 2026-09-15.** This skill was "DJ", built on Navidrome. It now targets **Orpheus**, our
+> own self-hosted media server plus a Flutter player. System design: `../orpheus/docs/architecture.md`;
+> server Phase 1 spec: `../orpheus/docs/phase1-server-spec.md`. The network survey below is kept because it's still
+> true; the Navidrome plan after it is superseded.
 
 ### What's actually on the network ✅ VERIFIED, and it isn't what we assumed
 
@@ -186,41 +192,67 @@ So the chosen approach — *media server with an API, reached over HTTP, no host
 target but **does not exist yet**. UGOS Pro's own Music/Media apps are behind the authenticated web
 UI and expose no documented open API worth building against.
 
-### Phase 0 — stand up the API (prerequisite, on the NAS)
+### Why Orpheus instead of Navidrome
 
-Install **Navidrome** via UGOS Pro's Docker/app support, pointed at the existing music share.
-Rationale:
+The Navidrome plan was sound for *music over an API*. Three requirements outgrew it:
 
-- Speaks the **Subsonic API**, the widest-supported open music API — which means the DJ skill is not
-  locked to one server, and any Subsonic client (phone, car) works against the same library for free.
-- Gives **cataloging, metadata, search, artwork, and stream URLs** out of the box. Building our own
-  scanner over an SMB mount would mean re-implementing all of it (mutagen/ffprobe, an index, an
-  invalidation strategy) — and `MEMORY_PLAN.md` already records the lesson about building elaborate
-  storage before retrieval is defined.
-- Lightweight, runs happily on a 2-bay NAS, and reads the library **read-only**.
-- Matches the "over the network, no host mount" decision exactly: container → `http://192.168.1.219:4533`.
+- **Video as well as music**, from the same library and the same voice commands.
+- **Playback on real devices** — a Shield, a phone, this workstation — instead of the SPA's audio
+  graph. The old plan's deferred `RemoteSink` (DLNA/MPD/Snapcast) becomes Orpheus's device registry:
+  every paired Orpheus player is a target.
+- **A resolver built for Whisper output.** Subsonic search is substring matching. "sigur rose" and
+  "churches" need phonetic matching, aliases, and ranked candidates with a disambiguation flag. The
+  Orpheus spec defines that retrieval contract, and its acceptance test, before any storage — the
+  `MEMORY_PLAN.md` lesson applied.
 
-*(Jellyfin is the alternative if video matters later — it's heavier and its music API is less clean.
-Plex is rejected: cloud account dependency conflicts with the local-first rule.)*
+What it costs, recorded honestly: we build and run a server ourselves (on Homelab, which mounts the NAS
+over SMB; Pantheon itself still needs no mount). And the free Subsonic-client ecosystem (car and phone
+apps) is gone, unless Orpheus later grows a Subsonic-compatible endpoint.
 
 ### Design
 
-`services/skills/dj.py` + `services/music/` split into two seams so neither choice is baked in:
+`services/skills/orpheus.py` holds the tool definitions; `services/orpheus_client.py` holds the HTTP
+client.
 
-**Library provider** (`SubsonicProvider`, adapter interface) — `search`, `get_album`, `get_artist`,
-`stream_url`, `cover_art`. Swapping to Jellyfin later means one new class.
+**Connect** (once per Pantheon user), from a settings button or the `media_connect` tool:
+1. **Find the server:** saved URL (checked against the saved `server_id`), then a subnet scan of
+   `GET /api/v1/server` across `ORPHEUS_SCAN_CIDR`. mDNS is skipped: its multicast doesn't reach this
+   container on the `ai-net` bridge. The container can't see the LAN's CIDR either, so `run-podman.sh`
+   derives it from the host, the same way it derives `TZ`.
+2. **Pair** as a `controller` device named after this host. The server returns a 6-digit code, the
+   assistant tells the user to approve it on the server, and Pantheon polls until it's approved.
+3. **Store** `server_id`, URL, and the device token in the per-user settings store. The token never
+   appears in a prompt or a tool result.
 
-**Playback sink** — per the decision to do browser now and remote later:
-- `BrowserSink` (now): the SPA plays the stream URL. Reuses nothing from the TTS path except the
-  audio context — deliberately a **separate gain node** (below).
-- `RemoteSink` (later): DLNA/UPnP, MPD, or Snapcast to play on other speakers.
+**Tools.** While unpaired, only `media_connect` is injected. After pairing it is swapped for the five
+control tools — the same count as the measured DJ set:
 
-Tools exposed (the 5 measured above at +218 tok): `music_search`, `music_play`, `music_control`
-(pause/resume/next/previous/stop), `music_volume`, `music_now_playing`.
+| Tool | Orpheus call |
+|---|---|
+| `media_connect` *(unpaired only)* | Discovery + `POST /api/v1/pair`; returns the code to read out |
+| `media_find {query, kinds?}` | `POST /api/v1/resolve` — ranked candidates + `needs_disambiguation`; when set, she asks |
+| `media_play {item_id, device?}` | `play` command to a player |
+| `media_control {action, device?, position_ms?}` | pause / resume / stop / next / previous / seek |
+| `media_volume {level, device?}` | `volume` command |
+| `media_status {device?}` | Registered players and what each is playing |
 
-Credentials (`NAVIDROME_URL`, user, token) go in the per-user settings store, not the image.
+`device` is a player *name*, validated against the server's registry. It defaults to the Orpheus player
+on this workstation if one is paired, otherwise a per-user default. When she mishears something and the
+user corrects her, the skill may teach the server an alias (`POST /api/v1/aliases`).
+
+**Speech biasing.** Periodically fetch `GET /api/v1/vocabulary` and pass it to faster-whisper as
+`initial_prompt`, so library names are recognized before they need resolving.
+
+**Playback happens on an Orpheus player, not in the SPA.** `BrowserSink` is dropped. To listen at this
+desk, run the Orpheus player (Flatpak) on this workstation — it's just another registered device.
 
 ### The hard problem: music audio vs. the voice loop
+
+> **Changed by the move to Orpheus.** Music now plays in the Orpheus player, outside Pantheon's audio
+> graph. Ducking under TTS gets *easier*: Pantheon sends the player `duck` when she starts speaking and
+> `unduck` after. The open-mic half gets *harder*: option 2's "raise the VAD threshold by the music's
+> own amplitude" relied on the music being a signal we generate in the browser, and it no longer is.
+> Headphones or push-to-talk remain the answer. The analysis below is otherwise unchanged.
 
 This is the real engineering risk, and it's new — the vtuber plan never had a second continuous audio
 source. Today's hands-free loop is **half-duplex**: `hfTick` skips the mic entirely while `ttsSource`
@@ -253,7 +285,7 @@ the DJ skill on solving AEC.
 
 ### Voice command mapping
 
-No new NLU layer: STT transcript → normal chat turn → the model emits a `music_*` tool call. "Play
+No new NLU layer: STT transcript → normal chat turn → the model emits a `media_*` tool call. "Play
 something upbeat", "skip this", "what is this song?" all route through the same tool-calling path
 already verified above. The wake word (`applyWakeWord`) is unchanged.
 
@@ -269,13 +301,15 @@ already verified above. The wake word (`applyWakeWord`) is unchanged.
 - **Phase 1 — System Info.** Now just `get_system_status` over read-only bind mounts. Still worth
   doing first: it's the smallest possible skill, so it shakes out the tool loop end-to-end before
   the DJ skill's network and audio complexity land on top.
-- **Phase 2 — DJ, read-only.** Navidrome on the NAS; `music_search` / `music_now_playing` only. She
-  can talk about the library before she can touch it — cataloging and metadata first, which is also
-  the low-risk half.
-- **Phase 3 — DJ playback (browser sink).** `music_play` / `music_control` / `music_volume`, separate
-  gain node, PTT-compatible. Hands-free documented as headphones-only.
-- **Phase 4 — Audio coexistence.** Ducking music under TTS + music-aware VAD gating (option 2).
-- **Phase 5 — Remote sink.** DLNA/MPD/Snapcast, per the "browser now, remote later" decision.
+- **Phase 2 — Media, read-only.** Needs Orpheus server Phase 1 (library, resolver, pairing).
+  `media_connect` / `media_find` / `media_status`. She can talk about the library before she can
+  touch it — the low-risk half.
+- **Phase 3 — Media playback.** Needs Orpheus Phase 4 (control protocol) and at least one Orpheus
+  player. `media_play` / `media_control` / `media_volume`, PTT-compatible. Hands-free documented as
+  headphones-only.
+- **Phase 4 — Audio coexistence.** `duck` / `unduck` around TTS, plus a VAD policy for when a nearby
+  player is playing (see the note in the hard-problem section).
+- ~~**Phase 5 — Remote sink.**~~ Folded into Phase 3: every paired Orpheus player is a target.
 
 ## Security
 
@@ -292,6 +326,10 @@ the same reasoning that killed the hardcoded admin password applies here, harder
 - **Prompt injection is in scope.** A malicious card's `description` or `post_history_instructions`
   can try to drive skills. Keep skills to read-mostly, low-consequence actions; anything destructive
   needs explicit UI confirmation, not a tool call.
+- **Pairing with Orpheus needs a human.** The server issues a token only after someone approves the
+  code on the server, so a prompt-injected card can start a pairing request but can't complete one.
+  Pantheon pairs as a `controller`: it can find, play, and teach aliases, but can't scan, prune,
+  override matches, or approve other devices.
 - **Host status endpoint (if built)** is read-only, unparameterized, and bound to `ai-net` — not
   published to the LAN.
 
@@ -299,12 +337,13 @@ the same reasoning that killed the hardcoded admin password applies here, harder
 
 - Where the skill registry lives — `services/skills/` with a decorator-based registry, vs. explicit
   wiring in `main.py`. (Registry is cleaner; explicit is more in keeping with the current codebase.)
-- Whether tool schemas are trimmed per turn (only inject `music_*` once music is plausibly relevant)
+- Whether tool schemas are trimmed per turn (only inject `media_*` once media is plausibly relevant)
   to claw back the +218 tok — cheap heuristically, but a mid-conversation schema change may confuse
   the model.
 - Whether a skill result should be able to write to memory (e.g. "she remembers you like this album")
   or stay strictly ephemeral. Leaning ephemeral for now; auto-facts already have a review surface.
-- UGOS Pro's Docker support specifics — needs confirming on the actual unit before Phase 2.
+- Whether `media_connect` should be a tool at all, or only a settings-UI button (as a tool it costs
+  schema tokens, but only while unpaired).
 - Whether `get_system_status` should be admin-gated.
 
 ## Integration points (reuse, don't rebuild)
@@ -313,8 +352,10 @@ the same reasoning that killed the hardcoded admin password applies here, harder
   re-append logic is the pattern to extend, not bypass.
 - `prompt_builder.build_messages` — tools ride alongside, not inside, the system block.
 - `PROMPT_BUDGET.md` — tool schemas are a new fixed cost on every turn; add them to the table.
-- `AppSettings` + `GET/PUT /api/settings` — NAS URL/credentials and per-skill toggles.
+- `AppSettings` + `GET/PUT /api/settings` — Orpheus server ID, URL, device token, default player, and
+  per-skill toggles.
 - `Ctx` — per-user isolation for skill config, same as every other data route.
 - The `piper:` TTS backend is the precedent for a **pluggable provider behind one interface**; the
   library provider and playback sink should follow it.
-- `run-podman.sh` / `compose.yaml` — the TZ fix, and any new mounts.
+- `run-podman.sh` / `compose.yaml` — the TZ fix, `ORPHEUS_SCAN_CIDR` (derived from the host like
+  `TZ`), and any new mounts.
