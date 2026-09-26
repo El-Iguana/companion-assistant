@@ -1,0 +1,47 @@
+# Pantheon on the host's network — Linux only (Docker Engine or Podman). Use
+# it INSTEAD of compose.yaml, on its own:
+#
+#   docker compose -f compose.host-network.yaml up -d
+#   podman compose -f compose.host-network.yaml up -d
+#
+# For backends that listen on this computer's 127.0.0.1 only — ComfyUI does
+# by default. With compose.yaml's bridge network, host.docker.internal reaches
+# only services listening beyond loopback (INSTALL.md, section 4a). Here
+# 127.0.0.1 inside the container *is* this computer.
+#
+# Pantheon then binds to PANTHEON_BIND (default 127.0.0.1) itself. Docker
+# Desktop (Windows, macOS) and Podman machines run containers in a VM, where
+# host networking means the VM's network: use compose.yaml there.
+
+name: pantheon
+
+services:
+  pantheon:
+    image: localhost/companion:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: pantheon
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      KOBOLD_URL: ${KOBOLD_URL:-http://127.0.0.1:5001}
+      COMFYUI_URL: ${COMFYUI_URL:-http://127.0.0.1:8188}
+      TZ: ${TZ:-UTC}
+      COMPANION_ADMIN_PASSWORD: ${PANTHEON_ADMIN_PASSWORD:-}
+    command: ["python3", "-m", "uvicorn", "main:app",
+              "--host", "${PANTHEON_BIND:-127.0.0.1}", "--port", "${PANTHEON_PORT:-7861}"]
+    volumes:
+      - pantheon-data:/app/data
+      - ${PIPER_VOICES_DIR:-./voices}:/app/models/piper:ro,z
+    healthcheck:
+      # PANTHEON_BIND should be 127.0.0.1 or 0.0.0.0 for this check to pass.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:${PANTHEON_PORT:-7861}/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  pantheon-data:
+    name: pantheon-data

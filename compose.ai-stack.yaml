@@ -1,0 +1,19 @@
+# Linux with ai-stack: join its "ai-net" network and reach its koboldcpp and
+# comfyui containers by name. `stack up` (or `stack on`) creates the network.
+#
+#   podman compose -f compose.yaml -f compose.ai-stack.yaml up -d
+#
+# `stack companion` does the same without compose (run-podman.sh), in a
+# container named "companion" — run one or the other, not both.
+
+services:
+  pantheon:
+    environment:
+      KOBOLD_URL: http://koboldcpp:5001
+      COMFYUI_URL: http://comfyui:8188
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    external: true

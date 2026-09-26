@@ -1,0 +1,13 @@
+# The NVIDIA GPU for the KoboldCPP container, under Podman (CDI). Needs the
+# NVIDIA Container Toolkit and a CDI spec: `nvidia-ctk cdi list` must show
+# nvidia.com/gpu=all. Use with compose.koboldcpp.yaml.
+#
+# label=disable: with SELinux enforcing (Fedora, Bazzite, RHEL) the GPU device
+# nodes are otherwise denied to the container.
+
+services:
+  koboldcpp:
+    devices:
+      - nvidia.com/gpu=all
+    security_opt:
+      - label=disable

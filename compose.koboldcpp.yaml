@@ -1,0 +1,45 @@
+# KoboldCPP in a container next to Pantheon (NVIDIA GPU, x86_64 Linux or
+# Windows). Stack it on compose.yaml together with the GPU file for your
+# engine — without one, KoboldCPP has no GPU:
+#
+#   docker compose -f compose.yaml -f compose.koboldcpp.yaml -f compose.gpu.docker.yaml up -d
+#   podman compose -f compose.yaml -f compose.koboldcpp.yaml -f compose.gpu.podman.yaml up -d
+#
+# or set COMPOSE_FILE in .env (see .env.example) and just `up -d`.
+# Put .gguf models in KOBOLD_MODELS_DIR (default ./llm-models) and name one
+# in KOBOLD_MODEL. On a Mac, run KoboldCPP natively instead (INSTALL.md):
+# containers there cannot use the GPU.
+
+services:
+  pantheon:
+    environment:
+      KOBOLD_URL: http://koboldcpp:5001
+    depends_on:
+      koboldcpp:
+        condition: service_started
+
+  koboldcpp:
+    image: localhost/pantheon-koboldcpp:latest
+    build:
+      context: backends/koboldcpp
+      dockerfile: Containerfile
+    container_name: pantheon-koboldcpp
+    restart: unless-stopped
+    environment:
+      KOBOLD_MODEL: ${KOBOLD_MODEL:-}
+      KOBOLD_GPU_LAYERS: ${KOBOLD_GPU_LAYERS:--1}
+      KOBOLD_CONTEXT: ${KOBOLD_CONTEXT:-8192}
+      KOBOLD_ARGS: ${KOBOLD_ARGS:-}
+    volumes:
+      - ${KOBOLD_MODELS_DIR:-./llm-models}:/models:ro,z
+    # Not published: Pantheon reaches it by name. To query it from this
+    # computer too, uncomment:
+    # ports:
+    #   - "127.0.0.1:5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5001/api/v1/model"]
+      interval: 30s
+      timeout: 5s
+      # Loading a model into VRAM can take minutes.
+      start_period: 300s
+      retries: 3

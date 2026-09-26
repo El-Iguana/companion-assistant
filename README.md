@@ -21,76 +21,43 @@ export losslessly.
   library of characters, personas, and presets
 - **Roleplay vs assistant** chat modes, custom system prompts, and a `/no_think` speed toggle
 
-## Requirements
+## Installing
 
-- **Podman**, and network access for the first build.
-- **KoboldCPP** reachable — required; without it there's no text generation.
-- **ComfyUI** reachable — optional; only expression sprites need it. Everything else works without.
+**[INSTALL.md](INSTALL.md)** covers Windows, macOS and Linux with Docker or Podman: the container
+engine, KoboldCPP (natively, in a container next to Pantheon, or through ai-stack), optional
+ComfyUI, first sign-in, backups, and troubleshooting. In short:
 
-Both backends come from the [`ai-stack`](https://github.com/JotunheimPress/ai-stack) launcher, which
-installs and runs them. This app itself needs no GPU: its own models (TTS, STT, embeddings,
-background removal) are CPU/ONNX, so the GPU stays free for KoboldCPP and ComfyUI.
-
-## Running
-
-With [`ai-stack`](https://github.com/JotunheimPress/ai-stack):
-
-```bash
-stack up            # start the backends (KoboldCPP + ComfyUI)
-stack companion     # build (first run) + start on http://localhost:7861
+```sh
+cp .env.example .env          # time zone, port, backend addresses
+docker compose up -d          # or: podman compose up -d  →  http://127.0.0.1:7861
+docker compose logs pantheon  # the first ADMIN password
 ```
 
-…or directly, from a clone of this repo:
+- **KoboldCPP** is required (chat); **ComfyUI** is optional (expression sprites only). By default
+  Pantheon looks for both on this computer. `compose.koboldcpp.yaml` runs KoboldCPP in a container
+  beside it (NVIDIA; with `compose.gpu.docker.yaml` or `compose.gpu.podman.yaml`).
+- Pantheon itself needs **no GPU**: its own models (TTS, STT, embeddings, background removal) are
+  CPU/ONNX, baked into the image. The first build downloads ~850 MB of them: Kokoro TTS (338 MB),
+  rembg (336 MB), faster-whisper `base.en` (141 MB) and BGE-small embeddings (34 MB).
+- Everything a user makes lives in the `pantheon-data` volume (compose) or the `data/` folder
+  (`run-podman.sh`). `manage.py` checks the backends and resets passwords.
+
+With [`ai-stack`](https://github.com/JotunheimPress/ai-stack) on the Linux workstation, `stack up`
+then `stack companion` still works as before. It runs `run-podman.sh`, which joins the `ai-net`
+network when it exists (backends by name), falls back to host networking, keeps data in `data/`,
+mounts Piper voices from `../jarvis`, and derives `TZ` from the host:
 
 ```bash
 ./run-podman.sh              # build + run on :7861
 ./run-podman.sh --rebuild    # rebuild after code/template/static changes
 ./run-podman.sh --port 8861  # publish on a different host port
+COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh   # choose the first ADMIN password
 ```
 
-`run-podman.sh` joins the `ai-net` Podman network when it exists and reaches the backends by name
-(`koboldcpp:5001`, `comfyui:8188`). If that network isn't there it falls back to host networking and
-points both at `localhost` instead — so a standalone install works, as long as the backends are
-listening on the usual ports. Somewhere else entirely? The app reads `KOBOLD_URL` and `COMFYUI_URL`
-from its environment, so set them with `-e` on a manual `podman run` (or in `compose.yaml`).
-
-> **The first build takes a while and downloads ~850 MB of models**, baked into the image so nothing
-> is fetched at runtime: Kokoro TTS (338 MB), rembg background removal (336 MB), faster-whisper
-> `base.en` (141 MB), and a BGE-small embedding model (34 MB). Later builds reuse the layers — only
-> `--rebuild` after a code change, which is fast.
-
-### First login
-
-The first run creates a single admin account, **ADMIN**, with a randomly generated password. It's
-printed once at startup and written to a file, since the container starts detached:
-
-```bash
-podman logs companion | head -20      # the startup banner
-cat data/auth/INITIAL_PASSWORD        # or read it here (owner-only)
-```
-
-Log in, **change the password** (userbar → your account), delete that file, then add users from the
-admin-only **Users** panel. To choose the password yourself instead, set it before the first run —
-it's read only when seeding, so it does nothing on an existing install:
-
-```bash
-COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh
-```
-
-Worth knowing: the container publishes port 7861 on **all interfaces**, not just localhost, so
-anyone on your network can reach the login page.
+`run-podman.sh` publishes 7861 on **all interfaces**; compose publishes on `127.0.0.1` unless
+`PANTHEON_BIND` says otherwise.
 
 The in-app **?** button documents custom system prompts and curation.
-
-### Optional: Piper voices
-
-Piper TTS voices are **mounted, not baked**: `run-podman.sh` looks for a `jarvis/` directory beside
-this repo and mounts any `<name>.onnx` + `<name>.onnx.json` pairs in it read-only. Missing directory
-is fine — it's skipped, and the 54 built-in Kokoro voices still work. Adding a voice needs only a
-container restart, no rebuild.
-
-`compose.yaml` (an alternative to `run-podman.sh` for `podman-compose` users) mounts that directory
-**unconditionally**, so comment the line out if you don't have one.
 
 ## Architecture
 
