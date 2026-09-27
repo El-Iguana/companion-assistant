@@ -1,0 +1,27 @@
+# KoboldCPP for Pantheon's "koboldcpp" compose profile — NVIDIA GPUs, x86_64.
+#
+# The official prebuilt Linux binary (CUDA bundled) on NVIDIA's CUDA runtime
+# image, as ai-stack builds it. Built by compose; see INSTALL.md, "KoboldCPP in
+# a container". Change the version to a tag from
+# https://github.com/LostRuins/koboldcpp/releases
+ARG KOBOLDCPP_VERSION=1.111.2
+
+FROM docker.io/nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ARG KOBOLDCPP_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL \
+      "https://github.com/LostRuins/koboldcpp/releases/download/v${KOBOLDCPP_VERSION}/koboldcpp-linux-x64" \
+      -o /usr/local/bin/koboldcpp \
+    && chmod +x /usr/local/bin/koboldcpp
+
+COPY start.sh /usr/local/bin/start-koboldcpp
+RUN chmod +x /usr/local/bin/start-koboldcpp
+
+VOLUME /models
+EXPOSE 5001
+
+ENTRYPOINT ["/usr/local/bin/start-koboldcpp"]

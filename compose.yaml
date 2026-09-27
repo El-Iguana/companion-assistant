@@ -1,39 +1,62 @@
-# Companion — Podman Compose
-# Assumes KoboldCPP is already running on the "ai-net" network.
+# Pantheon — Docker Compose or Podman Compose, on Linux, Windows or macOS.
+# See INSTALL.md. Settings come from .env (copy .env.example).
 #
-#   podman-compose up -d
-#   podman-compose logs -f
-#   podman-compose down
+#   docker compose up -d          (or: podman compose up -d)
+#   docker compose logs pantheon  # the first-run ADMIN password is here
+#
+# Pantheon needs a KoboldCPP to chat with (and optionally a ComfyUI for
+# sprites). By default it looks for both on this computer, through
+# host.docker.internal. Add-ons, stacked with -f or COMPOSE_FILE in .env:
+#   compose.koboldcpp.yaml      KoboldCPP in a container next to Pantheon
+#   compose.gpu.docker.yaml     …with the NVIDIA GPU, under Docker
+#   compose.gpu.podman.yaml     …with the NVIDIA GPU, under Podman
+#   compose.ai-stack.yaml       join ai-stack's "ai-net" (Linux, ai-stack users)
+# Instead of this file: compose.host-network.yaml (Linux, backends on
+# 127.0.0.1 only), on its own.
+#
+# On the ai-stack workstation `stack companion` (run-podman.sh) is still the
+# usual way in; this file does not replace it.
+
+name: pantheon
 
 services:
-  companion:
+  pantheon:
     image: localhost/companion:latest
     build:
       context: .
       dockerfile: Containerfile
-    container_name: companion
+    container_name: pantheon
     restart: unless-stopped
     ports:
-      - "7861:7861"
+      # 127.0.0.1 = this computer only. PANTHEON_BIND=0.0.0.0 in .env opens it
+      # to your network; read INSTALL.md, "Other devices", first.
+      - "${PANTHEON_BIND:-127.0.0.1}:${PANTHEON_PORT:-7861}:7861"
+    extra_hosts:
+      # Docker Desktop and Podman define this name already; Docker Engine on
+      # Linux needs it spelled out.
+      - "host.docker.internal:host-gateway"
     environment:
-      - KOBOLD_URL=http://koboldcpp:5001
-      - COMFYUI_URL=http://comfyui:8188
-      # Without this the image is Etc/UTC and every local time the app renders is wrong
-      # (see run-podman.sh, which derives it from the host). Compose can't shell out —
-      # export TZ, or edit the default.
-      - TZ=${TZ:-America/New_York}
+      KOBOLD_URL: ${KOBOLD_URL:-http://host.docker.internal:5001}
+      COMFYUI_URL: ${COMFYUI_URL:-http://host.docker.internal:8188}
+      # The image is UTC; timestamps and "what time is it?" follow this.
+      TZ: ${TZ:-UTC}
+      # Read once, when the first account is created. Empty = a random one,
+      # printed in the log and written to data/auth/INITIAL_PASSWORD.
+      COMPANION_ADMIN_PASSWORD: ${PANTHEON_ADMIN_PASSWORD:-}
     volumes:
-      - ./data:/app/data:z
-      - ../jarvis:/app/models/piper:ro,z   # Piper TTS voices (shared, read-only)
-    networks:
-      - ai-net
+      # Accounts, characters, chats, memories — everything. Back it up.
+      - pantheon-data:/app/data
+      # Piper voices (.onnx + .onnx.json), optional. Kokoro is built in.
+      - ${PIPER_VOICES_DIR:-./voices}:/app/models/piper:ro,z
     healthcheck:
-      test: ["CMD", "curl", "-fs", "http://localhost:7861/api/status"]
+      # "/" is the login page: it answers without a login and without the
+      # backends, so "unhealthy" means Pantheon itself is down.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7861/"]
       interval: 30s
       timeout: 5s
-      start_period: 15s
+      start_period: 30s
       retries: 3
 
-networks:
-  ai-net:
-    external: true
+volumes:
+  pantheon-data:
+    name: pantheon-data

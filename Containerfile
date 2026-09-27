@@ -46,13 +46,18 @@ ENV WHISPER_MODEL=base.en
 ENV WHISPER_CACHE=/app/models/whisper
 RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8', download_root='${WHISPER_CACHE}')"
 
-COPY main.py run.py ./
+COPY main.py run.py manage.py ./
 COPY models/ ./models/
 COPY services/ ./services/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
 RUN mkdir -p /app/data/characters /app/data/personas /app/data/sessions /app/data/expressions /app/data/settings
+
+# The redistributable default avatar. A new, empty named volume is filled from
+# the image the first time it is mounted, so compose installs start with it; a
+# bind-mounted data/ (run-podman.sh) hides this copy and has its own.
+COPY data/vrm/baseline.vrm /app/data/vrm/baseline.vrm
 
 # KoboldCPP URL — override with -e KOBOLD_URL=http://... at runtime.
 ENV KOBOLD_URL=http://koboldcpp:5001

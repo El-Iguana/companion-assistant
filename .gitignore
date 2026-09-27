@@ -31,3 +31,10 @@ models/rembg/
 .aider*
 .idea
 .obsidian
+
+# Local model/voice folders for compose (INSTALL.md); only the placeholders
+# are tracked.
+llm-models/*
+!llm-models/.gitkeep
+voices/*
+!voices/.gitkeep

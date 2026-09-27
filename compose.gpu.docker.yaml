@@ -1,0 +1,15 @@
+# The NVIDIA GPU for the KoboldCPP container, under Docker (Docker Engine with
+# the NVIDIA Container Toolkit on Linux, or Docker Desktop on Windows with the
+# WSL 2 backend). Use with compose.koboldcpp.yaml.
+#
+# Podman ignores this form — no GPU, no error. Use compose.gpu.podman.yaml.
+
+services:
+  koboldcpp:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

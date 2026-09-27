@@ -30,6 +30,41 @@ distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absoluter
 run. **Data (`data/…`) is a mounted volume**, so editing card/session/relationship JSON is live; **code
 is baked in — rebuild after edits.** `podman exec` needs `-i` to receive a stdin heredoc.
 
+### Installing elsewhere: compose (2026-09-26)
+
+**INSTALL.md** is the user guide: Windows/macOS/Linux, Docker or Podman. `run-podman.sh` (what
+`stack companion` runs) is unchanged and still the workstation path. Compose is for everyone else:
+
+| file | what |
+|---|---|
+| `compose.yaml` | container `pantheon`, `127.0.0.1:${PANTHEON_PORT:-7861}`, named volume `pantheon-data`, backends at `host.docker.internal` |
+| `compose.koboldcpp.yaml` | KoboldCPP container (`backends/koboldcpp/`, official CUDA binary) + `KOBOLD_URL=http://koboldcpp:5001` |
+| `compose.gpu.docker.yaml` / `compose.gpu.podman.yaml` | its GPU: `deploy…devices` vs CDI `nvidia.com/gpu=all` + `label=disable` |
+| `compose.ai-stack.yaml` | join external `ai-net`, backends by name |
+| `compose.host-network.yaml` | standalone (not an override): Linux, backends on 127.0.0.1; uvicorn binds `PANTHEON_BIND` itself |
+
+`manage.py`: `backends`, `probe HOST PORT`, `users`, `reset-password [--create] [--password-stdin]`.
+It writes `data/auth/users/<id>.json` directly with `services.auth`, so keep it in step with
+`_save_user` and the scrypt params.
+
+Traps, all measured:
+
+- **Podman ignores Docker's GPU form.** `deploy.resources.reservations.devices` gives the container
+  no GPU and no error (`nvidia-smi` not found), so there are two GPU files.
+- **From a bridge network, `host.*.internal` does not reach 127.0.0.1-only host services**
+  (connection refused; an all-interfaces port is reachable). ComfyUI binds 127.0.0.1 by default.
+  Hence `compose.host-network.yaml` and `manage.py probe`.
+- **Restoring into a volume after the first start duplicates ADMIN.** The first start seeds an
+  account; the backup brings another with the same name. Restore = `compose create`, `compose cp`,
+  then `up`.
+- **A new named volume is filled from the image**, which is how `data/vrm/baseline.vrm` reaches
+  compose installs (`COPY` in the Containerfile, re-included in `.containerignore`). A bind-mounted
+  `data/` hides it.
+- The old compose healthcheck curled `/api/status`, which is behind login (401) and so was always
+  unhealthy; both now probe `/`. Podman drops the Containerfile `HEALTHCHECK` without
+  `--format docker`, so compose carries its own.
+- `llm-models/` and `voices/` are mounted `:z`; only ever point those at dedicated folders.
+
 ## Container topology
 
 | Container  | Network         | Address                         | Role         |
@@ -97,7 +132,7 @@ Login-gated, role-based, per-user isolated libraries.
   the known default admin credential of every install. Seeding only runs when no users exist.
 - **Frontend**: full-screen `#login` overlay; `boot()` checks `/api/me` and gates `init()`; `api()` shows
   login on any 401; sidebar `#userbar` (name·role, Logout, admin-only **Users** modal).
-- **Volume**: the whole `data/` is now a single bind mount (`run-podman.sh`/`compose.yaml`) so `data/u`,
+- **Volume**: the whole `data/` is now a single mount (bind mount in `run-podman.sh`, the `pantheon-data` volume in `compose.yaml`) so `data/u`,
   `data/auth`, and per-user subdirs all persist — no more per-subdir mount list to keep in sync.
 
 ## Data model (models/schema.py)

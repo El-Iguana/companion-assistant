@@ -1,5 +1,7 @@
 # Don't bake data into the image — it's mounted as volumes
 data/
+# …except the redistributable default avatar, which seeds a new data volume.
+!data/vrm/baseline.vrm
 
 # Dev artifacts
 __pycache__/
@@ -21,5 +23,13 @@ __pycache__/
 
 # Podman / compose files don't belong in the image
 Containerfile
-compose.yaml
+compose*.yaml
 run-podman.sh
+.env
+.env.example
+backends/
+llm-models/
+voices/
+desktop/
+eval/
+scripts/
