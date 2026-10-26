@@ -99,6 +99,227 @@ def chat_steps(page) -> None:
     assert page.input_value("#ch-input") == text, "stopped text is restored to the input"
 
 
+def studio_steps(page) -> None:
+    """Phase 4: create, edit, draft restore, VRM import, duplicate."""
+    page.evaluate("location.hash = '#/create'")
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    page.fill('[data-f="name"]', "Smoke Tester")
+    page.fill('[data-f="creator_notes"]', "Exists only to be tested")
+    page.fill('[data-f="tags"]', "test, smoke")
+    page.fill("[data-greet]", "*{{char}} waves.* Hello, {{user}}!")
+    page.click('[data-act="add-greet"]')
+    page.fill('[data-rep="greet"] >> nth=1 >> textarea', "Back again?")
+    page.click('[data-act="add-starter"]')
+    page.fill("[data-starter]", "Run the tests")
+    page.click('[data-act="add-lore"]')
+    page.fill('[data-lore="keys"]', "smoke")
+    page.fill('[data-lore="content"]', "Smoke is what the tests make.")
+    page.wait_for_timeout(300)
+    preview = page.inner_text("#st-preview")
+    assert "Smoke Tester" in preview and "Hello," in preview and "Run the tests" in preview, preview
+    page.screenshot(path=str(SHOTS / "studio-new.png"))
+    page.click('[data-act="save"]')
+    page.wait_for_function("/^#\\/create\\/.+/.test(location.hash)", timeout=15_000)
+    card_id = page.evaluate("location.hash.split('/')[2]")
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    assert page.input_value('[data-f="name"]') == "Smoke Tester"
+    assert page.locator('[data-rep="greet"]').count() == 2
+    assert page.input_value("[data-starter]") == "Run the tests"
+    assert page.input_value('[data-lore="keys"]') == "smoke"
+
+    # edit + save, then the profile shows it
+    page.fill('[data-f="creator_notes"]', "Edited tagline")
+    page.click('[data-act="save"]')
+    page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
+    page.evaluate(f"location.hash = '#/character/{card_id}'")
+    page.wait_for_selector(".pt-prof-head h2", timeout=20_000)
+    assert "Edited tagline" in page.inner_text(".pt-prof-head")
+    assert page.locator(".pt-greet").count() and "2" in page.inner_text(".pt-prof-sec .pt-swipe")
+    page.keyboard.press("Escape")
+
+    # draft: leave with unsaved changes, come back, restore
+    page.evaluate(f"location.hash = '#/create/{card_id}'")
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    page.fill('[data-f="personality"]', "unsaved draft text")
+    page.evaluate("location.hash = '#/discover'")
+    page.wait_for_timeout(500)
+    page.evaluate(f"location.hash = '#/create/{card_id}'")
+    page.wait_for_selector('[data-act="restore"]', timeout=20_000)
+    page.click('[data-act="restore"]')
+    page.wait_for_timeout(300)
+    assert page.input_value('[data-f="personality"]') == "unsaved draft text"
+    page.click('[data-act="save"]')
+    page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
+
+    # 3D avatar: import the repo's baseline model, see its audit
+    baseline = Path(__file__).resolve().parents[1] / "data" / "vrm" / "baseline.vrm"
+    if baseline.exists():
+        page.check('input[name="st-avatar"][value="vrm"]')
+        page.set_input_files("#st-vrm-file", str(baseline))
+        page.wait_for_function("document.querySelector('#st-vrm-info').textContent.includes('triangles')",
+                               timeout=60_000)
+        page.screenshot(path=str(SHOTS / "studio-vrm.png"))
+        page.check('input[name="st-avatar"][value="sprite"]')
+    page.click('[data-jump="look"]')
+    page.wait_for_timeout(600)
+    page.screenshot(path=str(SHOTS / "studio-sprites.png"))
+
+    # duplicate: the VRM import left unsaved changes, so it asks first
+    page.click('[data-act="duplicate"]')
+    page.wait_for_selector(".wapyt-msg-dialog", timeout=5_000)
+    page.click(".wapyt-msg-dialog .wapyt-msg-btn:has-text('Duplicate')")
+    page.wait_for_function(f"location.hash.startsWith('#/create/') && !location.hash.endsWith('{card_id}')",
+                           timeout=15_000)
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    assert page.input_value('[data-f="name"]') == "Smoke Tester (copy)"
+
+    # import: export the copy as a V2 PNG card, then import it back as a new character
+    copy_id = page.evaluate("location.hash.split('/')[2]")
+    png = page.request.get(f"{URL}/pmedia/card/{copy_id}/export.png?version=2")
+    assert png.ok and png.body()[:8] == b"\x89PNG\r\n\x1a\n", "export should be a PNG card"
+    card_file = SHOTS / "smoke-export.png"
+    card_file.write_bytes(png.body())
+    page.evaluate("location.hash = '#/create'")
+    page.wait_for_selector("#st-import", state="attached", timeout=20_000)
+    page.set_input_files("#st-import", str(card_file))
+    page.wait_for_function(f"location.hash.startsWith('#/create/') && !location.hash.endsWith('{copy_id}')",
+                           timeout=20_000)
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    assert page.input_value('[data-f="name"]') == "Smoke Tester (copy)", "imported card keeps its name"
+    assert page.input_value("[data-starter]") == "Run the tests", "starters round-trip through V2 export"
+
+
+def _confirm(page, label):
+    page.wait_for_selector(".wapyt-msg-dialog", timeout=5_000)
+    page.click(f".wapyt-msg-dialog .wapyt-msg-btn:has-text('{label}')")
+
+
+def phase5_steps(page) -> None:
+    """Personas, presets, settings, password, users, guide, chat memory + context."""
+    # personas: create, use, delete
+    page.evaluate("location.hash = '#/personas'")
+    page.wait_for_selector("[data-new]", timeout=20_000)
+    page.click("[data-new]")
+    page.fill("#pe-name", "Smoke Persona")
+    page.fill("#pe-title", "Test pilot")
+    page.uncheck("#pe-default")
+    page.click("[data-save]")
+    page.wait_for_selector(".pt-pcard:has-text('Smoke Persona')", timeout=10_000)
+    page.screenshot(path=str(SHOTS / "personas.png"))
+    before = page.inner_text("#pt-persona-name")
+    page.locator(".pt-pcard:has-text('Smoke Persona') [data-use]").first.click()
+    page.wait_for_function("document.querySelector('#pt-persona-name').textContent === 'Smoke Persona'", timeout=10_000)
+    page.click(f".pt-pcard:has-text('{before}') [data-use]")         # back to the original
+    page.wait_for_function(f"document.querySelector('#pt-persona-name').textContent === '{before}'", timeout=10_000)
+    n = page.locator(".pt-pcard:has-text('Smoke Persona')").count()
+    page.locator(".pt-pcard:has-text('Smoke Persona')").first.click()
+    page.click(".pt-modal [data-delete]")
+    _confirm(page, "Delete")
+    page.wait_for_function(f"document.querySelectorAll('.pt-pcard').length && "
+                           f"[...document.querySelectorAll('.pt-pcard')].filter(c => c.innerText.includes('Smoke Persona')).length === {n - 1}",
+                           timeout=10_000)
+
+    # presets: create with a slider, then delete
+    page.evaluate("location.hash = '#/presets'")
+    page.wait_for_selector("[data-new]", timeout=20_000)
+    page.click("[data-new]")
+    page.fill("#pr-name", "Smoke Preset")
+    page.fill("#pr-note", "The test begins.")
+    page.eval_on_selector('[data-key="trust"]', "el => { el.value = 40; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.screenshot(path=str(SHOTS / "preset-editor.png"))
+    page.click("[data-save]")
+    page.wait_for_selector(".pt-crow:has-text('Smoke Preset')", timeout=10_000)
+    assert "trust 40" in page.locator(".pt-crow:has-text('Smoke Preset')").last.inner_text()
+    n = page.locator(".pt-crow:has-text('Smoke Preset')").count()
+    page.locator(".pt-crow:has-text('Smoke Preset')").first.click()
+    page.click(".pt-modal [data-delete]")
+    _confirm(page, "Delete")
+    page.wait_for_function(f"[...document.querySelectorAll('.pt-crow')].filter(c => c.innerText.includes('Smoke Preset')).length === {n - 1}",
+                           timeout=10_000)
+
+    # settings: change, save, reload, restore
+    page.evaluate("location.hash = '#/settings'")
+    page.wait_for_selector('[data-s="disable_thinking"]', timeout=20_000)
+    was = page.is_checked('[data-s="disable_thinking"]')
+    page.click('[data-s="disable_thinking"]')
+    page.click('[data-act="save"]')
+    page.wait_for_function("document.querySelector('#set-status').textContent === 'Saved'", timeout=10_000)
+    page.screenshot(path=str(SHOTS / "settings.png"), full_page=False)
+    page.reload()
+    page.wait_for_selector('[data-s="disable_thinking"]', timeout=120_000)
+    assert page.is_checked('[data-s="disable_thinking"]') != was, "setting persisted"
+    page.click('[data-s="disable_thinking"]')
+    page.click('[data-act="save"]')
+    page.wait_for_function("document.querySelector('#set-status').textContent === 'Saved'", timeout=10_000)
+
+    # password: change and change back
+    page.fill("#pw-cur", PASS)
+    page.fill("#pw-new", PASS + "-x")
+    page.click('[data-act="password"]')
+    page.wait_for_function("document.querySelector('#pw-cur').value === ''", timeout=10_000)
+    page.fill("#pw-cur", PASS + "-x")
+    page.fill("#pw-new", PASS)
+    page.click('[data-act="password"]')
+    page.wait_for_function("document.querySelector('#pw-cur').value === ''", timeout=10_000)
+
+    # users (the test account is an admin): add, reset, delete
+    if page.locator("#set-users").count():
+        page.wait_for_selector("#nu-name", timeout=10_000)
+        page.fill("#nu-name", "smoke-user")
+        page.fill("#nu-pass", "smoke-pass")
+        page.click('[data-act="add-user"]')
+        page.wait_for_selector(".pt-urow:has-text('smoke-user')", timeout=10_000)
+        page.click(".pt-urow:has-text('smoke-user') [data-reset]")
+        page.wait_for_selector(".wapyt-msg-dialog input", timeout=5_000)
+        page.fill(".wapyt-msg-dialog input", "another-pass")
+        page.click(".wapyt-msg-dialog .wapyt-msg-btn:has-text('OK')")
+        page.wait_for_timeout(800)
+        page.click(".pt-urow:has-text('smoke-user') [data-udel]")
+        _confirm(page, "Delete")
+        page.wait_for_function("!document.querySelector('#set-users').innerText.includes('smoke-user')", timeout=10_000)
+
+    # the guide keeps its {{char}} macros (the classic page lost them to Jinja)
+    page.evaluate("location.hash = '#/help'")
+    page.wait_for_function("document.querySelector('#help-body').textContent.includes('{{char}}')", timeout=15_000)
+    page.screenshot(path=str(SHOTS / "help.png"))
+
+    # chat memory + relationship context, in the first roleplay chat in the list
+    page.evaluate("location.hash = '#/chats'")
+    page.wait_for_selector(".pt-crow:not(:has(.pt-tag))", timeout=20_000)
+    page.locator(".pt-crow:has-text('Iris')").first.click()
+    page.wait_for_selector("#ch-msgs .pt-msg", timeout=20_000)
+    page.click('[data-menu="head"]')
+    page.click(".wapyt-cmenu-item:has-text('Memory')")
+    page.wait_for_selector('[data-add="pinned"]', timeout=10_000)
+    page.click('[data-add="pinned"]')
+    page.fill('[data-row="pinned"] >> nth=-1 >> input', "Smoke pinned fact")
+    page.click('[data-tab="long"]')
+    page.click('[data-add="fact"]')
+    page.fill('[data-row="fact"] >> nth=-1 >> input', "Smoke long-term fact")
+    page.screenshot(path=str(SHOTS / "memory.png"))
+    page.click("[data-save]")
+    page.wait_for_timeout(800)
+    page.click('[data-menu="head"]')
+    page.click(".wapyt-cmenu-item:has-text('Memory')")
+    page.wait_for_selector('[data-row="pinned"]', timeout=10_000)
+    vals = page.eval_on_selector_all('[data-row] input', "els => els.map(e => e.value)")
+    assert "Smoke pinned fact" in vals and "Smoke long-term fact" in vals, vals
+    page.keyboard.press("Escape")
+    page.click('[data-menu="head"]')
+    page.click(".wapyt-cmenu-item:has-text('Relationship context')")
+    page.wait_for_selector("#cx-power", timeout=10_000)
+    page.eval_on_selector("#cx-power", "el => { el.value = 30; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.screenshot(path=str(SHOTS / "context.png"))
+    page.click("[data-save]")
+    page.wait_for_timeout(1000)
+    page.click('[data-menu="head"]')
+    page.click(".wapyt-cmenu-item:has-text('Relationship context')")
+    page.wait_for_selector("#cx-power", timeout=10_000)
+    assert page.input_value("#cx-power") == "30"
+    page.click("[data-clear]")
+    page.wait_for_timeout(800)
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
@@ -192,6 +413,8 @@ def run_steps(browser, page, errors: list) -> None:
 
         if not os.environ.get("PANTHEON_SKIP_CHAT"):
             chat_steps(page)
+        studio_steps(page)
+        phase5_steps(page)
 
         page.click("[data-theme=ember]")
         page.wait_for_timeout(800)

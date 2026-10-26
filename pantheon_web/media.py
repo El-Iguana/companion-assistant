@@ -1,8 +1,8 @@
 """Plain GET routes for images the new page shows: card portraits, expression sprites,
 persona portraits.
 
-Why not BFF: the BFF is JSON with a 2 MiB response cap, and an image belongs in an
-``<img src>`` the browser can cache. These routes read the signed-in user from
+Why not BFF: the BFF is JSON (8 MiB requests), and an image belongs in an ``<img src>``
+the browser can cache; uploads are multipart files (a VRM model is tens of MB). These routes read the signed-in user from
 pytincture's session (``request.session["user"]``, the claims ``pantheon_web.auth``
 returned at login) and resolve them to that user's library, so a URL only ever serves
 the caller's own files — the same isolation the old routes get from Pantheon's cookie.
@@ -15,7 +15,9 @@ from __future__ import annotations
 import base64
 import re
 
-from fastapi import APIRouter, HTTPException, Request
+import hmac
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 router = APIRouter(prefix="/pmedia")
@@ -109,3 +111,61 @@ async def card_export(card_id: str, request: Request, version: int = 2):
     if not _ID.match(card_id) or version not in (2, 3):
         raise HTTPException(status_code=404, detail="no such card")
     return await main.export_card(card_id, version, cur=_ctx(request))
+
+
+# --- uploads + the voice test (Studio, Phase 4) ------------------------------------
+def _require_csrf(request: Request) -> None:
+    """These POSTs never pass through pytincture's BFF handler, which is what checks
+    CSRF there; mirror it. The page sends the token from its CSRF cookie."""
+    session = getattr(request, "session", None) or {}
+    expected = str(session.get("csrf_token") or "")
+    supplied = request.headers.get("x-csrf-token", "")
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+
+@router.post("/import")
+async def import_card(request: Request, file: UploadFile = File(...)):
+    """A V2/V3 PNG or JSON card -> a new character (``main.import_card`` unchanged)."""
+    import main
+
+    cur = _ctx(request)
+    _require_csrf(request)
+    card = await main.import_card(file, cur=cur)
+    return {"ok": True, "id": card["id"], "name": card["name"]}
+
+
+@router.post("/vrm")
+async def upload_vrm(request: Request, file: UploadFile = File(...)):
+    """Import a .vrm (``main.upload_vrm``: audited before it is written, never replaces)."""
+    import main
+
+    _ctx(request)
+    _require_csrf(request)
+    return await main.upload_vrm(file, None)
+
+
+@router.get("/tts-sample.wav")
+async def tts_sample(request: Request, voice: str = "", speed: float = 1.0):
+    """The Studio's "Test voice": one line in the chosen voice and pace."""
+    import main
+
+    _ctx(request)
+    speed = max(0.5, min(1.5, float(speed or 1.0)))
+    return await main.tts_synth({"text": "Hi there. This is how I sound to you.",
+                                 "voice": voice or "af_sarah", "speed": speed}, None)
+
+
+@router.get("/help.html")
+def help_page(request: Request):
+    """The in-app guide, from the template the classic page includes (templates/help.html),
+    with its Jinja comment and raw markers stripped — one copy of the text for both pages."""
+    import re
+
+    from pathlib import Path
+
+    _ctx(request)
+    raw = (Path(__file__).resolve().parents[1] / "templates" / "help.html").read_text(encoding="utf-8")
+    raw = re.sub(r"\{#.*?#\}", "", raw, flags=re.S).replace("{% raw %}", "").replace("{% endraw %}", "")
+    return Response(content=raw, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})

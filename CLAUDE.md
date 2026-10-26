@@ -118,7 +118,9 @@ services/
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js     # the classic page (also /desktop)
 service.py              # runs both pages; builds the pytincture app beside main.app
-pantheon_web/           # server-side support for the new page: auth hook, login page, /pmedia images
+pantheon_web/           # server-side support for the new page (plain modules, never shipped to the browser):
+                        #   auth (login hook) · login_page · media (/pmedia: images, export, import, VRM upload,
+                        #   tts sample) · jobs (background sprite generation) · present (shared formatting)
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
 tests/smoke_web.py      # Playwright smoke test of the new page (WRITES: run on a scratch library)
@@ -394,6 +396,9 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   element display rules; toggle via `.hidden`.
 - Starlette: `TemplateResponse(request, "index.html")` (request first).
 - `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
+- **Sprite generation re-reads the card before saving** (`generate_expressions` /
+  `regenerate_expression`). It takes minutes; saving the copy loaded at the start silently
+  undid any edit made meanwhile, in either page. Only the sprite fields are written onto a fresh read.
 - Relationship/mood update on generation only (not re-rolls). Sprites are same-character via img2img from a
   reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
 - All characters adult; intimacy code is abstract state (tiers/thresholds) — the local model writes prose.

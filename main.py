@@ -669,9 +669,19 @@ async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_
     # Bulk generate REPLACES the whole set (clears old sprites first) so switching
     # between Core/Full starts fresh — no stale sprites left over. Single-sprite
     # regen (below) still merges.
-    card.expressions = sprites
-    _save(card, cur.cards)
-    return {"generated": list(sprites.keys()), "total": len(card.expressions)}
+    #
+    # Re-read the card before saving: generation takes minutes, and saving the copy
+    # loaded at the start would silently undo any edit made meanwhile (in either
+    # page). Only the sprite fields this request owns are written onto the fresh copy.
+    fresh = _load(cur.cards, card_id, CharacterCard)
+    if not fresh:
+        raise HTTPException(404, "card was deleted during generation")
+    fresh.expressions = sprites
+    fresh.appearance = card.appearance
+    fresh.expr_from_upload = card.expr_from_upload
+    fresh.expr_denoise = card.expr_denoise
+    _save(fresh, cur.cards)
+    return {"generated": list(sprites.keys()), "total": len(fresh.expressions)}
 
 
 @app.get("/api/cards/{card_id}/expression/{emotion}")
@@ -816,8 +826,14 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
-    card.expressions.update(sprites)
-    _save(card, cur.cards)
+    # Merge onto a fresh read, for the same reason as the batch above.
+    fresh = _load(cur.cards, card_id, CharacterCard)
+    if not fresh:
+        raise HTTPException(404, "card was deleted during generation")
+    fresh.expressions.update(sprites)
+    if "appearance" in body:
+        fresh.appearance = card.appearance
+    _save(fresh, cur.cards)
     return {"ok": True, "emotion": emotion}
 
 

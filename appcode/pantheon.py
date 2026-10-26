@@ -29,7 +29,9 @@ from bff.chat import Chat
 from ui.chat import ChatView
 from ui.chats import ChatsView
 from ui.discover import DiscoverView
-from ui.views import CreateView, PersonasView, PresetsView, SettingsView
+from ui.people import PersonasView, PresetsView
+from ui.settings import HelpView, SettingsView
+from ui.studio import StudioView
 
 APP_ENTRYPOINT = "Pantheon"
 
@@ -42,13 +44,14 @@ TILES = [  # (route, label, icon)
     ("settings", "Settings", "mdi-cog-outline"),
 ]
 SCREENS = {
-    "discover": DiscoverView, "create": CreateView, "chats": ChatsView,
+    "discover": DiscoverView, "create": StudioView, "chats": ChatsView,
     "personas": PersonasView, "presets": PresetsView, "settings": SettingsView,
     "chat": ChatView,
     "character": DiscoverView,      # Discover with a profile open: #/character/<id>
+    "help": HelpView,
 }
 # Routes that light up a tile other than their own name.
-TILE_OF = {"character": "discover"}
+TILE_OF = {"character": "discover", "help": "settings"}
 THEMES = [("bone", "Bone", "#f5f1e8"), ("ember", "Ember", "#e8a33d"), ("moss", "Moss", "#9ec978"),
           ("dusk", "Dusk", "#b79df0"), ("harbor", "Harbor", "#7fb4d8")]
 THEME_KEY = "pantheon.theme"     # per-browser cache only, to paint the right colours before

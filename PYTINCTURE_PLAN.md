@@ -242,3 +242,63 @@ Built: `appcode/ui/chat.py`, `appcode/ui/chats.py` (the Chats tile: every chat, 
 
 Until Phase 5/6 the chat header's ⋮ opens the classic page for memory, voice and the
 relationship-context editor.
+
+## Phase 4 results (2026-10-26) — the Studio
+
+Built: `appcode/ui/studio.py`, `appcode/bff/studio.py`, `pantheon_web/jobs.py`, plain routes
+`POST /pmedia/import`, `POST /pmedia/vrm`, `GET /pmedia/tts-sample.wav`, studio steps in the smoke test.
+
+- **Layout:** Ember's studio — sections (Basics · Personality · Greetings · Relationship ·
+  Lorebook · Expressions · 3D avatar · Voice · Advanced) with a jump bar, a sticky phone preview
+  (header, greeting with `{{char}}`/`{{user}}` filled in, starter chips) updated as you type, and
+  a sticky Save / Create / Create & chat bar.
+- **Everything the classic editor did:** all card fields, alternate greetings as a repeater,
+  starters (`extensions.pantheon.starters` — they survive a V2 PNG export/import, tested),
+  lorebook entries (keys, always, before/after, stage gate; unknown entry fields are kept),
+  power/social sliders (hidden for assistant cards), portrait (normalised to PNG ≤ 1024 px),
+  sprites, VRM import with the audit (licence flags, rig problems), voice + pace + Test voice,
+  the hands-free phrases, system prompt / post-history, creator/version; Import card,
+  Duplicate, Delete.
+- **Save takes a whitelist** (`studio.EDITABLE`) applied onto the stored card and validated by
+  `CharacterCard`, so sprites, VRM assignment, V3 extras and other `extensions` survive.
+- **Sprite generation is a background job** (`pantheon_web/jobs.py`, an asyncio task on the
+  server loop; the page polls every 2 s). Measured: one sprite took **32 s** — already past the
+  30 s BFF limit — so even single regenerations go through it. One job per card; you can keep
+  editing or leave and come back (the Studio picks a running job up on load).
+- **Fixed a lost-edit race in `main.py`:** generation saved the card copy it loaded minutes
+  earlier, undoing any edit made meanwhile; it now merges the sprites onto a fresh read.
+- **Drafts:** leaving with unsaved changes stores them in `localStorage`
+  (`pantheon.draft.<id|new>`, portrait excluded); the next visit offers Restore / Discard.
+- The segmented avatar switch keeps its radios focusable (visually hidden, not `display:none`).
+- Correction to Phase 1/2 notes: pytincture's BFF limits are **8 MiB per request, 50 MiB per
+  result** — the "2 MiB" was Monguana's own middleware. Uploads still use plain routes because
+  a VRM is tens of MB and multipart.
+
+## Phase 5 results (2026-10-26) — personas, presets, memory, settings, users, guide
+
+Built: `appcode/ui/{people,settings,memory}.py`, `appcode/bff/{people,account,memory}.py`,
+`GET /pmedia/help.html`, `templates/help.html`, phase-5 steps in the smoke test.
+
+- **Personas** (grid, active badge, chat count; editor with portrait, name, role, description,
+  background, make active) and **Presets** (list; editor with the eight relationship sliders,
+  optional character/persona pairing, description, opening note).
+- **Settings**, one page: account + password change (shared with the classic page), the
+  thinking switch, the memory tuning (summarize after, keep recent, summary length, recall
+  and its depth, automatic facts and their ceiling) and the voice / hands-free settings
+  with the classic explanations. The voice settings are used today by the classic page and
+  the desktop avatar; the **microphone picker** needs the browser's device list and comes with
+  Phase 6's voice controls.
+- **Users** (admin): add, reset password, delete. Admin calls check the role on the **freshly
+  read** account (`ctx_for` re-reads it per call), so a demoted or deleted admin loses them at
+  once; `main`'s own rules (not yourself, not the last admin, ≥ 4 characters) still apply.
+- **Chat ⋮ → Memory…**: "This chat" (pinned facts, story so far) and "Long-term" shaped by the
+  card (roleplay: facts + history across chats; assistant: standing instructions, facts,
+  where things stand). Long-term rows keep their ids so AUTO facts are not relabelled; it is
+  only written back if it was loaded. Scenario chats have no long-term tab, as before.
+- **Chat ⋮ → Relationship context…** (roleplay, non-scenario): power / social overrides for
+  this relationship only, "Use card default" clears them.
+- **The guide** is `templates/help.html`, included by the classic page and served to the new
+  one. **Fixed on the classic page:** its help text and the card editor's hint were rendered
+  through Jinja, which read `{{char}}`/`{{user}}` as template variables and printed nothing —
+  the copy-paste example prompts came out as "You are  in an ongoing story with ." They are in
+  `{% raw %}` now; the new page's smoke test checks the macros survive.

@@ -20,9 +20,9 @@ Behaviour is Pantheon's, layout is Ember's:
   pill, and the idle fold into long-term memory 5 minutes after a reply (the app owns
   that timer, so leaving the screen does not cancel it).
 
-Not here yet (later phases): read-aloud, push-to-talk, hands-free and the 3D avatar
-(Phase 6); the memory and relationship-context editors (Phase 5). Until then the
-header's ⋮ menu opens the classic page for those.
+Not here yet: read-aloud, push-to-talk, hands-free and the 3D avatar (Phase 6). Until
+then the header's ⋮ menu opens the classic page for voice. Memory and the relationship
+context are editors in ui/memory.py.
 """
 from __future__ import annotations
 
@@ -533,13 +533,16 @@ class ChatView:
         card = self.data["card"]
         self._menu_mid = ""
         if which == "head":
+            lasting = card["mode"] != "assistant" and not self.data.get("scenario")
             items = [MenuItem(id="profile", label="Profile", icon="mdi-account-details-outline"),
                      MenuItem(id="studio", label="Edit character", icon="mdi-pencil-outline"),
                      MenuItem(separator=True),
-                     MenuItem(id="classic", label="Memory, voice & relationship (classic page)",
-                              icon="mdi-open-in-new"),
-                     MenuItem(separator=True),
-                     MenuItem(id="clear", label="Clear chat", icon="mdi-broom", danger=True)]
+                     MenuItem(id="memory", label="Memory…", icon="mdi-pin-outline")]
+            if lasting:
+                items.append(MenuItem(id="context", label="Relationship context…", icon="mdi-scale-balance"))
+            items += [MenuItem(id="classic", label="Voice & hands-free (classic page)", icon="mdi-open-in-new"),
+                      MenuItem(separator=True),
+                      MenuItem(id="clear", label="Clear chat", icon="mdi-broom", danger=True)]
         else:
             items = [MenuItem(id="regen", label=f"Another take on {card['name']}'s last reply",
                               icon="mdi-autorenew"),
@@ -576,6 +579,14 @@ class ChatView:
             self.app.go(f"character/{card['id']}")
         elif item == "studio":
             self.app.go(f"create/{card['id']}")
+        elif item == "memory":
+            from ui.memory import MemoryModal
+
+            MemoryModal(self.sid)
+        elif item == "context":
+            from ui.memory import ContextModal
+
+            ContextModal(self.sid, on_saved=lambda: spawn(self.load(), "reload chat"))
         elif item == "classic":
             js.window.open(classic_url(), "_blank", "noopener")
         elif item == "clear":
