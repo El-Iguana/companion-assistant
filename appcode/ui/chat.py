@@ -20,13 +20,18 @@ Behaviour is Pantheon's, layout is Ember's:
   pill, and the idle fold into long-term memory 5 minutes after a reply (the app owns
   that timer, so leaving the screen does not cancel it).
 
-Not here yet: read-aloud, push-to-talk, hands-free and the 3D avatar (Phase 6). Until
-then the header's ⋮ menu opens the classic page for voice. Memory and the relationship
+Voice and the 3D avatar are the JavaScript island ``static/js/voice.js`` (audio and frame
+rate work Pyodide's FFI handles poorly). This view drives it — the card, each streamed
+token, ``[expr:x]`` beats, whether a reply is streaming — and listens for its
+``pvoice:*`` events: a transcript to send, a barge-in abort, a beat to show now, button
+state. The header's speaker reads replies aloud; the composer has push-to-talk (hold)
+and hands-free (toggle); each reply's ⋯ has "Read aloud". Memory and the relationship
 context are editors in ui/memory.py.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 
 import js
@@ -36,9 +41,29 @@ from wapyt import ContextMenu, ContextMenuConfig, MenuItem, message
 from bff.chat import Chat
 from ui.common import (Listeners, attr, avatar_html, by_id, closest, esc, failed,
                        persona_url, portrait_url, spawn, toast)
-from ui.views import classic_url
-
 _DAY = 86_400_000
+
+
+def _proxy_once(fn):
+    from pyodide.ffi import create_once_callable
+
+    return create_once_callable(fn)
+
+
+def _scroll_to(el_id: str) -> None:
+    el = js.document.getElementById(el_id)
+    if el:
+        el.scrollIntoView(js.JSON.parse('{"behavior":"smooth","block":"start"}'))
+
+
+def voice():
+    """The voice island, or None while static/js/voice.js is still loading."""
+    v = getattr(js.window, "PantheonVoice", None)
+    return v if v else None
+
+
+def _js(obj):
+    return js.JSON.parse(json.dumps(obj))
 
 
 def md(text: str) -> str:
@@ -93,6 +118,14 @@ class ChatView:
         self.root = root
         root.innerHTML = '<div class="pt-chat-loading"><span class="pt-spin"></span></div>'
         self.listeners.on(root, "click", self._on_click)
+        w = js.window
+        self.listeners.on(w, "pvoice:ready", lambda _e: self._attach_voice())
+        self.listeners.on(w, "pvoice:send", self._on_voice_send)
+        self.listeners.on(w, "pvoice:abort", lambda _e: self.stop())
+        self.listeners.on(w, "pvoice:expr", lambda e: self._portrait(str(e.detail.label or "")))
+        self.listeners.on(w, "pvoice:state", lambda e: self._paint_voice(e.detail))
+        self.listeners.on(w, "pvoice:persist", self._on_voice_persist)
+        self.listeners.on(w, "pvoice:toast", lambda e: toast(str(e.detail.msg), str(e.detail.kind or "info"), 6000))
         spawn(self.load(), "open chat")
 
     def unmount(self) -> None:
@@ -102,6 +135,9 @@ class ChatView:
         self.listeners.clear()
         self.menu.destroy()
         self.root = None
+        v = voice()
+        if v:
+            v.detach()
 
     async def load(self) -> None:
         r = await Chat().open(self.sid)
@@ -138,6 +174,8 @@ class ChatView:
             '<span class="pt-chead-sub" id="ch-sub"></span></span></a>'
             '<span class="pt-mood" id="ch-mood" hidden title="Mood"><span id="ch-mood-label"></span>'
             '<span class="pt-mood-bar"><span id="ch-mood-fill"></span></span></span>'
+            '<button class="pt-ibtn" id="ch-speaker" data-voice="speaker" title="Read replies aloud">'
+            '<i class="mdi mdi-volume-off"></i></button>'
             '<button class="pt-ibtn" data-menu="head" title="Chat options"><i class="mdi mdi-dots-vertical"></i></button>'
             '</header>'
             '<div class="pt-msgs" id="ch-msgs"></div>'
@@ -148,11 +186,15 @@ class ChatView:
             '<button class="pt-ibtn" data-menu="input" title="More options"><i class="mdi mdi-menu"></i></button>'
             f'<textarea id="ch-input" rows="1" placeholder="Message {esc(card["name"])}…" '
             'aria-label="Message"></textarea>'
+            '<button class="pt-ibtn pt-vbtn" id="ch-hf" data-voice="hf" title="Hands-free: listen for my voice">'
+            '<i class="mdi mdi-ear-hearing"></i></button>'
+            '<button class="pt-ibtn pt-vbtn" id="ch-ptt" title="Hold to talk"><i class="mdi mdi-microphone"></i></button>'
             '<button class="pt-send" id="ch-send" title="Send"><i class="mdi mdi-send"></i></button>'
             '</div>'
             f'<div class="pt-hint">{self._hint()}</div>'
             '</div></div>'
             '<img class="pt-portrait" id="ch-portrait" alt="" hidden>'
+            '<div class="pt-avatar-slot" id="ch-avatar-slot"></div>'
             '</div>')
         inp = by_id("ch-input")
         self.listeners.on(inp, "keydown", self._on_key)
@@ -162,6 +204,10 @@ class ChatView:
         self._render_messages()
         self._render_sugs()
         self._portrait()
+        ptt = by_id("ch-ptt")
+        for name in ("pointerdown", "pointerup", "pointerleave", "pointercancel"):
+            self.listeners.on(ptt, name, self._on_ptt)
+        self._attach_voice()
         inp.focus()
 
     def _hint(self) -> str:
@@ -289,6 +335,9 @@ class ChatView:
         have = card.get("expressions") or []
         if not img or not have:
             return
+        if js.document.body.classList.contains("pt-avatar-on"):
+            img.hidden = True                   # the 3D avatar owns that corner
+            return
         if not label:
             msgs = self.data["session"]["messages"]
             last = next((m for m in reversed(msgs) if m["role"] == "char"), None)
@@ -328,6 +377,9 @@ class ChatView:
     # --- sending -----------------------------------------------------------------
     def _set_streaming(self, on: bool) -> None:
         self.streaming = on
+        v = voice()
+        if v:
+            v.setStreaming(on)
         btn = by_id("ch-send")
         if btn:
             btn.classList.toggle("stop", on)
@@ -369,6 +421,9 @@ class ChatView:
         self._set_streaming(True)
         self.stopped = False
         acc, done, error = "", None, ""
+        v = voice()
+        if v:
+            v.beginReply()
         stream = Chat().send(self.sid, text, bool(regenerate))
         try:
             async for ev in stream:
@@ -377,17 +432,28 @@ class ChatView:
                 if "token" in ev:
                     stick = self._near_bottom()
                     acc += ev["token"]
+                    if v:
+                        v.feed(acc, False)
                     live = by_id("ch-live")
                     if live:
                         live.querySelector(".pt-bubble").innerHTML = md(acc) + '<span class="pt-cursor"></span>'
                     if stick:
                         self._scroll_bottom()
                 elif "expr" in ev:
-                    self._portrait(str(ev["expr"]))
+                    if v:
+                        v.expr(str(ev["expr"]))      # timed to the audio when speaking
+                    else:
+                        self._portrait(str(ev["expr"]))
                 elif "error" in ev:
                     error = str(ev["error"])
                 elif ev.get("done"):
                     done = ev
+                    if v:
+                        v.feed(acc, True)
+                        v.flushExpr()
+                        rel = ev.get("relationship") or {}
+                        v.mood(str(ev.get("mood") or ""), float(ev.get("valence") or 0),
+                               str(rel.get("stage") or "") if isinstance(rel, dict) else "")
         except asyncio.CancelledError:
             self.stopped = True
         finally:
@@ -426,6 +492,71 @@ class ChatView:
         if self.task is not None and not self.task.done():
             self.task.cancel()
 
+    # --- voice -------------------------------------------------------------------
+    def _attach_voice(self) -> None:
+        v = voice()
+        if not v or not self.data or self.root is None:
+            return
+        v.attach(_js(self.data["card"]), _js(self.data.get("voice") or {}))
+        self._paint_voice(v.state())
+        rel = self.data.get("relationship") or {}
+        mood = self.data["session"].get("mood") or {}
+        v.mood(str(mood.get("mood") or ""), float(mood.get("valence") or 0), str(rel.get("stage") or ""))
+
+    def _paint_voice(self, st) -> None:
+        if st is None or self.root is None:
+            return
+        sp = by_id("ch-speaker")
+        if sp:
+            on = bool(st.speaker)
+            sp.classList.toggle("on", on)
+            sp.title = "Reading replies aloud — click to stop" if on else "Read replies aloud"
+            sp.innerHTML = f'<i class="mdi {"mdi-volume-high" if on else "mdi-volume-off"}"></i>'
+        hf = by_id("ch-hf")
+        if hf:
+            hf.classList.toggle("on", bool(st.hfActive))
+            hf.classList.toggle("listening", bool(st.listening))
+            hf.classList.toggle("awake", bool(st.awake))
+            hf.title = ("Hands-free is listening — click to stop" if st.hfActive
+                        else "Hands-free: listen for my voice")
+        ptt = by_id("ch-ptt")
+        if ptt:
+            ptt.classList.toggle("recording", bool(st.recording))
+            ptt.classList.toggle("busy", bool(st.busy))
+        img = by_id("ch-portrait")
+        if img and bool(st.avatar):
+            img.hidden = True
+        elif img and img.hidden and self.data:
+            self.live_expr = ""
+            self._portrait()
+
+    def _on_ptt(self, ev) -> None:
+        v = voice()
+        if not v:
+            return
+        if ev.type == "pointerdown":
+            ev.preventDefault()
+            v.pttStart()
+        else:
+            v.pttStop()
+
+    def _on_voice_send(self, ev) -> None:
+        text = str(ev.detail.text or "").strip()
+        if text and not self.streaming and self.data:
+            self.send(text)
+
+    def _on_voice_persist(self, ev) -> None:
+        patch = ev.detail.patch.to_py() if ev.detail.patch else {}
+        (self.data.get("voice") or {}).update(patch)
+        spawn(self._persist(patch), "save voice settings")
+
+    async def _persist(self, patch: dict) -> None:
+        from bff.account import Account
+
+        r = await Account().save_settings(patch)
+        if isinstance(r, dict) and not r.get("ok"):
+            failed(r, "save the voice setting")
+
     # --- events ------------------------------------------------------------------
     def _on_key(self, ev) -> None:
         if ev.key == "Enter" and not ev.shiftKey and not ev.isComposing:
@@ -450,6 +581,16 @@ class ChatView:
                     inp.value = ""
                     self._grow()
                     self.send(text)
+            return
+        vb = closest(ev, "[data-voice]")
+        if vb:
+            v = voice()
+            if v is None:
+                toast("Voice is still loading — try again in a moment.", "info")
+            elif attr(vb, "data-voice") == "speaker":
+                v.speaker()
+            else:
+                v.handsFree()
             return
         if closest(ev, "#ch-jump"):
             self._scroll_bottom()
@@ -516,6 +657,8 @@ class ChatView:
         items = []
         if m["role"] == "char" and idx == last_char and len(msgs) > 1:
             items.append(MenuItem(id="regen", label="Another take", icon="mdi-autorenew"))
+        if m["role"] == "char":
+            items.append(MenuItem(id="speak", label="Read aloud", icon="mdi-volume-high"))
         items += [
             MenuItem(id="edit", label="Edit & resend" if m["role"] == "user" else "Edit reply",
                      icon="mdi-pencil-outline"),
@@ -540,7 +683,7 @@ class ChatView:
                      MenuItem(id="memory", label="Memory…", icon="mdi-pin-outline")]
             if lasting:
                 items.append(MenuItem(id="context", label="Relationship context…", icon="mdi-scale-balance"))
-            items += [MenuItem(id="classic", label="Voice & hands-free (classic page)", icon="mdi-open-in-new"),
+            items += [MenuItem(id="voicecfg", label="Voice settings…", icon="mdi-tune-variant"),
                       MenuItem(separator=True),
                       MenuItem(id="clear", label="Clear chat", icon="mdi-broom", danger=True)]
         else:
@@ -587,8 +730,17 @@ class ChatView:
             from ui.memory import ContextModal
 
             ContextModal(self.sid, on_saved=lambda: spawn(self.load(), "reload chat"))
-        elif item == "classic":
-            js.window.open(classic_url(), "_blank", "noopener")
+        elif item == "voicecfg":
+            self.app.go("settings")
+            js.setTimeout(_proxy_once(lambda: _scroll_to("set-voice")), 400)
+        elif item == "speak" and mid:
+            m = self._msg(mid)
+            v = voice()
+            if m and v:
+                content = m["content"]
+                if m.get("swipes"):
+                    content = m["swipes"][max(0, min(m.get("swipe_index", 0), len(m["swipes"]) - 1))]
+                v.readAloud(content)
         elif item == "clear":
             spawn(self._clear(), "clear chat")
 

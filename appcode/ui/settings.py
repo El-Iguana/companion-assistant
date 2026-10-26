@@ -1,12 +1,14 @@
 """Settings (one page, in sections), the in-app Guide, and — for admins — Users.
 
 Every knob is the classic page's ⚙ Settings, with its explanation: thinking, the memory
-tuning, recall and automatic facts, and the voice/hands-free settings. The voice ones are
-already in use today by the classic page and the desktop avatar, so they are editable
-here even though the new page's own voice controls arrive in Phase 6. The microphone
-picker comes with them (it needs the browser's device list, granted mic access).
+tuning, recall and automatic facts, and the voice/hands-free settings with the
+microphone picker. Device names only come with microphone access, so the picker lists
+them straight away when access was granted before, and otherwise behind "Find
+microphones". Saving hands the new values to the voice island at once.
 """
 from __future__ import annotations
+
+import json
 
 import js
 
@@ -60,6 +62,9 @@ GROUPS = [
         ("full_duplex", "Let me interrupt her while she speaks", "check", None,
          "Only with headphones or an echo-cancelling mic (aec_source) — otherwise she hears her "
          "own voice and replies to herself."),
+        ("mic_device_id", "Microphone", "mic", None,
+         "For interrupting over speakers pick an echo-cancelled source (aec_source — "
+         "<code>scripts/setup-aec.sh --persist</code> creates it) <b>and</b> play through aec_sink."),
         ("desktop_card_id", "Desktop-mode character", "chars", None,
          "Who appears in the corner of the screen at /desktop."),
     ]),
@@ -86,6 +91,7 @@ class SettingsView:
         root.innerHTML = '<div class="pt-chat-loading"><span class="pt-spin"></span></div>'
         self.listeners.on(root, "click", self._on_click)
         self.listeners.on(root, "input", self._on_input)
+        self.listeners.on(root, "change", lambda _e: self._duplex_check())
         spawn(self.load(), "settings")
 
     def unmount(self) -> None:
@@ -98,6 +104,7 @@ class SettingsView:
             return
         self.data = r
         self.render()
+        spawn(self._fill_mics(False), "microphones")
         if r["me"]["role"] == "admin":
             await self.load_users()
 
@@ -115,6 +122,14 @@ class SettingsView:
             return (f'<label class="pt-setting"><span><b>{label}</b></span>'
                     f'<input type="text" data-s="{key}" value="{esc(v or "")}" placeholder="{esc(extra or "")}">'
                     + (f'<small>{hint}</small>' if hint else "") + '</label>')
+        if kind == "mic":
+            label = self.data["settings"].get("mic_device_label") or ""
+            opt = (f'<option value="{esc(v or "")}" selected>{esc(label)}</option>' if v else "")
+            return (f'<label class="pt-setting"><span><b>Microphone</b></span>'
+                    '<span class="pt-microw"><select data-s="mic_device_id" id="set-mic">'
+                    f'<option value="">Browser default</option>{opt}</select>'
+                    '<button class="pt-btn small" data-act="mics" type="button">Find microphones</button></span>'
+                    f'<small id="set-mic-warn" class="pt-warn" hidden></small><small>{hint}</small></label>')
         if kind in ("select", "chars"):
             options = extra if kind == "select" else (
                 [("", "her most recent chat's character")] + [(c["id"], c["name"]) for c in self.data.get("characters") or []])
@@ -128,8 +143,8 @@ class SettingsView:
         me = self.data["me"]
         groups = "".join(
             f'<section class="pt-sec" id="set-{gid}"><h2>{title}</h2>'
-            + (('<p class="pt-dim">Used by the classic page and the desktop avatar today; the new page\'s own '
-                'voice controls arrive in Phase 6. The microphone picker comes with them.</p>') if gid == "voice" else "")
+            + (('<p class="pt-dim">The ear in the chat box turns hands-free on; the microphone beside it is '
+                'push-to-talk (hold). The speaker in a chat\'s header reads replies aloud.</p>') if gid == "voice" else "")
             + "".join(self._control(*row) for row in rows) + '</section>'
             for gid, title, rows in GROUPS)
         self.root.innerHTML = (
@@ -184,6 +199,44 @@ class SettingsView:
             out.textContent = _fmt(attr(out, "data-fmt"), ev.target.value)
         by_id("set-status").textContent = "Unsaved changes"
 
+    async def _fill_mics(self, ask: bool) -> None:
+        """List capture devices. ``ask`` requests mic access when names are hidden."""
+        v = getattr(js.window, "PantheonVoice", None)
+        sel = by_id("set-mic")
+        if not v or not sel:
+            return
+        devices = json.loads(str(await v.mics(ask)))
+        if self.root is None or not by_id("set-mic"):
+            return
+        if not devices:
+            if ask:
+                toast("No microphones visible — the browser refused access or none is plugged in.", "warning")
+            return
+        want = self.data["settings"].get("mic_device_id") or ""
+        label = self.data["settings"].get("mic_device_label") or ""
+        opts = ['<option value="">Browser default</option>']
+        for d in devices:
+            text = d["label"] + ("  ✓ echo-cancelled" if d["aec"] else "")
+            opts.append(f'<option value="{esc(d["id"])}" data-label="{esc(d["label"])}"'
+                        f'{" selected" if d["id"] == want else ""}>{esc(text)}</option>')
+        if want and not any(d["id"] == want for d in devices):
+            opts.append(f'<option value="" disabled>(saved device “{esc(label)}” not found)</option>')
+        sel.innerHTML = "".join(opts)
+        self._duplex_check()
+
+    def _duplex_check(self) -> None:
+        """Warn while choosing, not only after she starts answering herself."""
+        box, sel = by_id("set-mic-warn"), by_id("set-mic")
+        duplex = self.root.querySelector('[data-s="full_duplex"]') if self.root else None
+        if not box or not sel or not duplex:
+            return
+        opt = sel.selectedOptions.item(0) if sel.selectedOptions.length else None
+        name = str(opt.textContent) if opt else ""
+        cancelled = any(k in name.lower() for k in ("aec", "echo", "cancel"))
+        box.hidden = not (duplex.checked and not cancelled)
+        box.innerHTML = ("Interruption is on but this microphone is not echo-cancelled. Fine on "
+                         "<b>headphones</b>; on <b>speakers</b> she will hear herself.")
+
     def collect(self) -> dict:
         values = {}
         for el in self.root.querySelectorAll("[data-s]"):
@@ -195,6 +248,11 @@ class SettingsView:
                 values[key] = int(n) if n.is_integer() and key != "vad_threshold" else n
             else:
                 values[key] = str(el.value)
+        sel = by_id("set-mic")
+        if sel is not None:
+            opt = sel.selectedOptions.item(0) if sel.selectedOptions.length else None
+            # deviceIds rotate when permissions reset; the label is what survives.
+            values["mic_device_label"] = (attr(opt, "data-label") or str(opt.textContent)) if opt and str(sel.value) else ""
         return values
 
     def _on_click(self, ev) -> None:
@@ -205,6 +263,8 @@ class SettingsView:
                 spawn(self._save(), "save settings")
             elif which == "password":
                 spawn(self._password(), "password")
+            elif which == "mics":
+                spawn(self._fill_mics(True), "microphones")
             elif which == "add-user":
                 spawn(self._add_user(), "add user")
             return
@@ -221,6 +281,10 @@ class SettingsView:
         if failed(r, "save settings"):
             return
         by_id("set-status").textContent = "Saved"
+        self.data["settings"] = r["settings"]
+        v = getattr(js.window, "PantheonVoice", None)
+        if v:
+            v.setSettings(js.JSON.parse(json.dumps(r["settings"])))
         toast("Settings saved.", "success")
 
     async def _password(self) -> None:

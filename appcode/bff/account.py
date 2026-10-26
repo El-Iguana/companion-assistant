@@ -18,6 +18,7 @@ SETTINGS = (
     "recall_enabled", "recall_top_k", "auto_facts_enabled", "auto_facts_max_new",
     "wake_word", "wake_mode", "sleep_phrase", "farewell", "sleep_after_s",
     "vad_silence_ms", "vad_threshold", "full_duplex", "desktop_card_id",
+    "hands_free", "mic_device_id", "mic_device_label",
 )
 
 

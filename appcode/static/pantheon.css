@@ -432,6 +432,33 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
   filter: drop-shadow(0 20px 40px rgba(0,0,0,.45)); }
 @media (max-width: 1480px) { .pt-portrait { display: none; } }
 
+/* Voice (Phase 6). Speaker in the header, hands-free + push-to-talk in the composer. */
+.pt-ibtn.on { color: var(--acc); border-color: var(--accLine); }
+.pt-vbtn { color: var(--mut); touch-action: none; user-select: none; -webkit-user-select: none; }
+.pt-vbtn:hover { color: var(--txt); }
+.pt-vbtn.on { color: var(--acc); background: color-mix(in srgb, var(--acc) 14%, transparent); }
+.pt-vbtn.on.awake { box-shadow: inset 0 0 0 2px var(--accLine); }
+.pt-vbtn.listening, .pt-vbtn.recording { color: #fff; background: #d84b4b; animation: pt-stop 1.4s infinite; }
+.pt-vbtn.busy { opacity: .55; cursor: progress; }
+
+/* The 3D avatar: one canvas that voice.js moves into the open chat's slot. Same corner
+   as the sprite portrait; on narrower screens it stays, smaller, behind the column. */
+.pt-avatar-slot { position: absolute; right: 0; bottom: 0; z-index: 0; height: 82%;
+  width: max(calc((100% - 860px) / 2 + 40px), 30%); pointer-events: none; }
+.pt-avatar-slot:empty { display: none; }
+canvas.pt-avatar { width: 100%; height: 100%; display: block; pointer-events: none;
+  filter: drop-shadow(0 20px 40px rgba(0,0,0,.45)); }
+canvas.pt-avatar[hidden] { display: none; }
+body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px; top: -10px; }
+/* Narrower: smaller, lifted clear of the composer, behind the column. Phones: hidden,
+   like the sprite (the renderer then draws a 1x1 canvas, which costs nothing). */
+@media (max-width: 1480px) { .pt-avatar-slot { bottom: 120px; height: 42%; width: 28%; opacity: .92; } }
+@media (max-width: 900px) { .pt-avatar-slot { display: none; } }
+
+.pt-microw { display: flex; gap: 8px; align-items: center; }
+.pt-microw select { flex: 1; min-width: 0; }
+.pt-warn { color: #e0a43a; }
+
 @media (max-width: 900px) {
   .pt-main:has(.pt-chat) > .pt-top { display: none; }
   .pt-chead-burger { display: inline-flex; }

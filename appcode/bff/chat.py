@@ -17,6 +17,11 @@ from __future__ import annotations
 from pytincture.dataclass import backend_for_frontend, bff_stream
 
 
+# AppSettings the voice island reads (static/js/voice.js).
+VOICE = ("hands_free", "wake_word", "wake_mode", "sleep_phrase", "farewell", "sleep_after_s",
+         "vad_silence_ms", "vad_threshold", "full_duplex", "mic_device_id", "mic_device_label")
+
+
 @backend_for_frontend
 class Chat:
     def __init__(self, _user: dict = None) -> None:
@@ -67,7 +72,12 @@ class Chat:
                 "expressions": sorted(card.expressions.keys()),
                 "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
                 "starters": starters(card),
+                # The voice island's per-character knobs (empty = the global setting).
+                "tts_voice": card.tts_voice, "tts_speed": card.tts_speed,
+                "wake_word": card.wake_word, "sleep_phrase": card.sleep_phrase,
+                "farewell": card.farewell,
             },
+            "voice": {k: v for k, v in main._load_settings(cur).model_dump().items() if k in VOICE},
             "persona": {"id": persona.id, "name": persona.name,
                         "has_portrait": bool(persona.image)},
             "relationship": rel,

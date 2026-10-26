@@ -70,6 +70,37 @@ def _session_secret() -> str:
     return f.read_text().strip()
 
 
+class BlobImagesMiddleware:
+    """Let the page load images it made itself.
+
+    three.js's GLTFLoader turns a .vrm's embedded textures into ``blob:`` URLs and loads
+    them (Chrome: ``fetch`` + ImageBitmap; others: ``<img>``). pytincture's CSP allows
+    ``blob:`` for scripts and workers but not ``img-src``/``connect-src``, and has no knob
+    for it, so every texture failed and the model rendered untextured. A blob URL can only
+    be minted by this page, so adding it opens no other origin.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def patched(message):
+            if message["type"] == "http.response.start":
+                headers = []
+                for k, v in message.get("headers", []):
+                    if k.lower() == b"content-security-policy":
+                        v = (v.replace(b"img-src 'self'", b"img-src 'self' blob:")
+                              .replace(b"connect-src 'self'", b"connect-src 'self' blob:"))
+                    headers.append((k, v))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, patched)
+
+
 def build_web_app():
     application = create_app(PytinctureConfig(
         modules_path=str(APPCODE),
@@ -77,6 +108,7 @@ def build_web_app():
         enable_user_login=True,
         # Loopback plain-HTTP login only. Off-box access is a later phase, behind TLS.
         enable_dev_email_login=True,
+        allow_microphone=True,           # hands-free and push-to-talk (Phase 6)
         session_secret=_session_secret(),
         allowed_hosts=("127.0.0.1",),
         canonical_origin=WEB_ORIGIN,
@@ -89,6 +121,7 @@ def build_web_app():
     ))
     check_at_startup()
     application.add_middleware(LoginPageMiddleware)
+    application.add_middleware(BlobImagesMiddleware)
     application.include_router(media_router)
     # The new page's own assets, and Pantheon's static tree (three.js, the VRM island).
     application.mount("/pstatic", StaticFiles(directory=str(APPCODE / "static")), name="pstatic")

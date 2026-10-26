@@ -124,6 +124,12 @@ class Pantheon(MainWindow):
         link.rel = "stylesheet"
         link.href = "/pstatic/pantheon.css"
         js.document.head.appendChild(link)
+        # The voice island (static/js/voice.js): page-wide, so a reply keeps speaking
+        # across a re-render and the mic outlives one chat view. The chat view drives it.
+        script = js.document.createElement("script")
+        script.id = "pt-voice"
+        script.src = "/static/js/voice.js"
+        js.document.head.appendChild(script)
 
     def _skeleton(self) -> str:
         tiles = "".join(

@@ -187,6 +187,131 @@ def studio_steps(page) -> None:
     page.wait_for_selector('[data-f="name"]', timeout=20_000)
     assert page.input_value('[data-f="name"]') == "Smoke Tester (copy)", "imported card keeps its name"
     assert page.input_value("[data-starter]") == "Run the tests", "starters round-trip through V2 export"
+    return card_id
+
+
+def phase6_steps(page, card_id: str) -> None:
+    """Voice controls, the wake-word gate, the mic picker and the 3D avatar.
+
+    Chromium runs with a fake microphone (a tone, or PANTHEON_FAKE_AUDIO's WAV), so
+    hands-free really opens a device. Speech itself needs the TTS/STT models, which only
+    the container has: PANTHEON_VOICE=1 adds the steps that need them.
+    """
+    page.goto(f"{URL}/pantheon/#/character/{card_id}")
+    page.wait_for_selector("[data-act=start]", timeout=120_000)
+    page.click("[data-act=start]")
+    page.wait_for_function("location.hash.startsWith('#/chat/')", timeout=15_000)
+    page.wait_for_selector("#ch-hf", timeout=20_000)
+    page.wait_for_function("!!window.PantheonVoice", timeout=10_000)
+
+    # speaker: a per-browser preference
+    page.click("#ch-speaker")
+    page.wait_for_selector("#ch-speaker.on", timeout=3_000)
+    assert page.evaluate("localStorage.getItem('pantheon.speaker')") == "1"
+    page.click("#ch-speaker")
+    page.wait_for_selector("#ch-speaker:not(.on)", timeout=3_000)
+
+    # hands-free opens the (fake) microphone, and off closes it
+    page.click("#ch-hf")
+    page.wait_for_selector("#ch-hf.on", timeout=10_000)
+    page.screenshot(path=str(SHOTS / "chat-handsfree.png"))
+    page.click("#ch-hf")
+    page.wait_for_selector("#ch-hf:not(.on)", timeout=5_000)
+    assert not page.evaluate("PantheonVoice.state().hfActive")
+
+    # the wake-word gate (pure logic; nothing is persisted by setSettings)
+    gate = page.evaluate("""() => {
+        const V = PantheonVoice, out = [];
+        V.setSettings({wake_word: "luna", wake_mode: "phrase"});
+        out.push(V._gate("Luna, what time is it?"), V._gate("what time is it"));
+        V.setSettings({wake_mode: "continuous", sleep_phrase: "that will be all."});
+        out.push(V._gate("Luna"), V.state().awake, V._gate("and tomorrow?"),
+                 V._gate("That'll be all"), V.state().awake);
+        V.setSettings({wake_word: "", wake_mode: "phrase"});
+        out.push(V._gate("anything at all"));
+        return out;
+    }""")
+    assert gate == ["what time is it?", "", "", True, "and tomorrow?", "", False, "anything at all"], gate
+    spoken = page.evaluate("PantheonVoice._clean('| a | b |\\n|---|---|\\n*waves* ~150 [expr:joy]')")
+    assert spoken == "a, b. about 150", spoken
+
+    # the 3D avatar: put the card on the VRM tier, open a chat, see the canvas
+    page.evaluate(f"location.hash = '#/create/{card_id}'")
+    page.wait_for_selector('[data-f="name"]', timeout=20_000)
+    model = page.evaluate("[...document.querySelectorAll('[data-f=vrm] option')].map(o => o.value).find(v => v)")
+    if model:
+        page.check('input[name="st-avatar"][value="vrm"]')
+        page.select_option('[data-f="vrm"]', model)
+        page.click('[data-act="save"]')
+        page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
+        page.go_back()
+        page.wait_for_function("location.hash.startsWith('#/chat/')", timeout=10_000)
+        page.wait_for_selector("#ch-avatar-slot canvas.pt-avatar:not([hidden])", timeout=60_000)
+        assert page.evaluate("document.body.classList.contains('pt-avatar-on')")
+        assert page.locator("#ch-portrait:not([hidden])").count() == 0, "sprite hides under the avatar"
+        page.wait_for_timeout(1500)
+        page.screenshot(path=str(SHOTS / "chat-avatar.png"))
+        # leaving the chat parks the canvas and stops the renderer
+        page.evaluate("location.hash = '#/discover'")
+        page.wait_for_timeout(800)
+        assert not page.evaluate("document.body.classList.contains('pt-avatar-on')")
+        page.evaluate(f"location.hash = '#/create/{card_id}'")
+        page.wait_for_selector('[data-f="name"]', timeout=20_000)
+        page.check('input[name="st-avatar"][value="sprite"]')
+        page.click('[data-act="save"]')
+        page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
+
+    # settings: the microphone picker lists the fake device
+    page.evaluate("location.hash = '#/settings'")
+    page.wait_for_selector("#set-mic", timeout=20_000)
+    page.click("[data-act=mics]")
+    page.wait_for_function("document.querySelectorAll('#set-mic option').length > 1", timeout=10_000)
+    page.locator("#set-voice").scroll_into_view_if_needed()
+    page.screenshot(path=str(SHOTS / "settings-mic.png"))
+
+    if os.environ.get("PANTHEON_VOICE"):
+        voice_steps(page, card_id)
+
+
+def voice_steps(page, card_id: str) -> None:
+    """Needs the TTS/STT models (the container) and, for push-to-talk, a fake mic WAV
+    of speech (PANTHEON_FAKE_AUDIO)."""
+    tts = page.evaluate("""async () => {
+        const csrf = document.cookie.split(';').map(s => s.trim()).find(p => /csrf/i.test(p.split('=')[0]));
+        const r = await fetch('/pmedia/tts', {method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': decodeURIComponent(csrf.split('=')[1])},
+            body: JSON.stringify({text: 'Hello there.', voice: 'af_sarah', speed: 1})});
+        return [r.status, r.headers.get('content-type'), (await r.arrayBuffer()).byteLength];
+    }""")
+    assert tts[0] == 200 and "audio/wav" in tts[1] and tts[2] > 10_000, tts
+    # outside the browser, so the expected 403 is not a console error
+    no_csrf = page.request.post(f"{URL}/pmedia/tts", data={"text": "x"}).status
+    assert no_csrf == 403, no_csrf
+    # read aloud a reply: playback starts (speaking goes true)
+    page.goto(f"{URL}/pantheon/#/character/{card_id}")
+    page.wait_for_selector("[data-act=start]", timeout=120_000)
+    page.click("[data-act=start]")
+    page.wait_for_selector("#ch-msgs .pt-msg.char", timeout=30_000)
+    page.hover("#ch-msgs .pt-msg.char >> nth=-1")
+    page.click("#ch-msgs .pt-msg.char >> nth=-1 >> [data-mmenu]")
+    page.click(".wapyt-cmenu-item:has-text('Read aloud')")
+    page.wait_for_function("PantheonVoice.state().speaking", timeout=20_000)
+    page.evaluate("PantheonVoice.stop()")
+    if os.environ.get("PANTHEON_FAKE_AUDIO"):
+        # push-to-talk: hold for the length of the fake recording, release, see it sent
+        before = page.locator("#ch-msgs .pt-msg.user").count()
+        page.hover("#ch-ptt")
+        page.mouse.down()
+        page.wait_for_selector("#ch-ptt.recording", timeout=10_000)
+        page.wait_for_timeout(int(os.environ.get("PANTHEON_FAKE_AUDIO_MS", "4000")))
+        page.mouse.up()
+        page.wait_for_function(f"document.querySelectorAll('#ch-msgs .pt-msg.user').length > {before}",
+                               timeout=60_000)
+        heard = page.inner_text("#ch-msgs .pt-msg.user >> nth=-1 >> .pt-bubble")
+        print("push-to-talk heard:", heard)
+        page.wait_for_selector("#ch-send.stop", timeout=10_000)
+        page.click("#ch-send")                            # stop the reply; not needed here
+        _idle(page)
 
 
 def _confirm(page, label):
@@ -324,7 +449,13 @@ def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROME or None)
+        # A fake microphone, granted without a prompt, and audio allowed to start
+        # without a gesture: hands-free and push-to-talk really open a device.
+        args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+                "--autoplay-policy=no-user-gesture-required"]
+        if os.environ.get("PANTHEON_FAKE_AUDIO"):
+            args.append(f"--use-file-for-fake-audio-capture={os.environ['PANTHEON_FAKE_AUDIO']}%noloop")
+        browser = p.chromium.launch(executable_path=CHROME or None, args=args)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(f"pageerror {e}"))
@@ -413,8 +544,9 @@ def run_steps(browser, page, errors: list) -> None:
 
         if not os.environ.get("PANTHEON_SKIP_CHAT"):
             chat_steps(page)
-        studio_steps(page)
+        smoke_card = studio_steps(page)
         phase5_steps(page)
+        phase6_steps(page, smoke_card)
 
         page.click("[data-theme=ember]")
         page.wait_for_timeout(800)

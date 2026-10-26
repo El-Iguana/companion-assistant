@@ -114,16 +114,19 @@ services/
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
-  stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
+  stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
+                        #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
 templates/index.html · static/css/style.css · static/js/app.js     # the classic page (also /desktop)
+static/js/voice.js      # the new page's voice island (port of app.js's voice loop) + on-demand vtuber.mjs loader
 service.py              # runs both pages; builds the pytincture app beside main.app
 pantheon_web/           # server-side support for the new page (plain modules, never shipped to the browser):
                         #   auth (login hook) · login_page · media (/pmedia: images, export, import, VRM upload,
-                        #   tts sample) · jobs (background sprite generation) · present (shared formatting)
+                        #   tts sample, tts, stt, avatar.vrm) · jobs (background sprite generation) · present (shared formatting)
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
-tests/smoke_web.py      # Playwright smoke test of the new page (WRITES: run on a scratch library)
+tests/smoke_web.py      # Playwright smoke test of the new page (WRITES: run on a scratch library); fake mic;
+                        #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
 scripts/web-dev.sh      # run the new page host-side against a scratch library
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library

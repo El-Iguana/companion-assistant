@@ -156,6 +156,43 @@ async def tts_sample(request: Request, voice: str = "", speed: float = 1.0):
                                  "voice": voice or "af_sarah", "speed": speed}, None)
 
 
+# --- voice + avatar (Phase 6) ---------------------------------------------------------
+@router.post("/tts")
+async def tts(request: Request):
+    """One sentence of a reply as WAV (``main.tts_synth``). JSON {text, voice, speed}."""
+    import main
+
+    _ctx(request)
+    _require_csrf(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="bad body")
+    text = str(body.get("text") or "")[:2000]
+    speed = max(0.5, min(1.5, float(body.get("speed") or 1.0)))
+    return await main.tts_synth({"text": text, "voice": str(body.get("voice") or "af_sarah"),
+                                 "speed": speed}, None)
+
+
+@router.post("/stt")
+async def stt(request: Request, file: UploadFile = File(...)):
+    """A recorded utterance (WAV) -> {text} (``main.stt_transcribe``)."""
+    import main
+
+    _ctx(request)
+    _require_csrf(request)
+    return await main.stt_transcribe(file, None)
+
+
+@router.get("/card/{card_id}/avatar.vrm")
+async def avatar(card_id: str, request: Request):
+    """This card's 3D model (``main.get_avatar``: filename only, never outside data/vrm)."""
+    import main
+
+    if not _ID.match(card_id):
+        raise HTTPException(status_code=404, detail="no such card")
+    return await main.get_avatar(card_id, cur=_ctx(request))
+
+
 @router.get("/help.html")
 def help_page(request: Request):
     """The in-app guide, from the template the classic page includes (templates/help.html),

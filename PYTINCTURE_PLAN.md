@@ -302,3 +302,50 @@ Built: `appcode/ui/{people,settings,memory}.py`, `appcode/bff/{people,account,me
   through Jinja, which read `{{char}}`/`{{user}}` as template variables and printed nothing —
   the copy-paste example prompts came out as "You are  in an ongoing story with ." They are in
   `{% raw %}` now; the new page's smoke test checks the macros survive.
+
+## Phase 6 results (2026-10-26) — voice and the 3D avatar
+
+Built: `static/js/voice.js` (the island), `POST /pmedia/tts`, `POST /pmedia/stt`,
+`GET /pmedia/card/<id>/avatar.vrm`, chat-view wiring, the Settings microphone picker,
+phase-6 steps in the smoke test.
+
+- **`voice.js` is a port, not a refactor.** The classic page and `/desktop` keep `app.js`
+  untouched; the voice loop was copied with its measured behaviour and the reasons beside it:
+  quoted-dialogue speech for roleplay and sentence-flushed whole replies for assistants,
+  `cleanForTTS`, prefetching speech queue, amplitude lip-sync, `[expr:x]` beats applied at
+  playback, PCM push-to-talk (WebKitGTK's MediaRecorder emits nothing), RMS VAD with 8-block
+  pre-roll, wake word with phrase/continuous modes, sleep phrase, farewell and idle timeout,
+  half-duplex by default, full duplex with the **deferred** barge-in, the self-hearing guard,
+  and mic choice by id → label → auto AEC.
+- **The seam.** Python calls `window.PantheonVoice` (`attach`, `feed`, `expr`, `setStreaming`,
+  `readAloud`, `speaker`, `pttStart/Stop`, `handsFree`, `mood`, `mics` …); the island answers
+  with `pvoice:*` window events (`send`, `abort`, `expr`, `state`, `persist`, `toast`). It never
+  reads the page's state. Settings it changes itself (`hands_free`, `full_duplex` after the
+  self-hearing guard trips) go back through `Account.save_settings`.
+- **UI.** Header speaker toggle (read replies aloud — a per-browser preference, kept in
+  localStorage); composer ear (hands-free: on / listening / awake states) and microphone
+  (hold to talk); "Read aloud" in a reply's ⋯ menu; chat ⋮ → Voice settings…. Leaving the chat
+  closes the mic (the saved setting stays on and the next chat reopens it): an open mic with
+  nothing to send to is only a privacy cost.
+- **3D avatar.** `vtuber.mjs` unchanged, imported on first need (only 3D-tier cards pay for
+  three.js); the import map is added before that import. Its one canvas moves into the open
+  chat's slot. Same corner as the sprite on wide screens, smaller and above the composer below
+  1480 px, hidden on phones like the sprite.
+- **CSP.** GLTFLoader loads a VRM's embedded textures from `blob:` URLs (Chrome via `fetch`,
+  others via `<img>`); pytincture allows `blob:` only for scripts and workers, with no setting,
+  so the model rendered untextured with 13 page errors. `service.BlobImagesMiddleware` adds
+  `blob:` to `img-src` and `connect-src` — page-minted URLs only, no new origin.
+  `allow_microphone=True` sets `Permissions-Policy: microphone=(self)`.
+- **Fixed for both pages — speech-to-text was broken in the image.** faster-whisper 1.2.1 calls
+  `av.open(..., metadata_errors=…)`, which PyAV 19.0.2 rejects, so every `/api/stt` raised a
+  TypeError (500). The deployed image has the same pair, so push-to-talk and hands-free on the
+  classic page were dead too. `services/stt.py` now decodes WAV (what both pages send) itself
+  and hands faster-whisper float32 samples at 16 kHz; other formats still go through PyAV.
+  Measured in the container: the Kokoro line "Hello there. What is your favourite colour?"
+  comes back as "Hello there, what is your favorite color?".
+- **Tests.** Chromium runs with a fake microphone. The host steps cover the speaker, hands-free
+  opening and closing a device, the wake-word gate (phrase, continuous, sleep phrase with a
+  contraction), `cleanForTTS`, the avatar rendering in chat and parking on leave, and the mic
+  picker. `PANTHEON_VOICE=1` (container only: the models are baked into the image) adds TTS,
+  the CSRF check, Read aloud starting playback, and — with `PANTHEON_FAKE_AUDIO=<speech.wav>` —
+  push-to-talk end to end, from the fake mic to a sent message.
