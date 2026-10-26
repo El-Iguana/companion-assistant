@@ -183,3 +183,62 @@ Screens behind the tiles are placeholders naming their phase, with a link to the
 - `pytincture`'s peer-address loopback check only gates its password-less dev login and API
   clients, so real logins through a published port work — the same thing Basilisk's compose
   install relies on.
+
+## Phase 2 results (2026-10-26) — Discover + profile
+
+Built: `appcode/ui/discover.py`, `appcode/ui/profile.py` (profile modal + Scenario dialog),
+`appcode/bff/library.py` (profile, start_chat, delete_card), `pantheon_web/present.py`,
+`/pmedia/card/<id>/export.png?version=2|3`, `ui.common.Modal`, `scripts/web-dev.sh`.
+
+- **Discover:** hero (counts, Browse / Create / Surprise me), a "Pick up where you left off"
+  rail, tag pills, the 3:4 portrait grid. The top-bar search filters it live (name, tagline,
+  tags; every word must match). The card's corner pill is **Continue →** the latest real
+  conversation, or **Chat →** for someone new.
+- **Profile** at `#/character/<id>` opens over Discover *in place* (the grid and its scroll
+  survive; Esc/backdrop/× return to `#/discover`). Continue · Start chat (with the greeting
+  picked in ‹ 1/3 ›, macros substituted for the active persona) · Scenario… (only when presets
+  exist) · Edit (Studio, Phase 4) · Export (V2/V3) · Delete (confirmed; like the classic page
+  it leaves chats/relationship/memories on disk). Roleplay cards show the relationship with the
+  active persona (stage, the four axes, emotional level, comfort tier).
+- **"Continue" = the latest chat with real conversation**, not the newest file: a chat that is
+  only the greeting (started and left) must not hide an older real one. The grid pill falls
+  back to a greeting-only chat rather than piling up new empty ones.
+- `main.create_session` is unchanged; greeting index, persona and preset + mode pass straight
+  through, so scenario chats behave exactly as from the classic wizard.
+
+Known gap: pytincture's post-login redirect drops the URL fragment, so a deep link
+(`#/character/…`) opened while signed out lands on Discover after signing in.
+
+## Phase 3 results (2026-10-26) — the chat view
+
+Built: `appcode/ui/chat.py`, `appcode/ui/chats.py` (the Chats tile: every chat, searchable),
+`appcode/bff/chat.py` (open, send, swipe, edit, delete, truncate_after, clear, sweep),
+`Shell.all_chats`, three endpoints in `main.py` (edit / delete / truncate one message),
+`tests/test_messages.py` (9 cases), chat steps in `tests/smoke_web.py` against the live backend.
+
+- **Layout:** Ember's centred 860 px column over the blurred portrait; carded replies with a
+  small avatar and "Name · time · feeling", accent-filled messages of yours on the right, day
+  dividers, `*actions*` in serif italic. The expression portrait docks beside the column above
+  1480 px and follows the running mood and live `[expr:x]` beats; the mood pill shows only for
+  cards with sprites, as on the classic page.
+- **Per message on hover:** ‹ n/m › on the last reply (› past the end = another take, the
+  classic ▶) and one ⋯ menu: Another take · Edit (yours: "Edit & resend") · Copy · Delete.
+- **Inline edit**; "Save & resend" = edit + truncate after + the ordinary regenerate path
+  (`main.chat` with `regenerate` answers a history that ends with a user message).
+- **Streaming** through `@bff_stream`: typing dots, then text with a cursor; Send becomes a
+  pulsing **Stop**, which cancels the task — the generated proxy aborts its fetch in a
+  `finally`, so KoboldCPP stops as with the classic page.
+- **A stopped turn is not saved** — true of the classic page too: `main.chat` saves the
+  exchange once, at the end. The new view puts your text back in the box and says so,
+  instead of letting it vanish.
+- **Idle sweep:** 5 min after a reply, per chat (the app owns the timers, so leaving the screen
+  does not cancel them; the classic page's single timer was cancelled by the next chat).
+- **Edit/delete/truncate keep memory consistent:** they move `last_summarized_index` and the
+  pairing's `swept_sessions` mark (`_shift_swept`), and a truncate below the summary resets it
+  as clearing does. Mood and relationship never change on these — as with re-rolls.
+- **`overflow: clip`, not `hidden`, on fixed-height containers.** An `overflow:hidden` box can
+  still be scrolled by `focus()`: opening the inline editor scrolled the chat header (and the
+  whole shell) out of view. `clip` cannot scroll. The smoke test asserts the header stays put.
+
+Until Phase 5/6 the chat header's ⋮ opens the classic page for memory, voice and the
+relationship-context editor.

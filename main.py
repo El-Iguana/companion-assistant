@@ -1228,6 +1228,103 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     return {"ok": True}
 
 
+# --- one message: edit, delete, truncate (the new page's ⋯ menu; PYTINCTURE_PLAN.md) ---
+# Messages are addressed by id, not position, so a chat changed in another tab cannot
+# make a request land on the wrong message. Two indices track this chat by POSITION —
+# the rolling summary's `last_summarized_index` and the pairing store's
+# `swept_sessions[id]` — so anything that removes messages must move them too, or the
+# summary skips/duplicates a turn and folding into long-term memory goes wrong (the same
+# failure `_forget_swept_session` documents for clearing).
+#
+# None of these touch mood or the relationship: those move on generation only, exactly
+# as a re-roll leaves them alone. Text already folded into a summary or into long-term
+# memory stays there — editing a line is not a request to rewrite what was remembered.
+
+def _find_message(s: ChatSession, message_id: str) -> int:
+    for i, m in enumerate(s.messages):
+        if m.id == message_id:
+            return i
+    raise HTTPException(404, "message not found")
+
+
+def _shift_swept(cur: Ctx, s: ChatSession, removed_from: int, count: int) -> None:
+    """`count` messages starting at index `removed_from` were removed: pull the
+    pairing's fold mark back so it still points at the same next-unfolded message."""
+    if count <= 0 or s.relationship is not None or not s.character_id:
+        return
+    persona = _load(cur.personas, s.persona_id, Persona) or _default_persona(cur)
+    card = _load(cur.cards, s.character_id, CharacterCard)
+    assistant = bool(card) and getattr(card, "chat_mode", "roleplay") == "assistant"
+    store = (_load_assistant_memory(cur, s.character_id, persona.id) if assistant
+             else _load_character_memory(cur, s.character_id, persona.id))
+    mark = store.swept_sessions.get(s.id)
+    if mark is None or mark <= removed_from:
+        return
+    store.swept_sessions[s.id] = max(removed_from, mark - count)
+    store.updated_at = datetime.now().isoformat()
+    (_save_assistant_memory if assistant else _save_character_memory)(cur, store)
+
+
+@app.put("/api/sessions/{session_id}/messages/{message_id}")
+async def edit_message(session_id: str, message_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
+    """Replace one message's text. On a character reply it edits the swipe being shown."""
+    s = _load(cur.sessions, session_id, ChatSession)
+    if not s:
+        raise HTTPException(404, "session not found")
+    text = str(body.get("content") or "").strip()
+    if not text:
+        raise HTTPException(400, "a message cannot be empty — delete it instead")
+    m = s.messages[_find_message(s, message_id)]
+    m.content = text
+    if m.swipes and 0 <= m.swipe_index < len(m.swipes):
+        m.swipes[m.swipe_index] = text
+    s.updated_at = datetime.now().isoformat()
+    _save(s, cur.sessions)
+    return {"ok": True, "message": m.model_dump()}
+
+
+@app.delete("/api/sessions/{session_id}/messages/{message_id}")
+async def delete_message(session_id: str, message_id: str, cur: Ctx = Depends(get_ctx)):
+    """Remove one message. The opening greeting is kept, as clearing a chat keeps it."""
+    s = _load(cur.sessions, session_id, ChatSession)
+    if not s:
+        raise HTTPException(404, "session not found")
+    i = _find_message(s, message_id)
+    if i == 0:
+        raise HTTPException(400, "the opening greeting stays — clear the chat to start over")
+    del s.messages[i]
+    if i < s.memory.last_summarized_index:
+        s.memory.last_summarized_index -= 1
+    s.updated_at = datetime.now().isoformat()
+    _save(s, cur.sessions)
+    _shift_swept(cur, s, i, 1)
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/messages/{message_id}/truncate")
+async def truncate_after(session_id: str, message_id: str, cur: Ctx = Depends(get_ctx)):
+    """Drop every message AFTER this one ("Save & resend": edit, truncate, regenerate).
+
+    A cut below what the rolling summary already covers resets the summary, as
+    clearing a chat does: the summary would otherwise describe turns that no longer
+    exist, and they would be injected as "the story so far"."""
+    s = _load(cur.sessions, session_id, ChatSession)
+    if not s:
+        raise HTTPException(404, "session not found")
+    keep = _find_message(s, message_id) + 1
+    removed = len(s.messages) - keep
+    if removed <= 0:
+        return {"ok": True, "removed": 0}
+    s.messages = s.messages[:keep]
+    if keep < s.memory.last_summarized_index:
+        s.memory.summary = ""
+        s.memory.last_summarized_index = 0
+    s.updated_at = datetime.now().isoformat()
+    _save(s, cur.sessions)
+    _shift_swept(cur, s, keep, removed)
+    return {"ok": True, "removed": removed}
+
+
 # --------------------------------------------------------------------------
 # Chat — SSE streaming
 # --------------------------------------------------------------------------

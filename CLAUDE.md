@@ -39,8 +39,8 @@ them with `services.auth`). Its cookie key is `data/auth/pytincture.key`.
 uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt pip pytest \
     ~/Development/Pytinc/wa_pytincture_widgetset
 PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
-PANTHEON_SERVE=web PANTHEON_DATA_DIR=/tmp/pantheon-dev PANTHEON_WEB_PORT=7871 \
-  KOBOLD_URL=http://localhost:5001 COMFYUI_URL=http://localhost:8188 .venv/bin/python service.py
+PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871, pidfile; stop|restart|log
+                                                                # refuses the real data/
 PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
   CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
   uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
@@ -121,7 +121,8 @@ service.py              # runs both pages; builds the pytincture app beside main
 pantheon_web/           # server-side support for the new page: auth hook, login page, /pmedia images
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
-tests/smoke_web.py      # Playwright smoke test of the new page
+tests/smoke_web.py      # Playwright smoke test of the new page (WRITES: run on a scratch library)
+scripts/web-dev.sh      # run the new page host-side against a scratch library
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
@@ -255,6 +256,11 @@ POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat in
 GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
+PUT    /api/sessions/{id}/messages/{mid}            edit one message (a reply: the swipe shown)
+DELETE /api/sessions/{id}/messages/{mid}            delete one (not the greeting)
+POST   /api/sessions/{id}/messages/{mid}/truncate   drop everything after it ("Save & resend")
+       — all three keep memory.last_summarized_index and the pairing's swept_sessions mark
+         consistent; a truncate below the summary resets it, like clearing (tests/test_messages.py)
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
 ```
 

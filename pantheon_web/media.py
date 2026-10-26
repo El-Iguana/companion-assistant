@@ -99,3 +99,13 @@ def persona_portrait(persona_id: str, request: Request):
     if not persona:
         raise HTTPException(status_code=404, detail="no such persona")
     return _png(request, persona.image, _etag(cur.personas / f"{persona_id}.json"))
+
+
+@router.get("/card/{card_id}/export.png")
+async def card_export(card_id: str, request: Request, version: int = 2):
+    """The character as a V2/V3 PNG card (download) — ``main.export_card`` unchanged."""
+    import main
+
+    if not _ID.match(card_id) or version not in (2, 3):
+        raise HTTPException(status_code=404, detail="no such card")
+    return await main.export_card(card_id, version, cur=_ctx(request))

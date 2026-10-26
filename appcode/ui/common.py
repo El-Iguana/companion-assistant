@@ -154,3 +154,47 @@ class Listeners:
             except Exception:  # noqa: BLE001
                 pass
         self._items = []
+
+
+class Modal:
+    """Ember's modal: centred panel (max 640 px, 22 px radius) over a blurred backdrop.
+
+    Hand-built rather than wapyt's ModalWindow because Ember's profile has no title bar —
+    the cover image runs to the top edge. Esc, a backdrop click and anything carrying
+    ``data-close`` close it; ``on_close`` runs once either way.
+    """
+
+    def __init__(self, inner_html: str, cls: str = "", on_close=None) -> None:
+        self._on_close = on_close
+        self.listeners = Listeners()
+        self.overlay = js.document.createElement("div")
+        self.overlay.className = "pt-modal-veil"
+        self.overlay.innerHTML = f'<div class="pt-modal {cls}" role="dialog" aria-modal="true">{inner_html}</div>'
+        js.document.body.appendChild(self.overlay)
+        self.panel = self.overlay.firstElementChild
+        self.listeners.on(self.overlay, "click", self._click)
+        self.listeners.on(js.document, "keydown", self._key)
+        self.open = True
+
+    def _click(self, ev) -> None:
+        if ev.target == self.overlay or closest(ev, "[data-close]"):
+            self.close()
+
+    def _key(self, ev) -> None:
+        # A wapyt dialog (confirm) on top owns Escape; only close when we are topmost.
+        if ev.key == "Escape" and not js.document.querySelector(".wapyt-msg-overlay"):
+            self.close()
+
+    def set_html(self, inner_html: str) -> None:
+        self.panel.innerHTML = inner_html
+
+    def close(self) -> None:
+        if not self.open:
+            return
+        self.open = False
+        self.overlay.remove()
+        # close() usually runs inside one of these listeners; destroying the proxy that is
+        # executing fails, so release them on the next tick.
+        asyncio.get_event_loop().call_soon(self.listeners.clear)
+        if self._on_close:
+            self._on_close()

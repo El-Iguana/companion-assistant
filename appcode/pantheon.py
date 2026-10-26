@@ -18,15 +18,18 @@ point of the rewrite; wapyt supplies the context menu, toasts and dialogs.
 from __future__ import annotations
 
 import js
-from pyodide.ffi import create_proxy
+from pyodide.ffi import create_once_callable, create_proxy
 
 from wapyt import CellConfig, ContextMenu, ContextMenuConfig, LayoutConfig, MainWindow, MenuItem
 
 from bff.shell import Shell
 from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, esc, failed,
                        persona_url, portrait_url, sign_out, spawn, toast)
-from ui.views import (ChatsView, ChatView, CreateView, DiscoverView, PersonasView,
-                      PresetsView, SettingsView)
+from bff.chat import Chat
+from ui.chat import ChatView
+from ui.chats import ChatsView
+from ui.discover import DiscoverView
+from ui.views import CreateView, PersonasView, PresetsView, SettingsView
 
 APP_ENTRYPOINT = "Pantheon"
 
@@ -42,12 +45,18 @@ SCREENS = {
     "discover": DiscoverView, "create": CreateView, "chats": ChatsView,
     "personas": PersonasView, "presets": PresetsView, "settings": SettingsView,
     "chat": ChatView,
+    "character": DiscoverView,      # Discover with a profile open: #/character/<id>
 }
+# Routes that light up a tile other than their own name.
+TILE_OF = {"character": "discover"}
 THEMES = [("bone", "Bone", "#f5f1e8"), ("ember", "Ember", "#e8a33d"), ("moss", "Moss", "#9ec978"),
           ("dusk", "Dusk", "#b79df0"), ("harbor", "Harbor", "#7fb4d8")]
 THEME_KEY = "pantheon.theme"     # per-browser cache only, to paint the right colours before
                                  # the account's own setting arrives; the account is the truth.
 STATUS_MS = 30_000
+# The idle fold into long-term memory: 5 minutes after a reply, as on the classic page
+# (SWEEP_IDLE_MS in static/js/app.js). The sweep is idempotent server-side.
+SWEEP_IDLE_MS = 5 * 60 * 1000
 
 _KEEP: list = []
 
@@ -80,6 +89,8 @@ class Pantheon(MainWindow):
         self.shell: dict = {}
         self.screen = None
         self.route = ("", "")
+        self.query = ""
+        self.sweeps: dict = {}           # session id -> pending timer (one per chat)
         self.listeners = Listeners()
         self._sure_id = ""
         self._load_css()
@@ -91,6 +102,7 @@ class Pantheon(MainWindow):
         root = by_id("pt-app")
         self.listeners.on(root, "click", self._on_click)
         self.listeners.on(by_id("pt-q"), "keydown", self._on_search_key)
+        self.listeners.on(by_id("pt-q"), "input", self._on_search_input)
         self.listeners.on(js.window, "hashchange", lambda _e: self._route())
 
         self.persona_menu = ContextMenu(ContextMenuConfig(items=[MenuItem(id="none", label="…")]))
@@ -183,6 +195,16 @@ class Pantheon(MainWindow):
         js.document.getElementById("pt-app").classList.remove("drawer")
         if (name, arg) == self.route and self.screen is not None:
             return
+        # Discover <-> a profile on it: open/close the modal in place, so the grid (and
+        # its scroll position) survives instead of being rebuilt under the modal.
+        if (name in ("discover", "character") and self.route[0] in ("discover", "character")
+                and isinstance(self.screen, DiscoverView)):
+            self.route = (name, arg)
+            if name == "character" and arg:
+                self.screen.open_profile(arg)
+            elif self.screen.modal is not None:
+                self.screen.modal.close()
+            return
         if self.screen is not None:
             try:
                 self.screen.unmount()
@@ -197,7 +219,7 @@ class Pantheon(MainWindow):
         self.screen = SCREENS[name](self, arg)
         self.screen.mount(host)
         for el in js.document.querySelectorAll(".pt-tile"):
-            el.classList.toggle("on", attr(el, "data-tile") == name)
+            el.classList.toggle("on", attr(el, "data-tile") == TILE_OF.get(name, name))
         self._mark_active_chat()
 
     # --- data ----------------------------------------------------------------------
@@ -210,12 +232,6 @@ class Pantheon(MainWindow):
         self._render_rail()
         if self.screen is not None and hasattr(self.screen, "on_shell"):
             self.screen.on_shell(r)
-        # The placeholder screens read shell data at mount; re-mount the current one once
-        # the first load lands so it is not stuck on the empty pre-load render.
-        if self.screen is not None and not getattr(self, "_mounted_with_data", False):
-            self._mounted_with_data = True
-            self.route = ("", "")
-            self._route()
 
     async def refresh_status(self) -> None:
         r = await Shell().status()
@@ -234,6 +250,25 @@ class Pantheon(MainWindow):
             f"KoboldCPP: {'up · ' + str(k.get('model')) if k.get('online') else 'offline'}\n"
             f"ComfyUI: {'up' if c.get('online') else 'offline'}")
 
+    # --- memory sweep --------------------------------------------------------------
+    def schedule_sweep(self, session_id: str, scenario: bool = False) -> None:
+        """Arm (or re-arm) the idle fold of one chat into long-term memory. Scenario
+        chats are never swept, as on the classic page. Timers are per chat, so
+        moving on to another chat does not cancel the first one's fold."""
+        if scenario or not session_id:
+            return
+        old = self.sweeps.pop(session_id, None)
+        if old is not None:
+            js.clearTimeout(old)
+
+        def fire(*_):
+            self.sweeps.pop(session_id, None)
+            spawn(Chat().sweep(session_id), "memory sweep")
+
+        # One-shot: frees itself after running (a re-armed timer's old callback is cleared
+        # before it fires and is collected with it).
+        self.sweeps[session_id] = js.setTimeout(create_once_callable(fire), SWEEP_IDLE_MS)
+
     # --- rail ----------------------------------------------------------------------
     def _render_rail(self) -> None:
         s = self.shell
@@ -242,7 +277,7 @@ class Pantheon(MainWindow):
             '<div class="pt-empty-side">No chats yet — start one from Discover.</div>')
         chars = s.get("characters") or []
         by_id("pt-mine").innerHTML = "".join(
-            f'<a class="pt-citem" href="#/discover" data-char="{esc(c["id"])}">'
+            f'<a class="pt-citem" href="#/character/{esc(c["id"])}" data-char="{esc(c["id"])}">'
             + avatar_html(c["name"], portrait_url(c["id"], c.get("updated_at", "")) if c.get("has_portrait") else "", 34)
             + f'<span class="pt-citem-txt"><span class="pt-citem-name">{esc(c["name"])}</span>'
             f'<span class="pt-citem-sub">{esc(c.get("tagline") or "")}</span></span></a>'
@@ -351,7 +386,15 @@ class Pantheon(MainWindow):
         await self.refresh()
         toast(f"You are now {(self.shell.get('persona') or {}).get('name', 'that persona')}.", "success")
 
+    def _on_search_input(self, _ev) -> None:
+        self.query = str(by_id("pt-q").value or "")
+        if self.screen is not None and hasattr(self.screen, "on_query"):
+            self.screen.on_query(self.query)
+
     def _on_search_key(self, ev) -> None:
-        if ev.key == "Enter":
-            # Discover does the filtering (Phase 2); for now searching lands there.
+        if ev.key == "Enter" and self.route[0] not in ("discover", "character"):
+            # The grid on Discover is what filters; from anywhere else, go there.
             self.go("discover")
+        elif ev.key == "Escape":
+            by_id("pt-q").value = ""
+            self._on_search_input(ev)

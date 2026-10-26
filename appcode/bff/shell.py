@@ -14,17 +14,6 @@ from pytincture.dataclass import backend_for_frontend
 THEMES = ("bone", "ember", "moss", "dusk", "harbor")
 
 
-def _tagline(card) -> str:
-    """One short line for a card: creator notes, else personality, else the description's
-    first sentence. Ember shows one under every name."""
-    for text in (card.creator_notes, card.personality, card.description):
-        line = " ".join((text or "").split())
-        if line:
-            first = line.split(". ")[0].rstrip(".")
-            return first[:90] + ("…" if len(first) > 90 else "")
-    return ""
-
-
 def _preview(session) -> str:
     for m in reversed(session.messages):
         text = " ".join((m.content or "").split())
@@ -46,6 +35,7 @@ class Shell:
     async def shell(self) -> dict:
         import main
         from models.schema import CharacterCard, ChatSession, Persona
+        from pantheon_web.present import has_portrait, tagline
 
         cur = self._cur()
         if cur is None:
@@ -57,8 +47,16 @@ class Shell:
         by_card = {c.id: c for c in cards}
         by_persona = {p.id: p for p in personas}
         chats_per_card: dict[str, int] = {}
-        for s in sessions:
+        latest_per_card: dict[str, str] = {}
+        talked_per_card: dict[str, str] = {}
+        for s in sorted(sessions, key=lambda s: s.updated_at or ""):
             chats_per_card[s.character_id] = chats_per_card.get(s.character_id, 0) + 1
+            latest_per_card[s.character_id] = s.id          # last write wins = newest
+            if len(s.messages) > 1:
+                talked_per_card[s.character_id] = s.id
+        # Resume the latest real conversation; a greeting-only chat only when there is no
+        # other (so the card's pill never piles up new empty chats).
+        resume_per_card = {cid: talked_per_card.get(cid) or sid for cid, sid in latest_per_card.items()}
         recent = []
         for s in sorted(sessions, key=lambda s: s.updated_at or "", reverse=True)[:30]:
             card = by_card.get(s.character_id)
@@ -67,15 +65,16 @@ class Shell:
             persona = by_persona.get(s.persona_id)
             recent.append({
                 "id": s.id, "character_id": card.id, "character": card.name,
-                "has_portrait": bool(card.image or card.expressions.get("neutral")),
+                "has_portrait": has_portrait(card),
                 "persona": persona.name if persona else "",
                 "preview": _preview(s), "updated_at": s.updated_at,
                 "messages": len(s.messages),
             })
         characters = [{
-            "id": c.id, "name": c.name, "tagline": _tagline(c), "tags": list(c.tags or [])[:6],
-            "has_portrait": bool(c.image or c.expressions.get("neutral")),
-            "chats": chats_per_card.get(c.id, 0), "mode": c.chat_mode,
+            "id": c.id, "name": c.name, "tagline": tagline(c), "tags": list(c.tags or [])[:6],
+            "has_portrait": has_portrait(c),
+            "chats": chats_per_card.get(c.id, 0), "latest_chat": resume_per_card.get(c.id, ""),
+            "mode": c.chat_mode,
             "updated_at": c.updated_at,
         } for c in sorted(cards, key=lambda c: c.name.lower())]
         settings = main._load_settings(cur)
@@ -90,6 +89,32 @@ class Shell:
             "characters": characters,
             "theme": settings.ui_theme if settings.ui_theme in THEMES else "bone",
         }
+
+    async def all_chats(self) -> dict:
+        """Every chat, newest first, with the same preview fields as the rail's 30."""
+        import main
+        from models.schema import CharacterCard, ChatSession, Persona
+        from pantheon_web.present import has_portrait
+
+        cur = self._cur()
+        if cur is None:
+            return {"ok": False, "error": "not signed in", "signed_out": True}
+        cards = {c.id: c for c in main._list(cur.cards, CharacterCard)}
+        personas = {p.id: p for p in main._list(cur.personas, Persona)}
+        out = []
+        for s in sorted(main._list(cur.sessions, ChatSession), key=lambda s: s.updated_at or "",
+                        reverse=True):
+            card = cards.get(s.character_id)
+            if card is None:
+                continue
+            persona = personas.get(s.persona_id)
+            out.append({
+                "id": s.id, "character_id": card.id, "character": card.name,
+                "has_portrait": has_portrait(card), "persona": persona.name if persona else "",
+                "preview": _preview(s), "updated_at": s.updated_at, "created_at": s.created_at,
+                "messages": len(s.messages), "scenario": s.relationship is not None,
+            })
+        return {"ok": True, "chats": out}
 
     async def status(self) -> dict:
         """KoboldCPP and ComfyUI, probed in parallel (each has a 5 s timeout)."""
