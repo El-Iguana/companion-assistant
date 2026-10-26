@@ -64,6 +64,9 @@ class AppSettings(BaseModel):
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
     auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
     auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
+    # The pytincture page's colourway (Ember's palette): bone|ember|moss|dusk|harbor.
+    # Per account rather than per browser, so it follows you; the old page ignores it.
+    ui_theme: str = "bone"
 
 
 # ---------------------------------------------------------------------------

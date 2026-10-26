@@ -9,6 +9,9 @@ IMAGE="localhost/companion:latest"
 CONTAINER="companion"
 NETWORK="ai-net"
 PORT="7861"
+# The new pytincture page (PYTINCTURE_PLAN.md). Loopback only; its login refuses anything
+# else. Container and host use the same number because it is also the page's origin.
+WEB_PORT="${PANTHEON_WEB_PORT:-7866}"
 
 REBUILD=0
 while [[ $# -gt 0 ]]; do
@@ -81,6 +84,8 @@ podman run -d \
   --restart unless-stopped \
   $NET_ARG \
   -p "${PORT}:7861" \
+  -p "127.0.0.1:${WEB_PORT}:${WEB_PORT}" \
+  -e "PANTHEON_WEB_PORT=${WEB_PORT}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
   -e "TZ=${TZ_VAL}" \
@@ -92,5 +97,6 @@ podman run -d \
 echo ""
 echo "✓  Pantheon is running."
 echo "   Open: http://localhost:${PORT}"
+echo "   New page (in progress): http://127.0.0.1:${WEB_PORT}/   (127.0.0.1, not localhost)"
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

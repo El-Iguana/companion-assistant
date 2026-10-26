@@ -38,3 +38,6 @@ llm-models/*
 !llm-models/.gitkeep
 voices/*
 !voices/.gitkeep
+
+# pytincture page: the browser wapyt wheel (dev_wheel.sh locally, the Containerfile in the image)
+appcode/wapyt-*.whl

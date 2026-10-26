@@ -25,6 +25,30 @@ python run.py                # local dev w/ autoreload (needs deps on host)
 # open http://localhost:7861 ; logs: podman logs -f companion ; stop: podman stop companion
 ```
 
+### The new page (pytincture + Ember's UX) — in progress
+
+Plan and decision log: **`PYTINCTURE_PLAN.md`**. The container now runs **`service.py`**: one
+process, two servers — the classic page (`main.app`) on **7861** exactly as before, and the new
+pytincture page on **`http://127.0.0.1:7866/`**, published on loopback only. **Use `127.0.0.1`,
+never `localhost`**: pytincture's plain-HTTP login refuses any Host that is not a literal
+loopback IP. Same accounts and passwords as the classic page (`pantheon_web/auth.py` checks
+them with `services.auth`). Its cookie key is `data/auth/pytincture.key`.
+
+```bash
+# host-side dev against a THROWAWAY library — never the real data/:
+uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt pip pytest \
+    ~/Development/Pytinc/wa_pytincture_widgetset
+PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
+PANTHEON_SERVE=web PANTHEON_DATA_DIR=/tmp/pantheon-dev PANTHEON_WEB_PORT=7871 \
+  KOBOLD_URL=http://localhost:5001 COMFYUI_URL=http://localhost:8188 .venv/bin/python service.py
+PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
+  CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
+  uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
+```
+
+`PANTHEON_DATA_DIR` (read by `main.py`) points any instance at another library;
+`PANTHEON_SERVE=both|web|classic` picks the servers; the rest are in `service.py`'s header.
+
 Prereqs: `~/Development/ai_ecosystem/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
 distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absolutereality_v181`) when both
 run. **Data (`data/…`) is a mounted volume**, so editing card/session/relationship JSON is live; **code
@@ -69,7 +93,7 @@ Traps, all measured:
 
 | Container  | Network         | Address                         | Role         |
 |------------|-----------------|---------------------------------|--------------|
-| companion  | ai-net | `0.0.0.0:7861`                  | this app     |
+| companion  | ai-net | `0.0.0.0:7861` + `127.0.0.1:7866` | this app (classic + new page) |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
 
@@ -92,7 +116,12 @@ services/
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
-templates/index.html · static/css/style.css · static/js/app.js
+templates/index.html · static/css/style.css · static/js/app.js     # the classic page (also /desktop)
+service.py              # runs both pages; builds the pytincture app beside main.app
+pantheon_web/           # server-side support for the new page: auth hook, login page, /pmedia images
+appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
+                        #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
+tests/smoke_web.py      # Playwright smoke test of the new page
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)

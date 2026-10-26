@@ -29,8 +29,14 @@ services:
       COMFYUI_URL: ${COMFYUI_URL:-http://127.0.0.1:8188}
       TZ: ${TZ:-UTC}
       COMPANION_ADMIN_PASSWORD: ${PANTHEON_ADMIN_PASSWORD:-}
-    command: ["python3", "-m", "uvicorn", "main:app",
-              "--host", "${PANTHEON_BIND:-127.0.0.1}", "--port", "${PANTHEON_PORT:-7861}"]
+      # service.py serves both pages. With host networking these ARE the host's
+      # addresses: the classic page follows PANTHEON_BIND as before, and the new page
+      # stays on 127.0.0.1 (the image's 0.0.0.0 is for published bridge ports only).
+      PANTHEON_CLASSIC_BIND: ${PANTHEON_BIND:-127.0.0.1}
+      PANTHEON_CLASSIC_PORT: ${PANTHEON_PORT:-7861}
+      PANTHEON_WEB_BIND: 127.0.0.1
+      PANTHEON_WEB_PORT: ${PANTHEON_WEB_PORT:-7866}
+    command: ["python3", "service.py"]
     volumes:
       - pantheon-data:/app/data
       - ${PIPER_VOICES_DIR:-./voices}:/app/models/piper:ro,z

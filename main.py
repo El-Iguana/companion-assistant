@@ -36,7 +36,9 @@ from services import card_io, prompt_builder, memory, assistant_memory, expressi
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
-DATA = BASE / "data"
+# PANTHEON_DATA_DIR points a dev or test instance at a throwaway library. Unset in the
+# container, where data/ is the mounted volume.
+DATA = Path(os.environ.get("PANTHEON_DATA_DIR") or (BASE / "data"))
 AUTH = DATA / "auth"
 USERS = AUTH / "users"
 UROOT = DATA / "u"                       # per-user library roots: data/u/<uid>/<subdir>/

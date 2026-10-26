@@ -33,3 +33,7 @@ voices/
 desktop/
 eval/
 scripts/
+
+# The browser wapyt wheel is built by the Containerfile; a local dev copy must not shadow it.
+appcode/wapyt-*.whl
+tests/
