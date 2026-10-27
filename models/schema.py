@@ -134,6 +134,16 @@ class CharacterCard(BaseModel):
     # stored explicitly so a character can keep a model assigned while showing
     # sprites -- switching back and forth must not throw the other away.
     avatar_mode: str = "sprite"          # "sprite" | "vrm"
+    # Profile picture: where the card's picture comes from (cards, rail, chat header).
+    # "" = automatic, the behaviour before this field: uploaded portrait, else the
+    # neutral sprite. "image" = the uploaded portrait, "sprite" = one expression sprite
+    # (`portrait_sprite`), "vrm" = a still of the 3D model (`vrm_still`, rendered in the
+    # browser by vtuber.mjs; `vrm_still_of` is the model file it was taken from). A
+    # missing source falls back to automatic, so a card never loses its picture.
+    portrait_source: str = ""            # "" | "image" | "sprite" | "vrm"
+    portrait_sprite: str = "neutral"
+    vrm_still: Optional[str] = None      # base64 PNG
+    vrm_still_of: str = ""
     # Per-character wake word. Empty falls back to the global one in AppSettings,
     # so existing setups keep working; set it to give each character her own name
     # to answer to, which is the point of having several.

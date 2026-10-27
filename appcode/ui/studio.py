@@ -72,6 +72,8 @@ class StudioView:
         self.lore: list = []                  # original entry dicts (unknown fields survive)
         self.portrait = ""                    # a newly picked image (data URL), not yet saved
         self.remove_portrait = False
+        self.vrm_still = ""                   # a freshly captured 3D still (data URL), not yet saved
+        self.vrm_still_of = ""
         self.dirty = False
         self.saving = False
         self.job = None
@@ -148,6 +150,7 @@ class StudioView:
         self._sync_mode()
         self._sync_avatar_mode()
         self._render_vrm_info()
+        self._sync_profile()
         self._render_preview()
 
     # Small field builders. Every value is escaped; data-f names the card field.
@@ -188,7 +191,8 @@ class StudioView:
             f'<button class="pt-btn small ghost" data-act="remove-portrait"{"" if portrait else " hidden"}>Remove</button>'
             '<small class="pt-dim">Shown on cards, in chat, and the base for generated sprites. Stored as PNG.</small>'
             '</div></div>'
-            '<div class="pt-row2">'
+            + self._profile_html()
+            + '<div class="pt-row2">'
             + self._inp("Name", "name", c.get("name"), ph="Who are they?")
             + self._inp("Nickname", "nickname", c.get("nickname"))
             + '</div>'
@@ -331,6 +335,62 @@ class StudioView:
             '</div>')
 
     # --- sprites -------------------------------------------------------------------
+    def _profile_html(self) -> str:
+        """Where the profile picture comes from: portrait, one sprite, or a 3D still."""
+        c = self.data["card"]
+        src = c.get("portrait_source") or ""
+        sprites = c.get("sprites") or []
+        want = c.get("portrait_sprite") or "neutral"
+        spr_opts = [(s, s) for s in sprites] or [("neutral", "neutral — no sprites yet")]
+        if want not in [s for s, _ in spr_opts]:
+            spr_opts.insert(0, (want, f"{want} — not generated"))
+        still = ("Captured from " + esc(c.get("vrm_still_of") or "the model")) if c.get("has_vrm_still") else "No still yet"
+        return (
+            '<div class="pt-row2">'
+            + self._sel("Profile picture", "portrait_source",
+                        [("", "Automatic — portrait, else neutral sprite"), ("image", "Uploaded portrait"),
+                         ("sprite", "Expression sprite"), ("vrm", "3D model still")], src,
+                        "What cards, the sidebar and the chat header show.")
+            + '<div id="st-pp-sprite">' + self._sel("Sprite", "portrait_sprite", spr_opts, want) + '</div>'
+            + '<div class="pt-field" id="st-pp-vrm"><span>3D still</span><div class="pt-btnrow">'
+            '<button class="pt-btn small" data-act="capture-still"><i class="mdi mdi-camera"></i>Capture from model</button></div>'
+            f'<small id="st-pp-still">{still}. Taken from the model chosen under 3D avatar; retaken on save when the model changes.</small></div>'
+            '</div>')
+
+    def _pp_source(self) -> str:
+        return self._field("portrait_source")
+
+    def _sync_profile(self) -> None:
+        src = self._pp_source()
+        for el_id, on in (("st-pp-sprite", src == "sprite"), ("st-pp-vrm", src == "vrm")):
+            el = by_id(el_id)
+            if el:
+                el.hidden = not on
+
+    async def _capture_still(self, quiet: bool = False) -> bool:
+        name = self._field("vrm")
+        if not name:
+            if not quiet:
+                toast("Choose a model under 3D avatar first.", "warning")
+            return False
+        note = by_id("st-pp-still")
+        if note:
+            note.textContent = "Rendering the model…"
+        try:
+            url = "/pmedia/vrm/" + str(js.encodeURIComponent(name))
+            self.vrm_still = str(await js.window.PantheonVoice.captureVrmStill(url))
+            self.vrm_still_of = name
+        except Exception as exc:  # noqa: BLE001 - WebGL missing, bad model
+            if note:
+                note.textContent = "Could not render the model."
+            toast(f"Could not render {name}: {exc}", "error")
+            return False
+        if note:
+            note.textContent = f"Captured from {name} — save to keep it."
+        self._mark_dirty()
+        self._render_preview()
+        return True
+
     def _sprites_html(self) -> str:
         c = self.data["card"]
         if self.data["is_new"]:
@@ -645,12 +705,7 @@ class StudioView:
         greet_el = self.root.querySelector("[data-greet]")
         greeting = str(greet_el.value) if greet_el else ""
         greeting = greeting.replace("{{char}}", name).replace("{{user}}", persona)
-        if self.portrait:
-            url = self.portrait
-        elif c.get("has_portrait") and not self.remove_portrait and not self.data["is_new"]:
-            url = portrait_url(c["id"], c.get("updated_at", ""))
-        else:
-            url = ""
+        url = self._preview_url()
         from ui.chat import md
 
         starters = [str(s.value).strip() for s in self.root.querySelectorAll("[data-starter]") if str(s.value).strip()]
@@ -669,6 +724,25 @@ class StudioView:
         pick = by_id("st-portrait")
         if pick:
             pick.innerHTML = avatar_html(name, url, 96)
+
+    def _preview_url(self) -> str:
+        """The picture the card will show once saved, given the unsaved choices."""
+        c = self.data["card"]
+        saved = not self.data["is_new"]
+        src = self._pp_source()
+        if src == "vrm" and self.vrm_still:
+            return self.vrm_still
+        if src == "sprite" and saved:
+            spr = self._field("portrait_sprite") or "neutral"
+            if spr in (c.get("sprites") or []):
+                return (f"/pmedia/card/{js.encodeURIComponent(c['id'])}/expr/{js.encodeURIComponent(spr)}.png"
+                        f"?v={js.encodeURIComponent(c.get('updated_at', ''))}")
+        if self.portrait and src in ("", "image"):
+            return self.portrait
+        if saved and not self.remove_portrait and (c.get("has_portrait") or c.get("has_vrm_still")
+                                                   or c.get("sprites")):
+            return portrait_url(c["id"], c.get("updated_at", ""))
+        return ""
 
     # --- drafts ------------------------------------------------------------------------
     def _mark_dirty(self) -> None:
@@ -753,6 +827,9 @@ class StudioView:
             self._sync_mode()
         elif attr(t, "data-f") == "vrm":
             self._render_vrm_info()
+        elif attr(t, "data-f") in ("portrait_source", "portrait_sprite"):
+            self._sync_profile()
+            self._render_preview()
 
     def _pick_portrait(self, inp) -> None:
         if not inp.files.length:
@@ -825,6 +902,8 @@ class StudioView:
             self._render_preview()
         elif which == "generate":
             spawn(self._generate(), "generate")
+        elif which == "capture-still":
+            spawn(self._capture_still(), "capture still")
         elif which == "vrm-delete":
             spawn(self._delete_vrm(), "vrm delete")
         elif which == "test-voice":
@@ -864,9 +943,17 @@ class StudioView:
             return
         self.saving = True
         by_id("st-status").textContent = "Saving…"
+        # A 3D-still profile needs a still of the model actually assigned: take one now
+        # if there is none, or the model changed since the last one.
+        c = self.data["card"]
+        model = data["fields"].get("vrm") or ""
+        if (data["fields"].get("portrait_source") == "vrm" and model and not self.vrm_still
+                and (not c.get("has_vrm_still") or c.get("vrm_still_of") != model)):
+            await self._capture_still(quiet=True)
         try:
             r = await Studio().save(self.card_id, data["fields"], self.portrait,
-                                    self.remove_portrait, data["starters"], data["lore"])
+                                    self.remove_portrait, data["starters"], data["lore"],
+                                    self.vrm_still)
         finally:
             self.saving = False
         if failed(r, "save"):
@@ -892,6 +979,11 @@ class StudioView:
             self.app.go(f"create/{r['id']}")          # now a saved card: sprites unlock
             return
         self.portrait, self.remove_portrait = "", False
+        if self.vrm_still:
+            c["has_vrm_still"], c["vrm_still_of"] = True, self.vrm_still_of
+        self.vrm_still = ""
+        c["portrait_source"] = data["fields"].get("portrait_source", "")
+        c["updated_at"] = r.get("updated_at") or str(js.Date.now())
         by_id("st-status").textContent = "Saved"
 
     async def _cancel(self) -> None:

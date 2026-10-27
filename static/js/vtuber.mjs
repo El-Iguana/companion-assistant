@@ -799,3 +799,59 @@ export function boot() {
 }
 
 boot();
+
+// --------------------------------------------------------------------------
+// Profile picture: one still of a model, rendered off-screen. Same rest pose,
+// lights and toon materials as the live avatar, but its own renderer and scene,
+// so it never disturbs an avatar that is on screen. Returns a PNG data URL with a
+// transparent background, framed head-and-shoulders at 3:4 like the card grid.
+// Used by the Studio's "Profile picture: 3D model still" (via PantheonVoice).
+// --------------------------------------------------------------------------
+export async function captureStill(url, { width = 768, height = 1024, expression = "" } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true });
+  r.setPixelRatio(1);
+  r.setSize(width, height, false);
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  const sc = new THREE.Scene();
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.position.set(1, 1.4, 2);
+  sc.add(key, new THREE.AmbientLight(0xffffff, 1.1));
+  const cam = new THREE.PerspectiveCamera(30, width / height, 0.1, 20);
+  let vrm = null;
+  try {
+    const loader = new GLTFLoader();
+    loader.register((parser) => new VRMLoaderPlugin(parser));
+    const gltf = await loader.loadAsync(url);
+    vrm = gltf.userData.vrm;
+    if (!vrm) throw new Error("not a VRM model");
+    VRMUtils.rotateVRM0(vrm);
+    sc.add(vrm.scene);
+    applyRestPose(vrm, armRestDeg);
+
+    vrm.scene.updateWorldMatrix(true, true);
+    const head = vrm.humanoid?.getNormalizedBoneNode?.("head");
+    let eye = 1.4;
+    if (head) {
+      const y = head.getWorldPosition(new THREE.Vector3()).y;
+      if (y > 0.2) eye = y + 0.08;
+    }
+    // Head and shoulders: ~0.5 m tall at 0.95 m with a 30° lens, centred a little
+    // below the eyes so there is air above the hair and the collar is in frame.
+    // The face sits in the upper-middle, which the round avatars' centre crop keeps.
+    cam.position.set(0, eye - 0.1, 0.95);
+    cam.lookAt(0, eye - 0.12, 0);
+    if (vrm.lookAt) vrm.lookAt.target = cam;
+    if (expression && vrm.expressionManager?.getExpression?.(expression)) {
+      vrm.expressionManager.setValue(expression, 1);
+    }
+    vrm.update(0);                                  // apply pose, gaze, expression
+    r.render(sc, cam);
+    return canvas.toDataURL("image/png");
+  } finally {
+    if (vrm) VRMUtils.deepDispose(vrm.scene);
+    r.dispose();
+    r.forceContextLoss?.();
+  }
+}

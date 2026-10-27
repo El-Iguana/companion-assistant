@@ -204,6 +204,11 @@ Login-gated, role-based, per-user isolated libraries.
   prompt), `expressions` (emotion→base64), **`power_dynamic`** (−100…100), **`social_acceptance`** (0…100),
   **`tts_voice`** (per-character voice — Kokoro id or `piper:<name>`), **`tts_speed`** (0.5–1.5 speaking
   pace, 1.0 = the voice's own tempo; Kokoro multiplier / inverse Piper `length_scale`),
+  **`portrait_source`** (`""` auto = portrait else neutral sprite | `image` | `sprite` + `portrait_sprite`
+  | `vrm` = `vrm_still`, a PNG of the model rendered in the browser by `vtuber.mjs` `captureStill()`,
+  taken from `vrm_still_of`) — the Studio's "Profile picture"; `present.portrait_b64()` is the one
+  place that picks, so `/pmedia/card/{id}.png` and `has_portrait` follow it everywhere. A missing
+  source falls back to auto. The Studio retakes the still on save when the assigned model changed.
   **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
   system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
   invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.

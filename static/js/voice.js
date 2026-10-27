@@ -712,6 +712,13 @@
   function loadAvatarModule() {
     if (avatarLoading) return avatarLoading;
     ensureCanvas();
+    return importAvatarModule();
+  }
+
+  // The module alone, without the live avatar's canvas — the Studio's profile still
+  // needs the renderer but no avatar on screen.
+  function importAvatarModule() {
+    if (avatarLoading) return avatarLoading;
     if (!document.querySelector('script[type="importmap"][data-pantheon]')) {
       const map = document.createElement("script");
       map.type = "importmap";
@@ -788,6 +795,11 @@
       repaint();
     },
     setStreaming(on) { streaming = !!on; },
+    // A PNG data URL of a .vrm, head and shoulders, for a card's profile picture.
+    async captureVrmStill(url) {
+      const m = await importAvatarModule();
+      return m.captureStill(url);
+    },
     beginReply() { stopSpeaking(); if (ttsEnabled) ensureAudioCtx(); },
     feed(text, final) { feedSpeech(String(text || ""), !!final); },
     expr(label) { pendingExpr(String(label || "")); },

@@ -68,9 +68,10 @@ def card_portrait(card_id: str, request: Request):
     card = main._load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(status_code=404, detail="no such card")
-    # Card art, else the neutral sprite — a card made in the studio may have only sprites.
-    b64 = card.image or card.expressions.get("neutral")
-    return _png(request, b64, _etag(cur.cards / f"{card_id}.json"))
+    # Whatever the card's "Profile picture" setting picks (pantheon_web.present).
+    from pantheon_web.present import portrait_b64
+
+    return _png(request, portrait_b64(card), _etag(cur.cards / f"{card_id}.json"))
 
 
 @router.get("/card/{card_id}/expr/{emotion}.png")

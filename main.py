@@ -481,7 +481,7 @@ async def list_cards(cur: Ctx = Depends(get_ctx)):
     # Trim the heavy expression sprite blobs from the list; expose a flag instead.
     out = []
     for c in _list(cur.cards, CharacterCard):
-        d = c.model_dump(exclude={"expressions"})
+        d = c.model_dump(exclude={"expressions", "vrm_still"})
         d["has_expressions"] = bool(c.expressions)
         # Labels only — the sprite blobs stay trimmed. The client needs these to know
         # which inline [expr:x] beats it actually has a sprite for.

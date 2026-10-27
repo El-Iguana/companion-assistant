@@ -24,6 +24,7 @@ EDITABLE = (
     "alternate_greetings", "system_prompt", "post_history_instructions", "chat_mode",
     "pronouns", "tags", "power_dynamic", "social_acceptance", "appearance",
     "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode",
+    "portrait_source", "portrait_sprite",
 )
 
 
@@ -54,7 +55,8 @@ class Studio:
         card = main._load(cur.cards, card_id, CharacterCard) if card_id else CharacterCard(name="")
         if card is None:
             return {"ok": False, "error": "that character no longer exists"}
-        data = card.model_dump(exclude={"expressions", "image"})
+        data = card.model_dump(exclude={"expressions", "image", "vrm_still"})
+        data["has_vrm_still"] = bool(card.vrm_still)
         data["starters"] = starters(card)
         data["has_portrait"] = bool(card.image)
         data["sprites"] = sorted(card.expressions.keys())
@@ -82,8 +84,11 @@ class Studio:
 
     async def save(self, card_id: str, fields: dict, portrait: str = "",
                    remove_portrait: bool = False, starters: list = None,
-                   lorebook: list = None) -> dict:
-        """Apply the edited fields onto the stored card (or a new one) and save it."""
+                   lorebook: list = None, vrm_still: str = "") -> dict:
+        """Apply the edited fields onto the stored card (or a new one) and save it.
+
+        ``vrm_still`` is a PNG data URL of the 3D model, rendered in the browser; it is
+        recorded against the model file it shows (``vrm_still_of``)."""
         import main
         from models.schema import CharacterBook, CharacterCard, LorebookEntry
         from pydantic import ValidationError
@@ -128,6 +133,16 @@ class Studio:
                 data["image"] = normalise_portrait(portrait)
             except Exception as exc:  # noqa: BLE001 - an unreadable upload
                 return {"ok": False, "error": f"that image could not be read ({exc})", "field": "portrait"}
+        if vrm_still:
+            try:
+                from pantheon_web.present import normalise_portrait
+
+                data["vrm_still"] = normalise_portrait(vrm_still)
+                data["vrm_still_of"] = data.get("vrm") or ""
+            except Exception as exc:  # noqa: BLE001 - a bad capture
+                return {"ok": False, "error": f"the 3D still could not be read ({exc})"}
+        if data.get("portrait_source") not in ("", "image", "sprite", "vrm"):
+            data["portrait_source"] = ""
         try:
             card = CharacterCard(**data)
         except ValidationError as exc:

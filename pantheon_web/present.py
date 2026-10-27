@@ -14,8 +14,19 @@ def tagline(card) -> str:
     return ""
 
 
+def portrait_b64(card) -> str | None:
+    """The card's profile picture, per its ``portrait_source``. A chosen source that
+    has nothing yet falls back to the automatic chain: portrait, neutral sprite, 3D still."""
+    src = card.portrait_source
+    if src == "vrm" and card.vrm_still:
+        return card.vrm_still
+    if src == "sprite" and card.expressions.get(card.portrait_sprite or "neutral"):
+        return card.expressions[card.portrait_sprite or "neutral"]
+    return card.image or card.expressions.get("neutral") or card.vrm_still
+
+
 def has_portrait(card) -> bool:
-    return bool(card.image or card.expressions.get("neutral"))
+    return bool(portrait_b64(card))
 
 
 def starters(card) -> list:
