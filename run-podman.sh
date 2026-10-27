@@ -8,10 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="localhost/companion:latest"
 CONTAINER="companion"
 NETWORK="ai-net"
+# Loopback only: the login (pytincture over plain HTTP) refuses anything else. Container and
+# host use the same number because it is also the page's origin.
 PORT="7861"
-# The new pytincture page (PYTINCTURE_PLAN.md). Loopback only; its login refuses anything
-# else. Container and host use the same number because it is also the page's origin.
-WEB_PORT="${PANTHEON_WEB_PORT:-7866}"
 
 REBUILD=0
 while [[ $# -gt 0 ]]; do
@@ -41,6 +40,7 @@ mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,
 # here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite
 # generation died on DNS while chat worked — on exactly the path someone without the
 # full ai-stack takes.
+BIND_ARG=()
 if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
   KOBOLD_URL="http://koboldcpp:5001"
@@ -48,6 +48,8 @@ if podman network exists "$NETWORK"; then
   echo "==> Joining network: $NETWORK (backends reachable by container name)"
 else
   NET_ARG="--network=host"
+  # Host networking ignores -p, so the server must bind loopback itself.
+  BIND_ARG=(-e "PANTHEON_BIND=127.0.0.1")
   KOBOLD_URL="http://localhost:5001"
   COMFYUI_URL="http://localhost:8188"
   echo "==> Network '$NETWORK' not found; falling back to host networking"
@@ -83,9 +85,9 @@ podman run -d \
   --name "$CONTAINER" \
   --restart unless-stopped \
   $NET_ARG \
-  -p "${PORT}:7861" \
-  -p "127.0.0.1:${WEB_PORT}:${WEB_PORT}" \
-  -e "PANTHEON_WEB_PORT=${WEB_PORT}" \
+  -p "127.0.0.1:${PORT}:${PORT}" \
+  -e "PANTHEON_PORT=${PORT}" \
+  "${BIND_ARG[@]}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
   -e "TZ=${TZ_VAL}" \
@@ -96,7 +98,6 @@ podman run -d \
 
 echo ""
 echo "✓  Pantheon is running."
-echo "   Open: http://localhost:${PORT}"
-echo "   New page (in progress): http://127.0.0.1:${WEB_PORT}/   (127.0.0.1, not localhost)"
+echo "   Open: http://127.0.0.1:${PORT}/   (this computer only; localhost redirects there)"
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

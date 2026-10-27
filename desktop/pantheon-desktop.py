@@ -48,7 +48,7 @@ from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
-DEFAULT_URL = "http://localhost:7861/desktop"
+DEFAULT_URL = "http://127.0.0.1:7861/desktop"
 # The HUD lives in a strip along the bottom. Only that strip accepts clicks;
 # everything above it passes through to whatever is on the desktop behind her.
 HUD_STRIP_PX = 56

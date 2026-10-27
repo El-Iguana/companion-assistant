@@ -1,7 +1,8 @@
 # Pantheon
 
-A self-hosted, fully-local **character-card AI companion**. FastAPI backend + a no-build vanilla-JS
-single-page frontend. All inference runs on your own machine — no cloud, no external services, no
+A self-hosted, fully-local **character-card AI companion**. A FastAPI backend and a
+[pytincture](https://github.com/pytincture/pytincture) page (Python in the browser), laid out after
+Emberfolk: a Discover gallery, character profiles, a centred chat, and a Studio for cards. All inference runs on your own machine — no cloud, no external services, no
 database (state is plain JSON files).
 
 Built around the **Character Card V2/V3** spec (SillyTavern / Chub compatible), so cards import and
@@ -19,6 +20,8 @@ export losslessly.
 - **Local voice** — Kokoro + Piper TTS (per-character voice) + push-to-talk & hands-free faster-whisper STT
 - **Multi-user** — login with `admin`/`user` roles; each account has its own **private, isolated**
   library of characters, personas, and presets
+- **3D avatars** (VRM) with lip-sync, expressions and idle motion, in the chat or as a
+  **desktop companion** in the corner of the screen (`desktop/`, Linux/KDE)
 - **Roleplay vs assistant** chat modes, custom system prompts, and a `/no_think` speed toggle
 
 ## Installing
@@ -49,15 +52,16 @@ mounts Piper voices from `../jarvis`, and derives `TZ` from the host:
 
 ```bash
 ./run-podman.sh              # build + run on :7861
-./run-podman.sh --rebuild    # rebuild after code/template/static changes
+./run-podman.sh --rebuild    # rebuild after code/static changes
 ./run-podman.sh --port 8861  # publish on a different host port
 COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh   # choose the first ADMIN password
 ```
 
-`run-podman.sh` publishes 7861 on **all interfaces**; compose publishes on `127.0.0.1` unless
-`PANTHEON_BIND` says otherwise.
+Open **`http://127.0.0.1:7861/`** (`localhost` redirects there). Both `run-podman.sh` and compose
+publish on `127.0.0.1` only: sign-in over plain HTTP is allowed on this computer alone, so other
+devices need HTTPS in front ([INSTALL.md, section 9](INSTALL.md#9-reaching-pantheon-from-other-devices)).
 
-The in-app **?** button documents custom system prompts and curation.
+The in-app **Guide** (Settings → Guide) documents custom system prompts and curation.
 
 ## Architecture
 
@@ -65,11 +69,11 @@ Runs as a Podman container on the shared `ai-net` network.
 
 | Component | Role |
 |-----------|------|
-| this app (`:7861`) | FastAPI + SPA |
+| this app (`127.0.0.1:7861`) | FastAPI + the pytincture page; voice and 3D avatar as JS islands |
 | KoboldCPP (`koboldcpp:5001`) | LLM text generation |
 | ComfyUI (`comfyui:8188`) | expression-sprite generation |
 
-Data lives under `data/` (git-ignored): `data/auth/` (accounts + signing secret) and
+Data lives under `data/` (git-ignored): `data/auth/` (accounts + session keys) and
 `data/u/<user>/` (each user's isolated library). It's a bind mount, so it survives rebuilds — and
 it's the thing to back up. Code is baked into the image, so rebuild after editing it. See
 [`CLAUDE.md`](CLAUDE.md) for the full internals.

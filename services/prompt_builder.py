@@ -54,7 +54,7 @@ DEFAULT_ASSISTANT = (
     # best is not the answer that HEARS best. Asked for Dunbar's number, the 9B fine-tune
     # produced a markdown table, ran out of tokens mid-row, and the auto-continue restarted
     # the whole table — output that is unreadable by ear twice over. Steering only; the
-    # markdown that gets through anyway is handled in cleanForTTS (app.js).
+    # markdown that gets through anyway is handled in cleanForTTS (static/js/voice.js).
     "Everything you say is SPOKEN ALOUD, so compose for the ear, not the eye. Plain spoken "
     "prose only: no markdown, no tables, no bullet points, no numbered lists, no headings, no "
     "code blocks, and no asterisks or underscores for emphasis. When something has parts, "

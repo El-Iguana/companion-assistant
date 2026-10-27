@@ -57,8 +57,8 @@ THEMES = [("bone", "Bone", "#f5f1e8"), ("ember", "Ember", "#e8a33d"), ("moss", "
 THEME_KEY = "pantheon.theme"     # per-browser cache only, to paint the right colours before
                                  # the account's own setting arrives; the account is the truth.
 STATUS_MS = 30_000
-# The idle fold into long-term memory: 5 minutes after a reply, as on the classic page
-# (SWEEP_IDLE_MS in static/js/app.js). The sweep is idempotent server-side.
+# The idle fold into long-term memory: 5 minutes after a reply (the classic page's
+# SWEEP_IDLE_MS; static/js/desktop.js uses it too). The sweep is idempotent server-side.
 SWEEP_IDLE_MS = 5 * 60 * 1000
 
 _KEEP: list = []

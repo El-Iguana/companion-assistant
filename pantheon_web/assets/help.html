@@ -1,5 +1,5 @@
-{# The in-app guide, shared by the classic page (included below the help modal's body)
-   and the new page (served raw at /pmedia/help.html). {% raw %} keeps Jinja from reading
+<!-- The in-app guide, served at /pmedia/help.html and shown on the Guide screen. -->
+ keeps Jinja from reading
    {{char}} / {{user}} as template variables: before this, they rendered as nothing and the
    copy-paste example prompts were missing their macros. #}
 {% raw %}
@@ -80,5 +80,3 @@
               instructions) and are per-character. Prefer the built-in <code>Chat mode</code> toggle for a
               quick roleplay↔assistant switch without writing a prompt.</p>
           </section>
-
-{% endraw %}

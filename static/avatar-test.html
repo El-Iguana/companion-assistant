@@ -80,7 +80,7 @@ try {
   // Model switcher: every .vrm in data/vrm/, click to load. Beats editing a card
   // just to look at a model.
   try {
-    const models = await (await fetch("/api/vrm")).json();
+    const models = await (await fetch("/pmedia/vrm")).json();
     if (Array.isArray(models) && models.length) {
       const bar = document.createElement("div");
       bar.id = "models";
@@ -92,7 +92,7 @@ try {
         a.onclick = () => {
           log("loading " + m.name);
           window.dispatchEvent(new CustomEvent("avatar:card",
-            { detail: { id: "preview", url: "/api/vrm/" + encodeURIComponent(m.name) } }));
+            { detail: { id: "preview", url: "/pmedia/vrm/" + encodeURIComponent(m.name) } }));
         };
         bar.appendChild(a);
       }
@@ -102,7 +102,7 @@ try {
 
   if (vrmName) {
     window.dispatchEvent(new CustomEvent("avatar:card",
-      { detail: { id: "preview", url: "/api/vrm/" + encodeURIComponent(vrmName) } }));
+      { detail: { id: "preview", url: "/pmedia/vrm/" + encodeURIComponent(vrmName) } }));
     log("requested model " + vrmName);
   } else if (cardId) {
     window.dispatchEvent(new CustomEvent("avatar:card",

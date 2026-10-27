@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Run the new (pytincture) page host-side against a THROWAWAY library, with a pidfile.
+# Run Pantheon host-side against a THROWAWAY library, with a pidfile.
 #
 #   PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start|stop|restart|log
 #
 # Never point PANTHEON_DATA_DIR at the real data/: the smoke test writes to it.
-# Port 7871 by default (7861/7866 are the real container's). Needs .venv and the browser
-# wheel in appcode/ — see CLAUDE.md, "The new page".
+# Port 7871 by default (7861 is the real container's). Needs .venv and the browser
+# wheel in appcode/ — see CLAUDE.md, "Running".
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${PANTHEON_DATA_DIR:?set PANTHEON_DATA_DIR to a scratch library}"
-PORT="${PANTHEON_WEB_PORT:-7871}"
+PORT="${PANTHEON_DEV_PORT:-7871}"
 STATE="${XDG_RUNTIME_DIR:-/tmp}/pantheon-web-dev"
 PIDFILE="$STATE/pid"
 LOG="$STATE/log"
@@ -32,7 +32,7 @@ stop() {
 
 start() {
   cd "$ROOT"
-  PANTHEON_SERVE=web PANTHEON_WEB_PORT="$PORT" PANTHEON_DATA_DIR="$PANTHEON_DATA_DIR" \
+  PANTHEON_PORT="$PORT" PANTHEON_DATA_DIR="$PANTHEON_DATA_DIR" \
     KOBOLD_URL="${KOBOLD_URL:-http://localhost:5001}" COMFYUI_URL="${COMFYUI_URL:-http://localhost:8188}" \
     setsid .venv/bin/python service.py >"$LOG" 2>&1 &
   echo $! >"$PIDFILE"

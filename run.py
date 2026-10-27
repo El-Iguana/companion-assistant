@@ -1,5 +1,12 @@
-"""Dev launcher: uvicorn with autoreload on port 7861."""
+"""Dev launcher: the server with autoreload on http://127.0.0.1:7861/.
+
+Point it at a throwaway library — ``PANTHEON_DATA_DIR=/tmp/pantheon-dev python run.py`` —
+or use scripts/web-dev.sh, which refuses the real data/.
+"""
+import os
+
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=7861, reload=True)
+    port = int(os.environ.setdefault("PANTHEON_PORT", "7861"))
+    uvicorn.run("service:app", host=os.environ.get("PANTHEON_BIND", "127.0.0.1"), port=port, reload=True)

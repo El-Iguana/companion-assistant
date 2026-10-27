@@ -1,14 +1,15 @@
 // ===========================================================================
 // Phase 3a — avatar renderer (module island)
 //
-// app.js is a single ~1600-line classic script and stays that way. three.js is
-// ESM-only, so the renderer lives here as a module and the two talk over DOM
-// CustomEvents on window — no imports either direction, no refactor of app.js.
+// three.js is ESM-only, so the renderer lives here as a module and the page's voice
+// code (static/js/voice.js; the classic app.js before it) talks to it over DOM
+// CustomEvents on window — no imports either direction.
 //
-//   app.js  --avatar:card-->    this   (which card is open; null = none)
-//   app.js  --avatar:expr-->    this   (an [expr:x] beat, already playback-timed)
-//   app.js  --avatar:speak-->   this   (mouth amplitude 0..1, per frame)
-//   this    --avatar:active-->  app.js (true = avatar took over, hide the sprite)
+//   voice.js  --avatar:card-->    this   (which card is open; null = none)
+//   voice.js  --avatar:expr-->    this   (an [expr:x] beat, already playback-timed)
+//   voice.js  --avatar:speak-->   this   (mouth amplitude 0..1, per frame)
+//   voice.js  --avatar:mood-->    this   (resting mood + relationship stage)
+//   this      --avatar:active-->  voice.js (true = avatar took over, hide the sprite)
 //
 // This phase is bring-up only: load, frame, render, resize, fall back. Idle
 // life (breath/blink/gaze/spring bones) is 3b, speech motion 3c, emotion and
@@ -65,7 +66,7 @@ let idleGain = 2;
 let armRestDeg = 72;
 
 // ---- Phase 3c: speech motion ---------------------------------------------
-// app.js already computes an RMS amplitude per frame for the sprite mouth
+// voice.js already computes an RMS amplitude per frame for the sprite mouth
 // (the Phase 0 analyser) and forwards it as avatar:speak. That signal is one
 // scalar, so it can drive a JAW but not visemes: which mouth shape belongs to
 // which instant needs phoneme timings, and neither Kokoro nor Piper exposes

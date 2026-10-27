@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
-"""Pantheon — the process that serves both pages during the pytincture transition.
+"""Pantheon — the server.
 
-    python service.py                 # both: classic page :7861, new page :7866
-    PANTHEON_SERVE=web python service.py      # only the new page (host-side dev)
+    python service.py                 # http://127.0.0.1:7861/
 
-**One process, two servers** (PYTINCTURE_PLAN.md). ``main`` is Pantheon itself — accounts,
-data, KoboldCPP/ComfyUI clients, every route handler. The classic page is ``main.app``,
-served exactly as before. The new page is a pytincture app built here, whose BFF classes
-(``appcode/bff/``) call ``main``'s handlers directly. Same process, so both pages share one
-copy of Pantheon's state: caches, the embeddings model, the idle-sweep timers.
+``main`` is Pantheon itself: accounts, data, the KoboldCPP/ComfyUI clients, the memory and
+relationship code, and the handlers every feature runs through. The page is a pytincture
+app built here (``appcode/``): its BFF classes call ``main``'s handlers directly with the
+signed-in user's context, and ``pantheon_web/`` adds the plain routes a JSON BFF cannot
+serve (images, uploads, audio, the VRM model, the desktop avatar's page).
 
-They are separate servers, not one app, because the new page's login is loopback-only
-(pytincture refuses a non-loopback Host when it signs users in over plain HTTP) and its
-stricter headers would otherwise apply to the classic page and cut its LAN access.
+**Loopback only.** pytincture signs users in over plain HTTP only on a literal loopback
+Host, so the address is ``http://127.0.0.1:7861/``. ``localhost`` is redirected there.
+Phones and other machines need TLS in front (PYTINCTURE_PLAN.md, Phase 8).
+
+``main.app`` (the old FastAPI app with its ``/api`` routes) is no longer served; it remains
+the home of the handlers and is what the unit tests exercise.
 
 Environment:
 
 | var | default | what |
 |---|---|---|
-| ``PANTHEON_SERVE`` | ``both`` | ``both`` · ``web`` (new page only) · ``classic`` |
-| ``PANTHEON_WEB_PORT`` | 7866 | the new page's port |
-| ``PANTHEON_WEB_BIND`` | 127.0.0.1 | its listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
-| ``PANTHEON_CLASSIC_PORT`` | 7861 | the classic page's port |
-| ``PANTHEON_CLASSIC_BIND`` | 0.0.0.0 | its listen address (as it always was; compose's host-network variant narrows it) |
+| ``PANTHEON_PORT`` | 7861 | listen port, and the port in the browser's address — publish it on the same number |
+| ``PANTHEON_BIND`` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
 | ``PANTHEON_DATA_DIR`` | ./data | a throwaway library for dev/test |
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import secrets
@@ -47,18 +45,17 @@ from pytincture import PytinctureConfig, create_app  # noqa: E402
 
 import main  # noqa: E402  — Pantheon itself
 from pantheon_web.login_page import LoginPageMiddleware, check_at_startup  # noqa: E402
+from pantheon_web.desktop import router as desktop_router  # noqa: E402
 from pantheon_web.media import router as media_router  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 
 APPLICATION = "pantheon"
-WEB_PORT = int(os.environ.get("PANTHEON_WEB_PORT", "7866"))
-WEB_BIND = os.environ.get("PANTHEON_WEB_BIND", "127.0.0.1")
-CLASSIC_PORT = int(os.environ.get("PANTHEON_CLASSIC_PORT", "7861"))
-CLASSIC_BIND = os.environ.get("PANTHEON_CLASSIC_BIND", "0.0.0.0")
+PORT = int(os.environ.get("PANTHEON_PORT", "7861"))
+BIND = os.environ.get("PANTHEON_BIND", "127.0.0.1")
 # The address the browser uses. A literal IP: pytincture refuses "localhost" with
-# loopback login, so the new page is http://127.0.0.1:7866/, never localhost.
-WEB_ORIGIN = f"http://127.0.0.1:{WEB_PORT}"
+# loopback login, so it is http://127.0.0.1:7861/, never localhost.
+ORIGIN = f"http://127.0.0.1:{PORT}"
 
 
 def _session_secret() -> str:
@@ -101,6 +98,34 @@ class BlobImagesMiddleware:
         await self.app(scope, receive, patched)
 
 
+class LocalhostRedirect:
+    """``localhost`` -> ``127.0.0.1``, same port and path.
+
+    pytincture's host check only admits the literal IP (its plain-HTTP login is loopback
+    only), so a bookmark, a launcher or the desktop shell pointing at localhost would get a
+    bare 400. Outermost, so it answers before that check.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            name, _, port = host.partition(":")
+            if name.lower() == "localhost":
+                path = scope.get("raw_path") or scope.get("path", "/").encode()
+                qs = scope.get("query_string") or b""
+                target = f"http://127.0.0.1:{port or PORT}{path.decode('latin-1')}" + (
+                    f"?{qs.decode('latin-1')}" if qs else "")
+                await send({"type": "http.response.start", "status": 307,
+                            "headers": [(b"location", target.encode("latin-1")),
+                                        (b"content-length", b"0")]})
+                await send({"type": "http.response.body", "body": b""})
+                return
+        await self.app(scope, receive, send)
+
+
 def build_web_app():
     application = create_app(PytinctureConfig(
         modules_path=str(APPCODE),
@@ -111,7 +136,7 @@ def build_web_app():
         allow_microphone=True,           # hands-free and push-to-talk (Phase 6)
         session_secret=_session_secret(),
         allowed_hosts=("127.0.0.1",),
-        canonical_origin=WEB_ORIGIN,
+        canonical_origin=ORIGIN,
         cookie_namespace="pantheon",
         environment={
             # Pantheon's own accounts and scrypt hashes (pantheon_web/auth.py).
@@ -123,6 +148,20 @@ def build_web_app():
     application.add_middleware(LoginPageMiddleware)
     application.add_middleware(BlobImagesMiddleware)
     application.include_router(media_router)
+    # Ahead of pytincture's own routes: its "/{application}" catch-all would otherwise
+    # read /desktop as an app called "desktop" and send it to /desktop/login.
+    before = len(application.router.routes)
+    application.include_router(desktop_router)
+    added = application.router.routes[before:]
+    del application.router.routes[before:]
+    application.router.routes[0:0] = added
+
+    @application.get("/api/health", include_in_schema=False)
+    def health():
+        # Public and cheap: the stack launcher and compose healthchecks probe it. It says
+        # the server is up, not that KoboldCPP is (that shows on the page).
+        return {"ok": True}
+
     # The new page's own assets, and Pantheon's static tree (three.js, the VRM island).
     application.mount("/pstatic", StaticFiles(directory=str(APPCODE / "static")), name="pstatic")
     application.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
@@ -136,36 +175,30 @@ def build_web_app():
         if request.url.path.startswith(("/pstatic/", "/static/")):
             response.headers["Cache-Control"] = "no-cache"
         return response
+
+    # main's clients (KoboldCPP, ComfyUI) were closed by main.app's shutdown hook when it was
+    # the served app; it no longer is.
+    from contextlib import asynccontextmanager
+
+    base_lifespan = application.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(app_):
+        async with base_lifespan(app_) as state:
+            yield state
+        await main._shutdown()
+
+    application.router.lifespan_context = lifespan
+
+    application.add_middleware(LocalhostRedirect)        # last added = outermost
     return application
 
 
 app = build_web_app()
 
 
-async def _serve(which: str) -> None:
+if __name__ == "__main__":
     import uvicorn
 
-    servers = []
-    if which in ("both", "web"):
-        servers.append(uvicorn.Server(uvicorn.Config(app, host=WEB_BIND, port=WEB_PORT,
-                                                     log_level="info")))
-        print(f"Pantheon (new page): {WEB_ORIGIN}/", flush=True)
-    if which in ("both", "classic"):
-        servers.append(uvicorn.Server(uvicorn.Config(main.app, host=CLASSIC_BIND, port=CLASSIC_PORT,
-                                                     log_level="info")))
-        print(f"Pantheon (classic page): http://localhost:{CLASSIC_PORT}/", flush=True)
-    if not servers:
-        raise SystemExit(f"PANTHEON_SERVE must be both, web or classic — not {which!r}")
-    # Each Server installs signal handlers; with two, let the first own them and the
-    # second follow its exit.
-    for extra in servers[1:]:
-        extra.install_signal_handlers = lambda: None
-    tasks = [asyncio.create_task(s.serve()) for s in servers]
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    for s in servers:
-        s.should_exit = True
-    await asyncio.gather(*pending, return_exceptions=True)
-
-
-if __name__ == "__main__":
-    asyncio.run(_serve(os.environ.get("PANTHEON_SERVE", "both")))
+    print(f"Pantheon: {ORIGIN}/", flush=True)
+    uvicorn.run(app, host=BIND, port=PORT, log_level="info")

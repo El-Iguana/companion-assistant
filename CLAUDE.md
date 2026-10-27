@@ -9,8 +9,11 @@ talks to **KoboldCPP** (text) and **ComfyUI** (portraits/expressions) on the sha
 `ai-net` network. Everything local; no external services, no database.
 
 Built around the **Character Card V2/V3 spec** (SillyTavern/Chub compatible). Scaffolded from
-`~/Development/ai_ecosystem/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`). Frontend is **vanilla JS,
-no framework, no build step**.
+`~/Development/ai_ecosystem/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`).
+The page is **pytincture + wapyt** (Python in the browser, `appcode/`), laid out after
+Emberfolk (perchance.org/character-ai-ember); voice and the 3D avatar are two JavaScript islands
+(`static/js/voice.js`, `static/js/vtuber.mjs`). It replaced the vanilla-JS page on 2026-10-26 —
+plan and decision log in **`PYTINCTURE_PLAN.md`**.
 
 Companion features layered on top: streaming chat, swipes, transparent expression sprites with a
 live-swapping portrait, a running **mood/valence**, and a **relationship system** (multi-axis +
@@ -19,35 +22,44 @@ intimacy/consent). Relationship design detail in `RELATIONSHIP_PLAN.md`.
 ## Running
 
 ```bash
-./run-podman.sh              # build (first run) + start on :7861
-./run-podman.sh --rebuild    # REBUILD after ANY code/template/static change (baked into image)
-python run.py                # local dev w/ autoreload (needs deps on host)
-# open http://localhost:7861 ; logs: podman logs -f companion ; stop: podman stop companion
+./run-podman.sh              # build (first run) + start: http://127.0.0.1:7861/
+./run-podman.sh --rebuild    # REBUILD after ANY code/static change (baked into the image)
+# logs: podman logs -f companion ; stop: podman stop companion
 ```
 
-### The new page (pytincture + Ember's UX) — in progress
+**`http://127.0.0.1:7861/`, this computer only.** pytincture signs users in over plain HTTP only
+on a literal loopback Host, so the container publishes `127.0.0.1:7861` and `localhost` is
+redirected to `127.0.0.1` (`service.LocalhostRedirect`). Phones and other machines need TLS in
+front — PYTINCTURE_PLAN.md Phase 8. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
+them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
-Plan and decision log: **`PYTINCTURE_PLAN.md`**. The container now runs **`service.py`**: one
-process, two servers — the classic page (`main.app`) on **7861** exactly as before, and the new
-pytincture page on **`http://127.0.0.1:7866/`**, published on loopback only. **Use `127.0.0.1`,
-never `localhost`**: pytincture's plain-HTTP login refuses any Host that is not a literal
-loopback IP. Same accounts and passwords as the classic page (`pantheon_web/auth.py` checks
-them with `services.auth`). Its cookie key is `data/auth/pytincture.key`.
+The container runs **`service.py`**: `main` (Pantheon itself — accounts, data, clients, every
+handler) plus the pytincture app, whose BFF classes call `main`'s handlers directly. `main.app`'s
+route table is **no longer served**; it stays as the handlers' contract and for the unit tests.
+`/desktop` is the desktop avatar's page (`pantheon_web/desktop.py`, below).
 
 ```bash
 # host-side dev against a THROWAWAY library — never the real data/:
 uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt pip pytest \
     ~/Development/Pytinc/wa_pytincture_widgetset
 PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
-PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871, pidfile; stop|restart|log
-                                                                # refuses the real data/
+PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871 (PANTHEON_DEV_PORT), pidfile;
+                                                                # stop|restart|log; refuses the real data/
 PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
   CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
   uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
+.venv/bin/python -m pytest -q tests/test_messages.py
 ```
 
-`PANTHEON_DATA_DIR` (read by `main.py`) points any instance at another library;
-`PANTHEON_SERVE=both|web|classic` picks the servers; the rest are in `service.py`'s header.
+| var | default | what |
+|---|---|---|
+| `PANTHEON_PORT` | 7861 | listen port **and** the port in the address bar — publish it on the same number |
+| `PANTHEON_BIND` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
+| `PANTHEON_DATA_DIR` | `./data` | another library (dev/test); read by `main.py` |
+| `KOBOLD_URL` / `COMFYUI_URL` | `http://koboldcpp:5001` / `http://comfyui:8188` | backends |
+
+Health: `GET /api/health` (public, `{"ok": true}`) — what `stack status` and the compose
+healthchecks probe. `stack companion` opens `http://localhost:7861/`, which redirects.
 
 Prereqs: `~/Development/ai_ecosystem/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
 distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absolutereality_v181`) when both
@@ -65,7 +77,7 @@ is baked in — rebuild after edits.** `podman exec` needs `-i` to receive a std
 | `compose.koboldcpp.yaml` | KoboldCPP container (`backends/koboldcpp/`, official CUDA binary) + `KOBOLD_URL=http://koboldcpp:5001` |
 | `compose.gpu.docker.yaml` / `compose.gpu.podman.yaml` | its GPU: `deploy…devices` vs CDI `nvidia.com/gpu=all` + `label=disable` |
 | `compose.ai-stack.yaml` | join external `ai-net`, backends by name |
-| `compose.host-network.yaml` | standalone (not an override): Linux, backends on 127.0.0.1; uvicorn binds `PANTHEON_BIND` itself |
+| `compose.host-network.yaml` | standalone (not an override): Linux, backends on 127.0.0.1; uvicorn binds 127.0.0.1 itself |
 
 `manage.py`: `backends`, `probe HOST PORT`, `users`, `reset-password [--create] [--password-stdin]`.
 It writes `data/auth/users/<id>.json` directly with `services.auth`, so keep it in step with
@@ -85,7 +97,7 @@ Traps, all measured:
   compose installs (`COPY` in the Containerfile, re-included in `.containerignore`). A bind-mounted
   `data/` hides it.
 - The old compose healthcheck curled `/api/status`, which is behind login (401) and so was always
-  unhealthy; both now probe `/`. Podman drops the Containerfile `HEALTHCHECK` without
+  unhealthy; both now probe the public `/api/health`. Podman drops the Containerfile `HEALTHCHECK` without
   `--format docker`, so compose carries its own.
 - `llm-models/` and `voices/` are mounted `:z`; only ever point those at dedicated folders.
 
@@ -93,15 +105,17 @@ Traps, all measured:
 
 | Container  | Network         | Address                         | Role         |
 |------------|-----------------|---------------------------------|--------------|
-| companion  | ai-net | `0.0.0.0:7861` + `127.0.0.1:7866` | this app (classic + new page) |
+| companion  | ai-net | `127.0.0.1:7861`                | this app      |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
 
 ## File structure
 
 ```
-main.py                 # FastAPI app — ALL routes + JSON file store (_save/_load/_list, relationship helpers)
-run.py                  # dev launcher (:7861)
+main.py                 # Pantheon: every handler + JSON file store (_save/_load/_list, relationship helpers);
+                        #   its FastAPI route table is not served (service.py is) — the BFFs call the handlers
+service.py              # the server: pytincture app + /pmedia + /desktop + /api/health; localhost -> 127.0.0.1
+run.py                  # dev launcher (service:app, autoreload, :7861)
 models/schema.py        # Pydantic models (below)
 services/
   kobold.py             # KoboldCPP client. chat_generate_stream() = OpenAI SSE + auto-continue (2 rounds)
@@ -117,17 +131,21 @@ services/
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
-templates/index.html · static/css/style.css · static/js/app.js     # the classic page (also /desktop)
-static/js/voice.js      # the new page's voice island (port of app.js's voice loop) + on-demand vtuber.mjs loader
-service.py              # runs both pages; builds the pytincture app beside main.app
-pantheon_web/           # server-side support for the new page (plain modules, never shipped to the browser):
-                        #   auth (login hook) · login_page · media (/pmedia: images, export, import, VRM upload,
-                        #   tts sample, tts, stt, avatar.vrm) · jobs (background sprite generation) · present (shared formatting)
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
-tests/smoke_web.py      # Playwright smoke test of the new page (WRITES: run on a scratch library); fake mic;
+pantheon_web/           # server-side plain modules (never shipped to the browser): auth (login hook) ·
+                        #   login_page · media (/pmedia: images, export, import, VRM list/file/upload, tts, stt,
+                        #   avatar.vrm, help.html) · desktop (/desktop + /pdesk/*) · jobs (background sprite
+                        #   generation) · present (shared formatting) · assets/help.html (the in-app guide)
+static/js/voice.js      # voice island: read-aloud + lip-sync, PTT, hands-free/VAD/wake word, barge-in; loads vtuber.mjs
+static/js/vtuber.mjs    # 3D avatar renderer (three.js + three-vrm, vendored in static/vendor/), avatar:* events
+static/js/desktop.js · static/css/desktop.css   # the desktop avatar's page, on voice.js
+static/avatar-test.html # avatar tuning harness (reads /pmedia/vrm; sign in first)
+desktop/                # the native shell: transparent GTK4 + WebKitGTK window on /desktop, tray (desktop/README.md)
+tests/smoke_web.py      # Playwright smoke test (WRITES: run on a scratch library); fake mic;
                         #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
-scripts/web-dev.sh      # run the new page host-side against a scratch library
+tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep marks
+scripts/web-dev.sh      # run Pantheon host-side against a scratch library
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
@@ -151,22 +169,29 @@ eval/                   # NOT baked into the image — `podman cp eval companion
 Login-gated, role-based, per-user isolated libraries.
 - **Accounts** (`models.schema.User`): `data/auth/users/<uid>.json`; password = **scrypt** hash + per-user
   salt (`services/auth.py`, stdlib — no bcrypt dep). Roles: **`admin`** | **`user`**.
-- **Session**: HMAC-signed stateless token (`uid.exp.sig`) in an **HttpOnly cookie**, signed with
-  `data/auth/secret` (persisted). `current_user`/`require_admin`/`get_ctx` FastAPI dependencies enforce it.
-- **Isolation**: every data route resolves a per-request **`Ctx`** → `data/u/<uid>/{characters,personas,
+- **Session**: pytincture's signed session cookie (key `data/auth/pytincture.key`), claims
+  `user_id/username/role` (`AUTH_SESSION_CLAIM_KEYS`). Sign-in is pytincture's form (restyled by
+  `pantheon_web/login_page.py`) checking Pantheon's accounts through `AUTH_USER_AUTHENTICATOR =
+  pantheon_web.auth.authenticate`. **`ctx_for(claims)` re-reads the account on every call**, so a
+  deleted or demoted user loses access at once. BFF calls carry pytincture's CSRF check; the plain
+  `/pmedia` and `/pdesk` POSTs mirror it (`_require_csrf`, `X-CSRF-Token` from the CSRF cookie).
+  (`services/auth.py`'s HMAC token, `data/auth/secret` and main's `current_user` belonged to the
+  classic page's cookie and are unused by the page now.)
+- **Isolation**: every handler resolves a per-request **`Ctx`** → `data/u/<uid>/{characters,personas,
   sessions,relationships,presets,settings}`. Users never see each other's data. (`_load/_save/_list` take
   the Ctx's folder; relationship/settings/persona helpers take `cur`.)
-- **Admin-only**: `/api/users` CRUD + password reset; guards against deleting yourself or the last admin
+- **Admin-only**: user CRUD + password reset (Settings → Users; `bff/account.py`); guards against deleting yourself or the last admin
   (deleting a user removes their whole `data/u/<uid>` library). Normal users manage only their own libraries.
 - **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** and moves any legacy flat
   `data/<subdir>/*` into the admin's library so nothing is orphaned. The password comes from
   `COMPANION_ADMIN_PASSWORD` if set, else `_seed_password()` mints a random one and
   `_announce_seed_password()` prints a startup banner + writes `data/auth/INITIAL_PASSWORD` (0600) —
   the container runs detached, so stdout alone isn't findable enough. **Never reintroduce a constant
-  here:** this repo is shared, and the app publishes 7861 on all interfaces, so a literal would be
-  the known default admin credential of every install. Seeding only runs when no users exist.
-- **Frontend**: full-screen `#login` overlay; `boot()` checks `/api/me` and gates `init()`; `api()` shows
-  login on any 401; sidebar `#userbar` (name·role, Logout, admin-only **Users** modal).
+  here:** this repo is shared, and a literal would be the known default admin credential of every
+  install (and of every LAN exposure once Phase 8 puts TLS in front). Seeding only runs when no users exist.
+- **Frontend**: signed out, every page route goes to `/pantheon/login` (and `/desktop` returns to
+  itself after sign-in via `session["return_to"]`); a BFF answer with `signed_out` sends the page
+  there too (`ui.common.failed`). The rail foot shows the account and Sign out.
 - **Volume**: the whole `data/` is now a single mount (bind mount in `run-podman.sh`, the `pantheon-data` volume in `compose.yaml`) so `data/u`,
   `data/auth`, and per-user subdirs all persist — no more per-subdir mount list to keep in sync.
 
@@ -223,14 +248,26 @@ Login-gated, role-based, per-user isolated libraries.
   (scenario mode), `character_id`, `persona_id`.
   (Lorebook entries carry `min_stage` for stage-gating.)
 
-## API endpoints (main.py)
+## What the server answers
 
-All `/api/*` except `login`/`me` require auth (401 otherwise); user-mgmt requires admin (403).
 ```
-GET  /                                     SPA (public; the SPA gates itself via /api/me)
-# auth
-POST /api/login ; POST /api/logout         set / clear the signed session cookie
-GET  /api/me                               {user:{username,role}} | {user:null}  (public)
+/pantheon/…                                the page (pytincture): login, the app, its BFF calls
+/                                          -> /pantheon (pytincture's own redirect)
+GET  /api/health                           {"ok": true} — public; stack + compose healthchecks
+/pmedia/…                                  pantheon_web/media.py: card/expression/persona PNGs, card export,
+                                           import, VRM list/file/upload/avatar.vrm, tts, tts-sample.wav, stt, help.html
+/desktop  ·  /pdesk/{state,open,chat,sweep,settings}    pantheon_web/desktop.py (the desktop avatar)
+/static/… · /pstatic/…                     islands + vendored three.js · the page's stylesheet
+```
+
+Everything but `/api/health`, `/static` and the login page needs the session; POSTs need the CSRF
+header. Any other Host than `127.0.0.1` gets a 400 from pytincture (`localhost` is redirected first).
+
+## Handlers (main.py — not served; the BFFs call them)
+
+The paths are the handlers' historical routes, kept because they name each handler and the unit
+tests use them; nothing listens on them. User management requires admin (403).
+```
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
 GET  /api/status                           KoboldCPP {online, version, model}
@@ -331,18 +368,28 @@ POST /api/chat                             SSE stream; done carries {expression,
   renders the assistant's different shape rather than a relabelled one.
 - **Storage:** plain JSON under `data/`, UUID ids.
 
-## Frontend map (static/js/app.js)
+## Frontend map (appcode/ + the islands)
 
-`state = {cards, sessions, persona, session, streaming}`. Chat pane: portrait overlay (mood-driven),
-header **mood meter** + **relationship strip** (stage, 4 axis bars, Emotional/Comfort readout), 🖼 Gallery,
-🎭 Expressions. Modals: card editor (all fields + portrait upload + **lorebook** + **power/social sliders**
-+ Duplicate), expression gallery (grid, per-sprite regen/delete), **help** (`?` in the sidebar header →
-in-app guide on custom system prompts / curation with copy-paste examples). The 🎭 Expressions panel also has a
-**preview stage** (`refreshExprPreview/showExprPreview`, ‹ › to cycle) that renders each sprite at the
-real in-chat `#portrait` framing (bottom-anchored, height-driven, over a transparency checker) + shows
-its natural WxH — for checking sizing/framing consistency across emotions. Key fns: `renderSession→
-renderMessages→updatePortrait/updateMood`, `renderRelationship/loadRelationship`, `send` (SSE),
-`gotoSwipe`, editor (`buildCardPayload/renderLore`), gallery (`refreshGallery/regenOne`).
+Python in the browser (Pyodide + wapyt). **Gotchas that cost time:** BFF modules are re-executed per
+call (no state; import plain modules inside methods; never import one BFF from another — shared
+helpers go in `pantheon_web/present.py`); async exports are awaited directly, sync ones get `_async`;
+never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, on fixed-height boxes
+(`focus()` scrolls `hidden` ones).
+
+| file | what |
+|---|---|
+| `pantheon.py` | the shell: 292 px rail (tile nav, Recent chats, Your characters, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Create), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
+| `ui/discover.py` · `ui/profile.py` | gallery home (search, tags, sort) · character profile modal (greetings, start / continue / scenario wizard) |
+| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, docked sprite or 3D avatar slot, speaker / hands-free / push-to-talk; drives `voice.js` |
+| `ui/chats.py` | all chats |
+| `ui/studio.py` | the card editor: every V2/V3 field, greetings, starters, lorebook, power/social, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
+| `ui/people.py` | personas + presets |
+| `ui/settings.py` | settings (model, memory, voice + microphone picker), password, users (admin), the guide |
+| `ui/memory.py` | the chat's Memory and Relationship-context modals |
+| `ui/common.py` | spawn, Listeners, Modal, toast/failed, csrf_token, avatar/portrait helpers |
+| `bff/*.py` | `shell`, `library`, `chat` (incl. the `@bff_stream` relay of `main.chat`), `studio`, `people`, `account`, `memory` |
+| `static/js/voice.js` | `window.PantheonVoice` + `pvoice:*` events (PYTINCTURE_PLAN.md, Phase 6) |
+| `static/js/vtuber.mjs` | `avatar:card/speak/expr/mood` in, `avatar:active/error` out |
 
 ## Feature set (all built + verified)
 
@@ -367,7 +414,7 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   `<name>.onnx` + `<name>.onnx.json` pair in there needs only a container restart, no rebuild. Piper honours
   each voice's own `inference` block; `speed` scales its `length_scale` inversely. Note Piper voices carry
   their own sample rate (jarvis = 22.05 kHz vs Kokoro's 24 kHz).
-- **What gets spoken** (`feedSpeech` in `app.js`): roleplay cards speak only the **quoted dialogue**,
+- **What gets spoken** (`feedSpeech` in `static/js/voice.js`): roleplay cards speak only the **quoted dialogue**,
   skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
   **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no
   scene, so quotes there mark a term or a citation, and feeding only the quoted spans spoke the
@@ -395,9 +442,9 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   budgets the total prompt, and history is bounded by turn *count*, not tokens — so on overflow the
   system block goes first: persona, relationship descriptor, and memory vanish with no error. The
   `boundary_note` trailing placement makes it the most overflow-resistant part; don't move it.
-- CSS: `[hidden] { display:none !important }` at top of style.css so the HTML `hidden` attr wins over
-  element display rules; toggle via `.hidden`.
-- Starlette: `TemplateResponse(request, "index.html")` (request first).
+- CSS (`appcode/static/pantheon.css`): an element with its own `display` beats the `hidden`
+  attribute, so each such rule carries a `[hidden] { display: none }` partner; accessible hidden
+  radios use `opacity: 0`, not `display: none`.
 - `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
 - **Sprite generation re-reads the card before saving** (`generate_expressions` /
   `regenerate_expression`). It takes minutes; saving the copy loaded at the start silently
@@ -412,6 +459,9 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 
 ## Roadmap / next
 
+- **pytincture page** (`PYTINCTURE_PLAN.md`): ✅ Phases 0–7 — the page replaced the classic one on
+  2026-10-26. ◻ **Phase 8: other devices** — TLS in front (pytincture only signs in over plain HTTP on
+  loopback), then phones work again.
 - ✅ **Relationship Phase 2 (done)** — milestones: `relationship.MILESTONES` + `newly_reached()`; crossing a
   stage/tier fires a one-time toast (chat `done.milestones`) and injects a one-time beat via
   `session.pending_milestone` into the next reply; recorded in `Relationship.milestones`.
@@ -466,9 +516,10 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   before a fall". That case is handled in the prompt, which now states the brackets are part
   of the tag.
   ✅ **Phase 3a done** — avatar renderer: `static/js/vtuber.mjs` **module island** (three.js +
-  `@pixiv/three-vrm`, vendored in `static/vendor/`, no CDN) talking to the classic-script `app.js` over
+  `@pixiv/three-vrm`, vendored in `static/vendor/`, no CDN) talking to the page's voice code (then the
+  classic `app.js`, now `voice.js`) over
   four CustomEvents (`avatar:card`/`:speak`/`:expr`/`:active`); `CharacterCard.vrm` picks the tier
-  (`""` = sprite tier, unchanged) and `GET /api/cards/{id}/avatar.vrm` serves models from `data/vrm/`.
+  (`""` = sprite tier, unchanged) and `GET /pmedia/card/{id}/avatar.vrm` serves models from `data/vrm/`.
   Renderer verified in-browser via `/static/avatar-test.html`; the real `.vrm` branch is untested for
   want of a model. ✅ **3b idle life done** — rest pose out of T (a VRM has a rig but no animation, so nothing lowers
   the arms unless we do), breathing, weight shift, randomised blink, `VRMLookAt` gaze, and the model's
@@ -509,11 +560,10 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   **+26 dB** over the noise floor, the AEC source at **−39 dB** — no level threshold can bridge that, so
   `echo_suppress` was a dead end and is gone from the UI. Over speakers BOTH halves are needed: pick
   `aec_source` *and* play into `aec_sink`, or there is no reference to subtract. Next: ◻
-  ◻ **Phase 6 desktop mode** — tray-resident avatar in the screen corner; a repackage, not a rebuild
-  (backend already is the microservice; adds a `/desktop` avatar-only view + a thin native shell).
-  Measured on this box: KWin advertises **`zwlr_layer_shell_v1` v5**, so a corner-anchored click-through
-  overlay is possible natively on Wayland; XWayland is the fallback. Phase 5 gates it — half-duplex is
-  disqualifying for a desktop assistant. · ◻ **Option: realistic non-VRM avatars** (Ready Player Me /
+  ✅ **Phase 6 desktop mode** — `desktop/` (transparent GTK4 + WebKitGTK window, tray over D-Bus,
+  click-through strip, drag to position; `desktop/README.md`) on **`/desktop`**, which since the
+  2026-10-26 switch-over is its own small page (`pantheon_web/desktop.py` + `static/js/desktop.js`
+  on `voice.js`), no longer the classic SPA in disguise. · ◻ **Option: realistic non-VRM avatars** (Ready Player Me /
   Avaturn / CC4 — glTF + 52 ARKit blendshapes, which would retire both the 28→5 expression collapse and
   the viseme block; costs a rig-adapter refactor and loses VRM spring bones) · ◻ Track B3 real animation
   clips · ◻ visemes (blocked on phoneme timings unless the ARKit route is taken). **Track B (sourcing a `.vrm`) now blocks 3b** —

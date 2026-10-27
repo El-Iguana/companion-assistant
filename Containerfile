@@ -86,9 +86,8 @@ RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER
 COPY main.py run.py manage.py service.py ./
 COPY models/ ./models/
 COPY services/ ./services/
-COPY templates/ ./templates/
 COPY static/ ./static/
-# The new (pytincture) page: browser code + BFF classes, and its server-side helpers.
+# The page (pytincture): browser code + BFF classes, and its server-side helpers.
 COPY pantheon_web/ ./pantheon_web/
 COPY appcode/ ./appcode/
 COPY --from=wapyt-wheels /wheels/browser/wapyt-99.99.99-py3-none-any.whl ./appcode/
@@ -103,25 +102,20 @@ COPY data/vrm/baseline.vrm /app/data/vrm/baseline.vrm
 # KoboldCPP URL — override with -e KOBOLD_URL=http://... at runtime.
 ENV KOBOLD_URL=http://koboldcpp:5001
 
-# The new page binds all interfaces INSIDE the container so a published port reaches it;
-# run-podman.sh / compose publish it on 127.0.0.1 only, because its login is loopback-only.
-# PANTHEON_WEB_PORT must equal the published host port: it is also the page's origin.
-ENV PANTHEON_WEB_BIND=0.0.0.0 \
-    PANTHEON_WEB_PORT=7866
+# Binds all interfaces INSIDE the container so a published port reaches it; run-podman.sh
+# and compose publish it on 127.0.0.1 only, because the login is loopback-only.
+# PANTHEON_PORT must equal the published host port: it is also the page's origin.
+ENV PANTHEON_BIND=0.0.0.0 \
+    PANTHEON_PORT=7861
 
-EXPOSE 7861 7866
+EXPOSE 7861
 
 # HEALTHCHECK is a docker-format field with no OCI slot, so podman drops it unless the build
 # passes --format docker (run-podman.sh does). Without that flag this block is silently inert.
 #
-# Probes `/`, not `/api/status`. Two reasons, both of which would have made this container
-# report unhealthy while working fine: /api/status is behind `current_user`, so unauthenticated
-# it answers 401 and `curl -f` treats that as failure; and it proxies KoboldCPP, so it would
-# also fail whenever the *backend* is down. `/` renders the login page — it exercises uvicorn
-# and Jinja without depending on either.
+# Probes /api/health: public, and true whenever the server answers, so a KoboldCPP outage
+# does not mark Pantheon unhealthy. 127.0.0.1, not localhost (localhost is redirected).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fs http://localhost:7861/ || exit 1
+    CMD curl -fs http://127.0.0.1:${PANTHEON_PORT}/api/health || exit 1
 
-# One process, two servers: the classic page on 7861 and the new page on 7866, sharing
-# Pantheon's state (service.py; PYTINCTURE_PLAN.md).
 CMD ["python3", "service.py"]

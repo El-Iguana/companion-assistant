@@ -28,18 +28,15 @@ services:
     container_name: pantheon
     restart: unless-stopped
     ports:
-      # 127.0.0.1 = this computer only. PANTHEON_BIND=0.0.0.0 in .env opens it
-      # to your network; read INSTALL.md, "Other devices", first.
-      - "${PANTHEON_BIND:-127.0.0.1}:${PANTHEON_PORT:-7861}:7861"
-      # The new page (in progress, PYTINCTURE_PLAN.md). Always this computer only: its
-      # login refuses any other address. Same number inside and out — it is the page's origin.
-      - "127.0.0.1:${PANTHEON_WEB_PORT:-7866}:${PANTHEON_WEB_PORT:-7866}"
+      # This computer only: the login refuses any other address (INSTALL.md, "Other
+      # devices"). Same number inside and out — it is also the page's origin.
+      - "127.0.0.1:${PANTHEON_PORT:-7861}:${PANTHEON_PORT:-7861}"
     extra_hosts:
       # Docker Desktop and Podman define this name already; Docker Engine on
       # Linux needs it spelled out.
       - "host.docker.internal:host-gateway"
     environment:
-      PANTHEON_WEB_PORT: ${PANTHEON_WEB_PORT:-7866}
+      PANTHEON_PORT: ${PANTHEON_PORT:-7861}
       KOBOLD_URL: ${KOBOLD_URL:-http://host.docker.internal:5001}
       COMFYUI_URL: ${COMFYUI_URL:-http://host.docker.internal:8188}
       # The image is UTC; timestamps and "what time is it?" follow this.
@@ -53,9 +50,8 @@ services:
       # Piper voices (.onnx + .onnx.json), optional. Kokoro is built in.
       - ${PIPER_VOICES_DIR:-./voices}:/app/models/piper:ro,z
     healthcheck:
-      # "/" is the login page: it answers without a login and without the
-      # backends, so "unhealthy" means Pantheon itself is down.
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7861/"]
+      # Public and independent of the backends, so "unhealthy" means Pantheon itself is down.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:${PANTHEON_PORT:-7861}/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 30s

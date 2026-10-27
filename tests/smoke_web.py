@@ -1,6 +1,6 @@
 """Smoke test for the pytincture page: every screen, zero console errors, screenshots.
 
-    PANTHEON_URL=http://127.0.0.1:7866 PANTHEON_USER=… PANTHEON_PASS=… \\
+    PANTHEON_URL=http://127.0.0.1:7861 PANTHEON_USER=… PANTHEON_PASS=… \\
     CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \\
       uv run --with playwright python tests/smoke_web.py [shots_dir]
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("PANTHEON_URL", "http://127.0.0.1:7866").rstrip("/")
+URL = os.environ.get("PANTHEON_URL", "http://127.0.0.1:7861").rstrip("/")
 USER = os.environ["PANTHEON_USER"]
 PASS = os.environ["PANTHEON_PASS"]
 CHROME = os.path.expanduser(os.environ.get("CHROME", ""))
@@ -314,6 +314,60 @@ def voice_steps(page, card_id: str) -> None:
         _idle(page)
 
 
+def switchover_steps(browser, page, card_id: str, errors: list) -> None:
+    """Phase 7: one server. Redirects, the health probe, and the desktop avatar's page."""
+    r = page.request.get(f"{URL}/", max_redirects=0)
+    assert r.status in (302, 307) and r.headers["location"].rstrip("/").endswith("/pantheon"), (r.status, r.headers)
+    assert page.request.get(f"{URL}/api/health").json() == {"ok": True}
+    local = URL.replace("127.0.0.1", "localhost")
+    r = page.request.get(f"{local}/pantheon/?x=1", max_redirects=0)
+    assert r.status == 307 and r.headers["location"] == f"{URL}/pantheon/?x=1", (r.status, r.headers)
+
+    # signed in: the desktop page boots on voice.js, and the tray hooks answer
+    desk = browser.new_page(viewport={"width": 420, "height": 640},
+                            storage_state=page.context.storage_state())
+    desk.on("console", lambda m: errors.append(f"[desktop] {m.text}") if m.type == "error" else None)
+    desk.on("pageerror", lambda e: errors.append(f"[desktop] pageerror {e}"))
+    desk.goto(f"{URL}/desktop")
+    desk.wait_for_function("window.__desktopReady === true", timeout=30_000)
+    chars = desk.evaluate("window.__desktopCharacters()")
+    assert any(c["id"] == card_id for c in chars), chars
+    assert desk.evaluate(f"window.__desktopSetCharacter({card_id!r})") is True
+    desk.wait_for_timeout(600)
+    cur = [c for c in desk.evaluate("window.__desktopCharacters()") if c["current"]]
+    assert [c["id"] for c in cur] == [card_id], cur
+    listening = desk.evaluate("window.__desktopListening()")
+    assert set(listening) >= {"on", "wake", "sleep", "mode", "awake", "duplex"}, listening
+    assert desk.evaluate("PantheonVoice.state().speaker"), "voice is on by default on the desktop"
+    if not os.environ.get("PANTHEON_SKIP_CHAT"):
+        # a spoken turn, as voice.js would deliver it: the reply streams into the caption.
+        # Speech output needs the TTS models (the container); mute it elsewhere.
+        if not os.environ.get("PANTHEON_VOICE"):
+            desk.evaluate("PantheonVoice.speaker(false)")
+        desk.evaluate("window.dispatchEvent(new CustomEvent('pvoice:send', "
+                      "{detail: {text: 'Say hello in five words.'}}))")
+        desk.wait_for_function("document.getElementById('dt-state').textContent === 'thinking…'", timeout=10_000)
+        desk.wait_for_function("document.getElementById('dt-state').textContent !== 'thinking…'", timeout=180_000)
+        said = desk.inner_text("#dt-caption")
+        assert said and said != "…", f"no reply in the caption: {said!r}"
+    desk.hover("#dt-bar")
+    desk.wait_for_timeout(300)
+    desk.screenshot(path=str(SHOTS / "desktop.png"))
+    desk.close()
+
+    # signed out: /desktop -> login -> back to /desktop
+    ctx = browser.new_context(viewport={"width": 420, "height": 640})
+    anon = ctx.new_page()
+    anon.goto(f"{URL}/desktop")
+    anon.wait_for_selector("input[name=email]", timeout=30_000)
+    anon.fill("input[name=email]", USER)
+    anon.fill("input[name=password]", PASS)
+    anon.keyboard.press("Enter")
+    anon.wait_for_url(f"{URL}/desktop", timeout=30_000)
+    anon.wait_for_function("window.__desktopReady === true", timeout=30_000)
+    ctx.close()
+
+
 def _confirm(page, label):
     page.wait_for_selector(".wapyt-msg-dialog", timeout=5_000)
     page.click(f".wapyt-msg-dialog .wapyt-msg-btn:has-text('{label}')")
@@ -547,6 +601,7 @@ def run_steps(browser, page, errors: list) -> None:
         smoke_card = studio_steps(page)
         phase5_steps(page)
         phase6_steps(page, smoke_card)
+        switchover_steps(browser, page, smoke_card, errors)
 
         page.click("[data-theme=ember]")
         page.wait_for_timeout(800)

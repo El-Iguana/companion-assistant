@@ -238,7 +238,6 @@ Open `.env` in a text editor. The settings you are most likely to change:
 | `TZ` | Your time zone, e.g. `Europe/Berlin`, `America/New_York`. Timestamps, and "what time is it?" in assistant mode, use it. Default `UTC`. |
 | `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([6](#6-start-pantheon-and-sign-in)). |
 | `PANTHEON_PORT` | The port on this computer, default `7861`. |
-| `PANTHEON_BIND` | `127.0.0.1` (this computer only, the default) or `0.0.0.0` (your network, see [9](#9-reaching-pantheon-from-other-devices)). |
 | `KOBOLD_URL`, `COMFYUI_URL` | Where the backends are, if not on this computer's usual ports. |
 
 The rest of `.env.example` is for the KoboldCPP container ([4b](#4b-koboldcpp-in-a-container-nvidia))
@@ -458,7 +457,8 @@ A `NOT reachable` line comes with the next command to try. See
 
 ### First sign-in
 
-Open **<http://127.0.0.1:7861>** (or the port you chose).
+Open **<http://127.0.0.1:7861>** (or the port you chose). Use `127.0.0.1`;
+`localhost` redirects there.
 
 The account is **`ADMIN`**. If you did not set `PANTHEON_ADMIN_PASSWORD`, its
 password was generated on the first start. Read it from the log:
@@ -482,14 +482,15 @@ docker compose exec pantheon cat /app/data/auth/INITIAL_PASSWORD
 Then:
 
 1. Sign in as `ADMIN`.
-2. Change the password: the user bar at the bottom left → your account.
+2. Change the password: **Settings → Account**.
 3. Delete the file: `docker compose exec pantheon rm /app/data/auth/INITIAL_PASSWORD`.
-4. Add other people from **Users** (admins only). Each account gets its own
-   private library of characters, personas and chats.
+4. Add other people from **Settings → Users** (admins only). Each account gets
+   its own private library of characters, personas and chats.
 
-The header's status dot shows whether KoboldCPP is online. Import a
-character card (PNG or JSON, SillyTavern/Chub format) or make one with **New
-character**, start a chat, and send a message.
+The status pill at the top right shows whether KoboldCPP is online (and which
+model it has loaded). Import a character card (PNG or JSON, SillyTavern/Chub
+format) or make one under **Create**, open it from **Discover**, start a chat,
+and send a message.
 
 ---
 
@@ -630,64 +631,18 @@ from the host.
 
 ## 9. Reaching Pantheon from other devices
 
-By default Pantheon answers only on this computer. To use it from a phone or
-another PC on your network, set in `.env`:
+**Not yet.** Pantheon answers on this computer only, at `http://127.0.0.1:7861`
+(`localhost` redirects there). Its sign-in runs over plain HTTP, and it allows
+that only on this computer's own address, so a phone or another PC gets an
+error page instead of the sign-in form, and a reverse proxy in front does not
+help yet: Pantheon would still refuse the proxy's host name.
 
-```sh
-PANTHEON_BIND=0.0.0.0
-```
+Support for other devices is planned: Pantheon behind HTTPS, with a host name
+you choose. Until then, use it on the computer that runs it.
 
-and run `docker compose up -d`. Open `http://<this computer's address>:7861`,
-and allow port 7861 through the firewall. Windows asks the first time. On
-macOS it is under **System Settings → Network → Firewall**. On Linux, for
-example: `sudo firewall-cmd --add-port=7861/tcp --permanent && sudo
-firewall-cmd --reload`.
-
-Know what that means:
-
-- It is **plain HTTP**. Passwords and chats cross the network unencrypted.
-- **The microphone does not work over plain HTTP**, except on the computer
-  itself. Browsers only allow it on `https://` or `127.0.0.1`/`localhost`, so
-  speech input (push-to-talk, hands-free) is unavailable from other devices
-  until you use HTTPS.
-- Anyone on the network can reach the sign-in page. Use strong passwords.
-
-**HTTPS with a reverse proxy.** Keep `PANTHEON_BIND=127.0.0.1` and put a proxy
-in front. Pantheon needs nothing special from it: no host-name setting, and
-cookies work on HTTP and HTTPS alike. Two things matter. Chat replies stream as
-*server-sent events*, so the proxy must not buffer them. Avatar uploads (VRM
-models) are often 10–20 MB, so it must allow bodies that size.
-
-[Caddy](https://caddyserver.com) fetches certificates by itself, and
-streaming needs no extra setting:
-
-```
-pantheon.example.com {
-    reverse_proxy 127.0.0.1:7861
-}
-```
-
-nginx:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name pantheon.example.com;
-    # ssl_certificate ... ; ssl_certificate_key ... ;
-    client_max_body_size 64m;
-
-    location / {
-        proxy_pass http://127.0.0.1:7861;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;             # stream chat replies as they come
-        proxy_read_timeout 300s;         # long generations
-    }
-}
-```
-
-For a home network without a public name, Tailscale's `tailscale serve`
-gives the same result with a trusted certificate.
+Changing `PANTHEON_BIND` in `.env` no longer opens Pantheon to the network.
+Older `.env` files that set `PANTHEON_BIND=0.0.0.0` are harmless; the setting
+is ignored.
 
 ---
 

@@ -21,10 +21,8 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.responses import (
-    HTMLResponse, JSONResponse, StreamingResponse, Response, FileResponse,
+    StreamingResponse, Response, FileResponse,
 )
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
@@ -54,9 +52,11 @@ COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://comfyui:8188")
 kobold = KoboldClient(KOBOLD_URL)
 comfy = ComfyUIClient(COMFYUI_URL)
 
+# The route table is no longer served (2026-10-26, pytincture switch-over): service.py
+# serves the page, whose BFF classes (appcode/bff/) and plain routes (pantheon_web/) call
+# these handlers directly with the signed-in user's Ctx. The decorators remain as the
+# handlers' contract and for the unit tests; the classic page and its cookie login are gone.
 app = FastAPI(title="Pantheon")
-app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
-templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 
 # --------------------------------------------------------------------------
@@ -350,74 +350,11 @@ async def _shutdown():
 
 
 # --------------------------------------------------------------------------
-# UI
-# --------------------------------------------------------------------------
-def _asset_ver(rel: str) -> int:
-    """mtime of a static asset — appended as ?v= so rebuilds bust the browser cache."""
-    try:
-        return int((BASE / "static" / rel).stat().st_mtime)
-    except OSError:
-        return 0
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse(request, "index.html", {
-        "css_v": _asset_ver("css/style.css"),
-        "js_v": _asset_ver("js/app.js"),
-        "desktop": False,
-    })
-
-
-@app.get("/desktop", response_class=HTMLResponse)
-async def desktop(request: Request):
-    """Phase 6: the same SPA in avatar-only dress.
-
-    Deliberately the same template rather than a second one. Everything desktop
-    mode needs -- the voice loop, the TTS queue, the avatar bridge, the session
-    and card state -- already lives in app.js, wired to elements in this page.
-    A separate slimmer template would either duplicate that or spend the rest of
-    its life null-guarding against the elements it chose not to render. So the
-    chrome is hidden by CSS and the same code runs untouched.
-    """
-    return templates.TemplateResponse(request, "index.html", {
-        "css_v": _asset_ver("css/style.css"),
-        "js_v": _asset_ver("js/app.js"),
-        "desktop": True,
-    })
-
-
-# --------------------------------------------------------------------------
-# Auth routes (login / logout / me) + admin user management
+# Accounts: password change + admin user management (sign-in is pytincture's, via
+# pantheon_web/auth.py)
 # --------------------------------------------------------------------------
 def _safe_user(u: User) -> dict:
     return {"id": u.id, "username": u.username, "role": u.role, "created_at": u.created_at}
-
-
-@app.post("/api/login")
-async def login(body: dict):
-    u = _user_by_name(body.get("username", ""))
-    if not u or not auth.verify_password(body.get("password", ""), u.salt, u.password_hash):
-        raise HTTPException(401, "invalid username or password")
-    resp = JSONResponse({"username": u.username, "role": u.role})
-    resp.set_cookie("session", auth.make_token(_secret(), u.id),
-                    httponly=True, samesite="lax", max_age=30 * 86400, path="/")
-    return resp
-
-
-@app.post("/api/logout")
-async def logout():
-    resp = JSONResponse({"ok": True})
-    resp.delete_cookie("session", path="/")
-    return resp
-
-
-@app.get("/api/me")
-async def me(request: Request):
-    tok = request.cookies.get("session")
-    uid = auth.read_token(_secret(), tok) if tok else None
-    u = _user_by_id(uid) if uid else None
-    return {"user": {"username": u.username, "role": u.role} if u else None}
 
 
 @app.post("/api/me/password")

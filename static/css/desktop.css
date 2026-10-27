@@ -1,0 +1,39 @@
+/* The desktop avatar's page (/desktop). Three layers have to agree for the desktop to
+   show through: this page, the WebView and the GTK window (desktop/pantheon-desktop.py). */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+  font-family: system-ui, sans-serif; }
+[hidden] { display: none !important; }
+
+/* The shell decides where the window sits, so she fills it. */
+#stage { position: fixed; inset: 0; }
+#ch-avatar-slot { position: absolute; inset: 0; }
+#ch-avatar-slot:empty { display: none; }
+canvas.pt-avatar { width: 100%; height: 100%; display: block; pointer-events: none;
+  filter: drop-shadow(0 6px 22px #000a); }
+body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px; top: -10px; }
+#ch-portrait { position: absolute; right: 0; bottom: 0; max-height: 100%; max-width: 100%;
+  transform-origin: bottom center; pointer-events: none; filter: drop-shadow(0 6px 22px #000a); }
+
+/* HUD: only on hover (the shell lets clicks through except in a strip along the bottom). */
+#dt-hud { position: fixed; inset: auto 0 0 0; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+  opacity: 0; transition: opacity .18s ease; pointer-events: none; }
+body:hover #dt-hud, #dt-hud:focus-within { opacity: 1; }
+#dt-hud > * { pointer-events: auto; }
+/* Her latest line shows even when the HUD is hidden. */
+#dt-caption { max-width: 100%; box-sizing: border-box; font-size: 12px; line-height: 1.45;
+  background: #0b0b12cc; color: #e7e7ef; border-radius: 10px; padding: 7px 10px;
+  backdrop-filter: blur(6px); display: none; }
+#dt-caption.show { display: block; }
+#dt-hud:has(#dt-caption.show) { opacity: 1; }
+#dt-hud:has(#dt-caption.show) #dt-bar { opacity: 0; }
+body:hover #dt-hud #dt-bar { opacity: 1; }
+
+#dt-bar { display: flex; gap: 6px; align-items: center; transition: opacity .18s ease;
+  background: #0b0b12cc; border-radius: 999px; padding: 4px 8px; backdrop-filter: blur(6px); }
+.dt-btn { background: none; border: none; cursor: pointer; font-size: 15px; line-height: 1;
+  padding: 4px 6px; border-radius: 999px; color: #e7e7ef; text-decoration: none; }
+.dt-btn:hover { background: #ffffff22; }
+.dt-btn.active { background: #5aa9e055; }
+.dt-btn.awake { box-shadow: 0 0 0 2px #5ac47a88; }
+.dt-state { font-size: 11px; color: #9a9aa8; min-width: 4.5em; }

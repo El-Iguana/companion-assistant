@@ -328,7 +328,7 @@ class SettingsView:
 
 
 class HelpView:
-    """The guide — the same text the classic page shows (templates/help.html)."""
+    """The guide (pantheon_web/assets/help.html, served at /pmedia/help.html)."""
 
     def __init__(self, app, arg: str = "") -> None:
         self.app = app

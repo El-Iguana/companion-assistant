@@ -25,7 +25,7 @@ browser: pantheon.py (Pyodide + wapyt)  ──BFF──▶  services/*_bff.py  �
                  └─ JS islands: vtuber.mjs, voice.js (mic, VAD, TTS playback, lip-sync)
 ```
 
-- **One process, two servers during the transition.** `service.py` imports `main` (all of
+- *(Phases 0–6; Phase 7 made it one server — see its results.)* **One process, two servers during the transition.** `service.py` imports `main` (all of
   Pantheon's state and clients) and builds the pytincture app beside it. The old page keeps
   serving from `main.app` on 7861, exactly as today, including LAN access. The new page runs
   as a second uvicorn server in the same process on a **loopback-only** port (7866; the
@@ -349,3 +349,37 @@ phase-6 steps in the smoke test.
   picker. `PANTHEON_VOICE=1` (container only: the models are baked into the image) adds TTS,
   the CSRF check, Read aloud starting playback, and — with `PANTHEON_FAKE_AUDIO=<speech.wav>` —
   push-to-talk end to end, from the fake mic to a sent message.
+
+## Phase 7 results (2026-10-26) — the switch-over
+
+One server, one page. `http://127.0.0.1:7861/` is the pytincture page; the classic page is gone.
+
+- **`service.py` serves one app** on `PANTHEON_PORT` (7861), bound by `PANTHEON_BIND` (image:
+  0.0.0.0, published `127.0.0.1:7861:7861`). `PANTHEON_SERVE`, `PANTHEON_WEB_*`,
+  `PANTHEON_CLASSIC_*` and port 7866 are gone. `main.app`'s route table is no longer served;
+  `main` stays the home of every handler, and its shutdown (closing the KoboldCPP/ComfyUI
+  clients) now runs from the served app's lifespan.
+- **`localhost` -> `127.0.0.1`** (`LocalhostRedirect`, 307, path and query kept), outermost, so
+  bookmarks, `stack companion`, and the desktop shell's old URL land on the address pytincture
+  will sign in on. `GET /api/health` (public) is what `stack status` and both compose
+  healthchecks probe now.
+- **`/desktop` is its own small page** (`pantheon_web/desktop.py` + `static/js/desktop.js` +
+  `static/css/desktop.css`) on `voice.js` and `vtuber.mjs`: no Pyodide in the shell's
+  WebKitGTK window, and no forked voice code. Five JSON routes behind the session (`/pdesk/state`,
+  `open`, `chat` — `main.chat`'s SSE unchanged — `sweep`, `settings`). It keeps the classic
+  behaviour: `?card=` → the desktop-mode character → the last chat; continue her latest chat;
+  voice on by default; caption of her latest line; the idle memory fold; the four
+  `window.__desktop*` hooks the tray uses. Two traps: pytincture's `/{application}` catch-all
+  read `/desktop` as an app named "desktop" (its routes are now inserted ahead), and the login's
+  `return_to` must carry the query or `?card=` is lost.
+- **Deleted:** `templates/index.html`, `templates/help.html` (the guide moved to
+  `pantheon_web/assets/help.html`, without its Jinja guards), `static/js/app.js`,
+  `static/css/style.css`, `appcode/ui/views.py`, main's `/` and `/desktop` page routes, the cookie
+  login (`/api/login`, `/api/logout`, `/api/me`), the Jinja and static-mount setup, and the
+  `jinja2` requirement. The avatar harness reads models from `/pmedia/vrm` now.
+- **Elsewhere:** `run-podman.sh` (publish + env; host-network fallback binds loopback), both
+  compose files, `.env.example`, INSTALL.md (section 9 now says other devices are not supported
+  yet — the old proxy recipe would be refused by the host check), README, `desktop/` (URL +
+  README), `ai-stack/stack` (the companion probe).
+- **Lost until Phase 8:** access from other devices. The classic page answered on every interface
+  over plain HTTP; nothing does now.

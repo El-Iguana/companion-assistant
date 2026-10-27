@@ -193,16 +193,30 @@ async def avatar(card_id: str, request: Request):
     return await main.get_avatar(card_id, cur=_ctx(request))
 
 
+@router.get("/vrm")
+async def vrm_list(request: Request):
+    """Models in data/vrm with their audits (the avatar harness, static/avatar-test.html)."""
+    import main
+
+    _ctx(request)
+    return await main.list_vrm(None)
+
+
+@router.get("/vrm/{name}")
+async def vrm_file(name: str, request: Request):
+    """One model by name, for previewing before it is assigned (``main.get_vrm``)."""
+    import main
+
+    _ctx(request)
+    return await main.get_vrm(name, None)
+
+
 @router.get("/help.html")
 def help_page(request: Request):
-    """The in-app guide, from the template the classic page includes (templates/help.html),
-    with its Jinja comment and raw markers stripped — one copy of the text for both pages."""
-    import re
-
+    """The in-app guide (pantheon_web/assets/help.html)."""
     from pathlib import Path
 
     _ctx(request)
-    raw = (Path(__file__).resolve().parents[1] / "templates" / "help.html").read_text(encoding="utf-8")
-    raw = re.sub(r"\{#.*?#\}", "", raw, flags=re.S).replace("{% raw %}", "").replace("{% endraw %}", "")
+    raw = (Path(__file__).resolve().parent / "assets" / "help.html").read_text(encoding="utf-8")
     return Response(content=raw, media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
