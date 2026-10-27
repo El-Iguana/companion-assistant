@@ -162,8 +162,11 @@ class ChatView:
         card = d["card"]
         portrait = portrait_url(card["id"], card.get("updated_at", "")) if card.get("has_portrait") else ""
         bg = f'<div class="pt-chat-bg" style="background-image:url(&quot;{esc(portrait)}&quot;)"></div>' if portrait else ""
+        # The stage: a column of its own beside the chat for the sprite or 3D avatar,
+        # so the messages never run underneath it. Only for cards that have one.
+        stage = bool(card.get("expressions")) or bool(card.get("has_vrm"))
         self.root.innerHTML = (
-            '<div class="pt-chat">'
+            f'<div class="pt-chat{" has-stage" if stage else ""}">'
             + bg
             + '<div class="pt-chatwrap">'
             '<header class="pt-chead">'
@@ -193,9 +196,10 @@ class ChatView:
             '</div>'
             f'<div class="pt-hint">{self._hint()}</div>'
             '</div></div>'
+            '<aside class="pt-stage" id="ch-stage"' + ("" if stage else " hidden") + '>'
             '<img class="pt-portrait" id="ch-portrait" alt="" hidden>'
             '<div class="pt-avatar-slot" id="ch-avatar-slot"></div>'
-            '</div>')
+            '</aside></div>')
         inp = by_id("ch-input")
         self.listeners.on(inp, "keydown", self._on_key)
         self.listeners.on(inp, "input", lambda _e: self._grow())

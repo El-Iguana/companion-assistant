@@ -386,7 +386,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 |---|---|
 | `pantheon.py` | the shell: 292 px rail (tile nav, Recent chats, Your characters, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Create), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
 | `ui/discover.py` · `ui/profile.py` | gallery home (search, tags, sort) · character profile modal (greetings, start / continue / scenario wizard) |
-| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, docked sprite or 3D avatar slot, speaker / hands-free / push-to-talk; drives `voice.js` |
+| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
 | `ui/chats.py` | all chats |
 | `ui/studio.py` | the card editor: every V2/V3 field, greetings, starters, lorebook, power/social, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
 | `ui/people.py` | personas + presets |

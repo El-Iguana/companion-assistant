@@ -164,8 +164,17 @@ function initScene(canvas) {
   resize();
 }
 
-// Frame the head and shoulders. VRM models are ~1.5 m tall with the origin at the
-// feet, so aim at eye height rather than the model's centre.
+// Frame the head and shoulders, fitted to the stage's shape. VRM models are ~1.5 m
+// tall with the origin at the feet, so work from eye height, not the model's centre.
+// The camera pulls back until a head-and-shoulders box fits BOTH the width and the
+// height, with the head kept near the top: a tall, narrow stage is width-bound, so
+// it shows more of the body instead of cropping the shoulders; a wide one is a bust.
+// MAX_VIS_H caps the pull-back (head to upper thigh), so a very thin stage crops the
+// arms rather than shrinking the face to nothing.
+const FRAME_W = 0.55, FRAME_H = 0.62;   // metres that should stay in view
+const MAX_VIS_H = 1.15;
+const HEAD_AIR = 0.24;                  // eye height to the top edge of the frame
+let viewerY = 1.4;                      // eye height the gaze aims at (not the camera's)
 function frameBust() {
   if (!camera) return;
   let eye = 1.4;                                   // sane default if there is no rig
@@ -180,18 +189,29 @@ function frameBust() {
       if (y > 0.2) eye = y + 0.08;                 // head BONE sits at the jaw/ear line;
     }                                              // nudge up to the visual centre of the head
   }
-  camera.position.set(0, eye, 1.4);
-  camera.lookAt(0, eye - 0.03, 0);
+  viewerY = eye;
+  const tan = Math.tan(camera.fov * Math.PI / 360);
+  const aspect = camera.aspect || 1;
+  const d = Math.min(MAX_VIS_H / (2 * tan), Math.max(FRAME_H / (2 * tan), FRAME_W / (2 * tan * aspect)));
+  const visH = 2 * d * tan;
+  const cy = Math.max(visH / 2, eye + HEAD_AIR - visH / 2);   // head top + air at the top edge
+  camera.position.set(0, cy, d);
+  camera.lookAt(0, cy, 0);
 }
 
+let sizeW = 0, sizeH = 0;
 function resize() {
   if (!renderer || !camera) return;
   const c = renderer.domElement;
   const w = c.clientWidth || 1, h = c.clientHeight || 1;
-  if (c.width === w && c.height === h) return;
+  // Compare CSS sizes: c.width is scaled by the pixel ratio and never equals w on
+  // a HiDPI screen, which resized the canvas every frame.
+  if (w === sizeW && h === sizeH) return;
+  sizeW = w; sizeH = h;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  frameBust();                                     // refit to the new shape
 }
 
 // --------------------------------------------------------------------------
@@ -396,10 +416,12 @@ function updateIdle(vrm, dt) {
   idle.gaze.x += (idle.gazeTo.x - idle.gaze.x) * Math.min(1, dt * 2.5);
   idle.gaze.y += (idle.gazeTo.y - idle.gaze.y) * Math.min(1, dt * 2.5);
   if (lookTarget && camera) {
-    // Track the camera, offset by the drift, so "centred" really means eyes on you.
+    // Look at the viewer at eye height, offset by the drift, so "centred" really
+    // means eyes on you. Not the camera's height: frameBust moves the camera down
+    // for a tall stage, and the gaze must not follow it to your chest.
     lookTarget.position.set(
       camera.position.x + idle.gaze.x,
-      camera.position.y + idle.gaze.y,
+      viewerY + idle.gaze.y,
       camera.position.z,
     );
   }
