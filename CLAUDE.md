@@ -332,6 +332,19 @@ POST /api/chat                             SSE stream; done carries {expression,
   batch. (img2img still restyles the upload toward the checkpoint, so likeness drifts somewhat; the
   likeness-preserving upgrade is LivePortrait — see `vtuber-upgrade-plan.md`/models present.)
   Sets: **Core 8** / **Full 28** (SillyTavern-compatible). Portrait reflects the running **mood**.
+  **FLUX (2026-10-27):** `flux1-schnell-Q4_K_S.gguf` (models/unet) is listed by
+  `comfy.list_checkpoints()` and loads split (`_flux_loaders`: UnetLoaderGGUF + DualCLIPLoader
+  clip_l/t5xxl + VAELoader ae — an fp8 all-in-one is ~12 GB, the whole card); img2img has its own
+  FLUX graph (`_flux_img2img`) and FLUX prompts drop the `(x:1.3)` weighting T5 can't read. The
+  Studio defaults the checkpoint to `card.expr_checkpoint` (what the set was made with, so a
+  single regen matches), else FLUX. **Emotions use Flux Kontext** (`generate_kontext`,
+  `card.expr_kontext`, Studio checkbox, on when `flux1-kontext-dev-Q4_K_M.gguf` is installed):
+  an instruction edit of the base ("change the facial expression to …, keep everything else"),
+  resized back to the base's size. Measured on the same base: img2img at 0.55 left five emotions
+  near-identical, at 0.7 angry/surprised were both grins; Kontext gave eight distinct emotions with
+  face, clothes and background unchanged. Cost: ~50 s per sprite at 12 steps (20 looked no better
+  at ~85 s) — Core 8 in 402 s, Full 28 ≈ 25 min — vs ~15 s for schnell img2img. Runs beside
+  KoboldCPP (9.5 GB loaded) without OOM.
 - **Mood/valence:** per reply, `EMOTION_VALENCE` → running `session.mood` via EMA; **neutral holds**.
   Header mood meter shows it.
 - **Relationship (`relationship.py`):** per (character, persona), stored `data/relationships/{cid}__{pid}.json`.

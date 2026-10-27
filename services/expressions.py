@@ -198,6 +198,19 @@ def _uploaded_base(b64_img: str, w: int, h: int) -> str:
 _rembg_sessions: dict = {}
 
 
+def _fit_to(b64_img: str, b64_like: str) -> str:
+    """Resize an image to another's dimensions (Kontext returns its own trained size)."""
+    from PIL import Image
+
+    like = Image.open(io.BytesIO(base64.b64decode(b64_like)))
+    im = Image.open(io.BytesIO(base64.b64decode(b64_img)))
+    if im.size == like.size:
+        return b64_img
+    buf = io.BytesIO()
+    im.resize(like.size, Image.LANCZOS).save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
 def _rembg_session(model: str):
     from rembg import new_session
     if model not in _rembg_sessions:
@@ -231,6 +244,7 @@ async def generate_expressions(
     transparent: bool = True,
     from_upload: bool = False,
     denoise: float = 0.55,
+    use_kontext: bool = False,
 ) -> dict[str, str]:
     """Generate a sprite per emotion. Returns {emotion: base64 PNG}.
 
@@ -240,6 +254,14 @@ async def generate_expressions(
         own character. Note: img2img still restyles it toward the checkpoint, so
         likeness drifts somewhat at the tuned denoise.
       - otherwise: a fresh txt2img portrait from the appearance prompt.
+
+    Each emotion is then either an img2img pass over the base (`denoise`), or — with
+    `use_kontext` — a Flux Kontext instruction edit of it ("change the expression to…"),
+    which keeps face, hair, clothes and background and changes only the expression.
+    img2img at a strength that keeps the likeness barely moves the face on FLUX (measured:
+    0.55 left five emotions near-identical; at 0.7 angry and surprised both came out as
+    grins); Kontext made angry and sad unmistakable with nothing else changed. ~52 s per
+    sprite against ~15 s, so it is a choice, not a default everywhere.
     """
     emotions = emotions or EMOTIONS
     appearance = _appearance_prompt(card)
@@ -271,12 +293,24 @@ async def generate_expressions(
             out[emo] = await finish(base)
             continue
         descriptor = EMOTION_PROMPTS.get(emo, f"{emo} facial expression")
-        positive = (f"{appearance}, ({descriptor}:1.3), same person, expressive face, "
-                    "solo portrait, upper body, looking at viewer, plain flat pastel background")
-        img = await comfy.generate_img2img(
-            base, positive=positive, negative=_NEG, checkpoint=checkpoint, style=style,
-            steps=d["steps"], cfg=d["cfg"], sampler=d["sampler"], scheduler=d["scheduler"],
-            denoise=denoise, seed=seed,
-        )
+        if d["is_flux"]:
+            # FLUX's T5 encoder reads plain language and has no (text:1.3) weighting —
+            # the numbers would be read as words. Lead with the expression instead.
+            positive = (f"{descriptor}, clearly showing on the face. {appearance}, same person, "
+                        "solo portrait, upper body, looking at viewer, plain flat pastel background")
+        else:
+            positive = (f"{appearance}, ({descriptor}:1.3), same person, expressive face, "
+                        "solo portrait, upper body, looking at viewer, plain flat pastel background")
+        if use_kontext:
+            img = await comfy.generate_kontext(
+                base, f"Change the facial expression to {descriptor}. Keep the person, hair, "
+                "clothing, pose, framing and background exactly the same.", seed=seed)
+            img = _fit_to(img, base)            # Kontext snaps its own size; match the set
+        else:
+            img = await comfy.generate_img2img(
+                base, positive=positive, negative=_NEG, checkpoint=checkpoint, style=style,
+                steps=d["steps"], cfg=d["cfg"], sampler=d["sampler"], scheduler=d["scheduler"],
+                denoise=denoise, seed=seed,
+            )
         out[emo] = await finish(img)
     return out

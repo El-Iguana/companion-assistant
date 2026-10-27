@@ -584,6 +584,9 @@ async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_
     card.expr_from_upload = from_upload
     denoise = min(0.9, max(0.2, float(body.get("denoise", 0.55))))
     card.expr_denoise = denoise
+    card.expr_checkpoint = checkpoint
+    card.expr_kontext = bool(body.get("kontext", card.expr_kontext))
+    use_kontext = card.expr_kontext and await comfy.has_kontext()
 
     # Resolve which emotions to generate: explicit list > preset ("core"|"full").
     emotions = body.get("emotions")
@@ -599,6 +602,7 @@ async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_
             transparent=body.get("transparent", True),
             from_upload=from_upload,
             denoise=denoise,
+            use_kontext=use_kontext,
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")
@@ -617,6 +621,8 @@ async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_
     fresh.appearance = card.appearance
     fresh.expr_from_upload = card.expr_from_upload
     fresh.expr_denoise = card.expr_denoise
+    fresh.expr_checkpoint = card.expr_checkpoint
+    fresh.expr_kontext = card.expr_kontext
     _save(fresh, cur.cards)
     return {"generated": list(sprites.keys()), "total": len(fresh.expressions)}
 
@@ -760,6 +766,7 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx
             comfy, card, checkpoint=checkpoint, style=body.get("style", "anime"),
             emotions=[emotion], transparent=body.get("transparent", True),
             from_upload=card.expr_from_upload, denoise=card.expr_denoise,   # match the batch
+            use_kontext=card.expr_kontext and await comfy.has_kontext(),
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")

@@ -124,6 +124,8 @@ class CharacterCard(BaseModel):
     tts_speed: float = Field(1.0, ge=0.5, le=1.5)  # speaking pace; 1.0 = the voice's own tempo, lower = slower
     expr_from_upload: bool = False       # derive expression sprites from the uploaded portrait (img2img) vs. txt2img
     expr_denoise: float = 0.55           # img2img denoise for emotion sprites (lower = closer to base/likeness)
+    expr_kontext: bool = True            # emotions via Flux Kontext edits when installed (else img2img)
+    expr_checkpoint: str = ""            # model the sprite set was made with; single regen + the Studio default reuse it
     expressions: Dict[str, str] = {}     # emotion -> base64 PNG sprite
     # Avatar tier. "" = sprite tier (the default): this card keeps the generated
     # expression sprites and no 3D avatar. A filename here (under data/vrm/) puts the

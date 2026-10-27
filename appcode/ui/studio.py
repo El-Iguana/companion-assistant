@@ -396,9 +396,21 @@ class StudioView:
         if self.data["is_new"]:
             return '<p class="pt-dim">Save the character first — sprites are generated onto a saved card.</p>'
         cps = self.data.get("checkpoints") or []
-        cp_opts = "".join(f'<option value="{esc(x)}">{esc(x)}</option>' for x in cps) or '<option value="">ComfyUI is not running</option>'
+        # Default: the model this card's sprites were made with (so a single regen
+        # matches the set), else FLUX when it's installed, else the first one.
+        want = c.get("expr_checkpoint") if c.get("expr_checkpoint") in cps else next(
+            (x for x in cps if "flux" in x.lower()), cps[0] if cps else "")
+        cp_opts = "".join(f'<option value="{esc(x)}"{" selected" if x == want else ""}>{esc(x)}</option>'
+                          for x in cps) or '<option value="">ComfyUI is not running</option>'
         styles = "".join(f'<option value="{s}">{s}</option>' for s in STYLES)
         denoise = float(c.get("expr_denoise") or 0.55)
+        kontext = ""
+        if self.data.get("kontext"):
+            on = c.get("expr_kontext", True)
+            kontext = (f'<label class="pt-check" title="Edits the base portrait by instruction: only the '
+                       f'expression changes. About 50 s per sprite; off = img2img, faster but subtler.">'
+                       f'<input type="checkbox" id="st-kontext"{" checked" if on else ""}>'
+                       'Flux Kontext for expressions</label>')
         upload = ""
         if c.get("has_portrait"):
             upload = (f'<label class="pt-check"><input type="checkbox" id="st-from-upload"{" checked" if c.get("expr_from_upload") else ""}>'
@@ -414,7 +426,7 @@ class StudioView:
             '<small>Lower keeps the likeness; higher shows the feeling more strongly.</small></label>'
             '<div class="pt-btnrow">'
             '<label class="pt-check"><input type="checkbox" id="st-transparent" checked>Transparent background</label>'
-            f'{upload}<span class="pt-flex"></span>'
+            f'{upload}{kontext}<span class="pt-flex"></span>'
             f'<button class="pt-btn primary small" data-act="generate"{"" if cps else " disabled"}>'
             '<i class="mdi mdi-creation"></i>Generate sprites</button></div>'
             '<div class="pt-job" id="st-job" hidden></div>'
@@ -444,11 +456,16 @@ class StudioView:
         def val(i):
             el = by_id(i)
             return str(el.value) if el else ""
-        return {"checkpoint": val("st-checkpoint"), "style": val("st-style") or "anime",
+        params = {"checkpoint": val("st-checkpoint"), "style": val("st-style") or "anime",
                 "preset": val("st-set") or "core", "transparent": bool(by_id("st-transparent").checked),
                 "from_upload": bool(by_id("st-from-upload").checked) if by_id("st-from-upload") else False,
                 "denoise": float(val("st-denoise") or 0.55),
                 "appearance": str(self.root.querySelector('[data-f="appearance"]').value or "")}
+        # Only when the box is shown: without Kontext installed, sending False would
+        # overwrite the card's saved preference for when it is.
+        if by_id("st-kontext"):
+            params["kontext"] = bool(by_id("st-kontext").checked)
+        return params
 
     async def _generate(self, emotion: str = "") -> None:
         if self.job:
@@ -808,7 +825,7 @@ class StudioView:
         elif t.id == "st-denoise":
             by_id("st-denoise-val").textContent = f"{float(t.value):.2f}"
             return
-        if t.id in ("st-checkpoint", "st-style", "st-set", "st-transparent", "st-from-upload"):
+        if t.id in ("st-checkpoint", "st-style", "st-set", "st-transparent", "st-from-upload", "st-kontext"):
             return
         self._mark_dirty()
         if f in ("name", "creator_notes", "personality") or t.hasAttribute("data-greet") or t.hasAttribute("data-starter"):

@@ -64,12 +64,14 @@ class Studio:
             checkpoints = await main.comfy.list_checkpoints()
         except Exception:  # noqa: BLE001 - ComfyUI down is a normal state
             checkpoints = []
+        kontext = bool(checkpoints) and await main.comfy.has_kontext()
         running = jobs.running_for(cur.user.id, card.id) if card_id else None
         return {
             "ok": True, "card": data, "is_new": not card_id,
             "voices": await asyncio.to_thread(tts.voices),
             "vrms": await self._vrms(),
             "checkpoints": checkpoints,
+            "kontext": kontext,
             "emotions": {"core": list(expressions.CORE_EMOTIONS), "full": list(expressions.FULL_EMOTIONS)},
             "job": running.public() if running else None,
         }

@@ -27,6 +27,42 @@ def is_flux(checkpoint: str) -> bool:
     return "flux" in checkpoint.lower()
 
 
+def is_gguf(checkpoint: str) -> bool:
+    return checkpoint.lower().endswith(".gguf")
+
+
+# FLUX from a GGUF diffusion model (models/unet, e.g. city96's flux1-schnell-Q4_K_S.gguf)
+# loads split: the model, its two text encoders and the VAE from separate files. An fp8
+# all-in-one FLUX checkpoint is ~12 GB of diffusion weights alone — the whole 12 GB card —
+# while a Q4 GGUF runs beside KoboldCPP (measured in Iguana Studio: 1024² in 24 s with
+# KoboldCPP holding 9.5 GB). Same support files as Iguana's Flux and Kontext graphs.
+FLUX_CLIP_L = "clip_l.safetensors"
+FLUX_T5 = "t5xxl_fp8_e4m3fn_scaled.safetensors"
+FLUX_VAE = "ae.safetensors"
+
+
+# Flux Kontext: instruction editing ("change his expression to angry"). The source is bound
+# to the conditioning (ReferenceLatent) instead of being re-noised, so everything the
+# instruction doesn't mention stays put — which is exactly what an expression sprite needs.
+# Measured on the 4070 for a sprite: 12 steps ≈ 52 s and reads as well as 20 (≈ 85 s).
+KONTEXT_UNET = "flux1-kontext-dev-Q4_K_M.gguf"
+KONTEXT_STEPS = 12
+KONTEXT_GUIDANCE = 2.5
+
+
+def _flux_loaders(checkpoint: str) -> tuple[dict, list, list, list]:
+    """Loader nodes plus the (model, clip, vae) edges for a FLUX graph."""
+    if is_gguf(checkpoint):
+        return ({
+            "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": checkpoint}},
+            "1c": {"class_type": "DualCLIPLoader",
+                   "inputs": {"clip_name1": FLUX_CLIP_L, "clip_name2": FLUX_T5, "type": "flux"}},
+            "1v": {"class_type": "VAELoader", "inputs": {"vae_name": FLUX_VAE}},
+        }, ["1", 0], ["1c", 0], ["1v", 0])
+    return ({"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}}},
+            ["1", 0], ["1", 1], ["1", 2])
+
+
 def _is_flux_schnell(checkpoint: str) -> bool:
     return "schnell" in checkpoint.lower()
 
@@ -308,16 +344,14 @@ def _build_flux_workflow(
     seed: int,
 ) -> dict:
     """FLUX.1 workflow — uses CLIPTextEncodeFlux + ModelSamplingFlux + EmptySD3LatentImage."""
+    loaders, model, clip, vae = _flux_loaders(checkpoint)
     return {
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": checkpoint},
-        },
+        **loaders,
         # FLUX positive conditioning — guidance baked in here
         "2": {
             "class_type": "CLIPTextEncodeFlux",
             "inputs": {
-                "clip": ["1", 1],
+                "clip": clip,
                 "clip_l": positive,
                 "t5xxl": positive,
                 "guidance": guidance,
@@ -326,7 +360,7 @@ def _build_flux_workflow(
         # Empty negative — required by KSampler, FLUX doesn't use it
         "3": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["1", 1]},
+            "inputs": {"text": "", "clip": clip},
         },
         # 16-channel latent (SD3/FLUX format)
         "4": {
@@ -337,7 +371,7 @@ def _build_flux_workflow(
         "5": {
             "class_type": "ModelSamplingFlux",
             "inputs": {
-                "model": ["1", 0],
+                "model": model,
                 "max_shift": 1.15,
                 "base_shift": 0.5,
                 "width": width,
@@ -361,7 +395,7 @@ def _build_flux_workflow(
         },
         "7": {
             "class_type": "VAEDecode",
-            "inputs": {"samples": ["6", 0], "vae": ["1", 2]},
+            "inputs": {"samples": ["6", 0], "vae": vae},
         },
         "8": {
             "class_type": "SaveImage",
@@ -442,12 +476,73 @@ class ComfyUIClient:
             return {"online": False, "error": str(e)}
 
     async def list_checkpoints(self) -> list[str]:
+        """Checkpoints, plus FLUX GGUFs from models/unet (loaded split — see
+        _flux_loaders). Kontext is an edit model, not text-to-image, so it's left out.
+        Without the ComfyUI-GGUF node there are simply no GGUF entries."""
         r = await self.client.get(
             f"{self.base_url}/object_info/CheckpointLoaderSimple", timeout=10.0
         )
         r.raise_for_status()
         info = r.json()
-        return info["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+        names = list(info["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0])
+        try:
+            r = await self.client.get(f"{self.base_url}/object_info/UnetLoaderGGUF", timeout=10.0)
+            r.raise_for_status()
+            ggufs = r.json()["UnetLoaderGGUF"]["input"]["required"]["unet_name"][0]
+            names += [n for n in ggufs if is_flux(n) and "kontext" not in n.lower()]
+        except Exception:  # noqa: BLE001 - no GGUF node is a normal state
+            pass
+        return names
+
+    async def has_kontext(self) -> bool:
+        """Is the Kontext GGUF installed (and the GGUF node present)?"""
+        try:
+            r = await self.client.get(f"{self.base_url}/object_info/UnetLoaderGGUF", timeout=10.0)
+            r.raise_for_status()
+            return KONTEXT_UNET in r.json()["UnetLoaderGGUF"]["input"]["required"]["unet_name"][0]
+        except Exception:  # noqa: BLE001 - ComfyUI down / no GGUF node
+            return False
+
+    async def generate_kontext(self, image_b64: str, instruction: str, seed: Optional[int] = None,
+                               steps: int = KONTEXT_STEPS, guidance: float = KONTEXT_GUIDANCE) -> str:
+        """Edit an image by instruction with Flux Kontext; returns a base64 PNG.
+
+        Mirrors ComfyUI's flux_kontext_dev_basic template with the GGUF loader (the fp8
+        build needs ~20 GB). FluxKontextImageScale is mandatory — it snaps the source to
+        a trained resolution; without it the output goes mushy. CFG is pinned to 1.0 and
+        the negative is a zeroed copy of the positive: Kontext is guidance-distilled.
+        The output size is Kontext's, not the source's — callers resize if they care.
+        """
+        if seed is None:
+            seed = random.randint(0, 2**32 - 1)
+        img_name = await self.upload_image(base64.b64decode(image_b64))
+        workflow = {
+            "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": KONTEXT_UNET}},
+            "2": {"class_type": "DualCLIPLoader", "inputs": {
+                "clip_name1": FLUX_CLIP_L, "clip_name2": FLUX_T5, "type": "flux"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": FLUX_VAE}},
+            "4": {"class_type": "LoadImage", "inputs": {"image": img_name}},
+            "5": {"class_type": "FluxKontextImageScale", "inputs": {"image": ["4", 0]}},
+            "6": {"class_type": "VAEEncode", "inputs": {"pixels": ["5", 0], "vae": ["3", 0]}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": instruction, "clip": ["2", 0]}},
+            "8": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["6", 0]}},
+            "9": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["8", 0], "guidance": guidance}},
+            "10": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["7", 0]}},
+            "11": {"class_type": "KSampler", "inputs": {
+                "model": ["1", 0], "seed": seed, "steps": steps, "cfg": 1.0,
+                "sampler_name": "euler", "scheduler": "simple",
+                "positive": ["9", 0], "negative": ["10", 0], "latent_image": ["6", 0], "denoise": 1.0}},
+            "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+            "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": "companion"}},
+        }
+        r = await self.client.post(f"{self.base_url}/prompt",
+                                   json={"prompt": workflow, "client_id": self.client_id})
+        r.raise_for_status()
+        info = await self._wait_for_output(r.json()["prompt_id"], timeout=600)
+        r = await self.client.get(f"{self.base_url}/view", params={
+            "filename": info["filename"], "subfolder": info.get("subfolder", ""), "type": "output"})
+        r.raise_for_status()
+        return base64.b64encode(r.content).decode()
 
     async def list_samplers(self) -> dict:
         r = await self.client.get(f"{self.base_url}/object_info/KSampler", timeout=10.0)
@@ -553,7 +648,10 @@ class ComfyUIClient:
     ) -> str:
         """img2img from a base image — keeps composition/identity, changes the rest.
 
-        Standard SD1.5/SDXL node graph (LoadImage -> VAEEncode -> KSampler -> VAEDecode).
+        Standard SD1.5/SDXL node graph (LoadImage -> VAEEncode -> KSampler -> VAEDecode);
+        FLUX gets its own (CLIPTextEncodeFlux with `cfg` as guidance, ModelSamplingFlux,
+        sampler cfg pinned to 1.0, no negative) — the SD graph would run, but FLUX would
+        ignore half of it and sample at the wrong cfg.
         """
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
@@ -564,7 +662,49 @@ class ComfyUIClient:
             negative = f"{preset['negative_prefix']}, {negative}" if negative else preset["negative_prefix"]
 
         img_name = await self.upload_image(base64.b64decode(image_b64))
-        workflow = {
+        if is_flux(checkpoint):
+            workflow = self._flux_img2img(img_name, positive, checkpoint, steps, cfg,
+                                          sampler, denoise, seed)
+        else:
+            workflow = self._sd_img2img(img_name, positive, negative, checkpoint, steps, cfg,
+                                        sampler, scheduler, denoise, seed)
+        r = await self.client.post(f"{self.base_url}/prompt",
+                                   json={"prompt": workflow, "client_id": self.client_id})
+        r.raise_for_status()
+        prompt_id = r.json()["prompt_id"]
+        info = await self._wait_for_output(prompt_id, timeout=300)
+        r = await self.client.get(f"{self.base_url}/view", params={
+            "filename": info["filename"], "subfolder": info.get("subfolder", ""), "type": "output"})
+        r.raise_for_status()
+        return base64.b64encode(r.content).decode()
+
+    @staticmethod
+    def _flux_img2img(img_name: str, positive: str, checkpoint: str, steps: int,
+                      guidance: float, sampler: str, denoise: float, seed: int) -> dict:
+        loaders, model, clip, vae = _flux_loaders(checkpoint)
+        return {
+            **loaders,
+            "6": {"class_type": "CLIPTextEncodeFlux", "inputs": {
+                "clip": clip, "clip_l": positive, "t5xxl": positive, "guidance": guidance}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": clip}},
+            "10": {"class_type": "LoadImage", "inputs": {"image": img_name}},
+            "11": {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": vae}},
+            "12": {"class_type": "ModelSamplingFlux", "inputs": {
+                "model": model, "max_shift": 1.15, "base_shift": 0.5,
+                "width": 1024, "height": 1024}},
+            "3": {"class_type": "KSampler", "inputs": {
+                "seed": seed, "steps": steps, "cfg": 1.0,
+                "sampler_name": sampler, "scheduler": "simple", "denoise": denoise,
+                "model": ["12", 0], "positive": ["6", 0], "negative": ["7", 0],
+                "latent_image": ["11", 0]}},
+            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": vae}},
+            "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "companion", "images": ["8", 0]}},
+        }
+
+    @staticmethod
+    def _sd_img2img(img_name: str, positive: str, negative: str, checkpoint: str, steps: int,
+                    cfg: float, sampler: str, scheduler: str, denoise: float, seed: int) -> dict:
+        return {
             "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
             "6": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["4", 1]}},
             "7": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["4", 1]}},
@@ -578,15 +718,6 @@ class ComfyUIClient:
             "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
             "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "companion", "images": ["8", 0]}},
         }
-        r = await self.client.post(f"{self.base_url}/prompt",
-                                   json={"prompt": workflow, "client_id": self.client_id})
-        r.raise_for_status()
-        prompt_id = r.json()["prompt_id"]
-        info = await self._wait_for_output(prompt_id, timeout=300)
-        r = await self.client.get(f"{self.base_url}/view", params={
-            "filename": info["filename"], "subfolder": info.get("subfolder", ""), "type": "output"})
-        r.raise_for_status()
-        return base64.b64encode(r.content).decode()
 
     async def close(self):
         if self._client and not self._client.is_closed:
