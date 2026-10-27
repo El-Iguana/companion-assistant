@@ -111,10 +111,18 @@ const EXPR_FALLBACK = { surprised: "happy", relaxed: "happy", happy: null,
                         angry: null, sad: null, neutral: null };
 const EMOTIVE = ["happy", "angry", "sad", "relaxed", "surprised"];
 
+// Custom expressions. A model may carry its own VRM 1.0 custom expressions named
+// after an app emotion label (e.g. `fear`, `pride`, `embarrassed`). When it does,
+// that face is used at full weight instead of the lossy preset mapping above,
+// since the author already set its strength. Aliases cover label variants.
+const CUSTOM_ALIAS = { embarrassment: "embarrassed", embarrassed: "embarrassment" };
+
 const emo = {
-  weights: { happy: 0, angry: 0, sad: 0, relaxed: 0, surprised: 0 },
-  target:  { happy: 0, angry: 0, sad: 0, relaxed: 0, surprised: 0 },
+  channels: [...EMOTIVE],   // expressions this module drives: presets + customs
+  weights: Object.fromEntries(EMOTIVE.map(k => [k, 0])),
+  target:  Object.fromEntries(EMOTIVE.map(k => [k, 0])),
   supported: new Set(),
+  custom: new Set(),        // custom expression names on THIS model
   beatUntil: 0,          // a beat is momentary; resting affect resumes after
   resting: { preset: null, weight: 0 },
 };
@@ -404,10 +412,14 @@ function initEmotion(vrm) {
   for (const name of EMOTIVE) {
     if (em?.getExpression?.(name)) emo.supported.add(name);
   }
-  for (const k of Object.keys(emo.weights)) { emo.weights[k] = 0; emo.target[k] = 0; }
+  emo.custom = new Set(Object.keys(em?.customExpressionMap || {}));
+  emo.channels = [...emo.supported, ...emo.custom];
+  emo.weights = {}; emo.target = {};
+  for (const k of emo.channels) { emo.weights[k] = 0; emo.target[k] = 0; }
   emo.beatUntil = 0;
   emo.resting = { preset: null, weight: 0 };
   stats.presets = [...emo.supported].join(",") || "none";
+  stats.custom = [...emo.custom].join(",") || "none";
 }
 
 // Resolve a label to a preset this model can actually show.
@@ -417,14 +429,25 @@ function resolvePreset(preset) {
   return emo.supported.has(p) ? p : null;
 }
 
+// Resolve an emotion label to [expression, weight] for THIS model: its own
+// custom expression first, then the preset mapping. null if nothing fits.
+function resolveLabel(label) {
+  const l = String(label || "").toLowerCase();
+  for (const name of [l, CUSTOM_ALIAS[l]]) {
+    if (name && emo.custom.has(name)) return [name, 1.0];
+  }
+  const hit = EXPR_MAP[l];
+  if (!hit) return null;
+  return [resolvePreset(hit[0]), hit[1]];
+}
+
 // A momentary beat from the stream. Phase 2 already timed these to audio playback,
 // so this is deliberately not re-delayed here.
 function setBeat(label) {
-  const hit = EXPR_MAP[String(label || "").toLowerCase()];
+  const hit = resolveLabel(label);
   if (!hit) return;
-  const [preset, weight] = hit;
-  const use = resolvePreset(preset);
-  for (const k of EMOTIVE) emo.target[k] = 0;
+  const [use, weight] = hit;
+  for (const k of emo.channels) emo.target[k] = 0;
   if (use && weight > 0) emo.target[use] = weight;
   // Beats are punctuation, not state: hold, then fall back to resting affect.
   emo.beatUntil = performance.now() + 2600;
@@ -436,9 +459,9 @@ function setBeat(label) {
 // Resting affect from the running mood: a low, sustained bias, distinct from the
 // sharp beats above. Valence -1..1 leans sad or happy; a named mood overrides.
 function setResting(mood, valence) {
-  const hit = mood && EXPR_MAP[String(mood).toLowerCase()];
+  const hit = mood && resolveLabel(mood);
   if (hit && hit[1] > 0) {
-    const use = resolvePreset(hit[0]);
+    const use = hit[0];
     emo.resting = use ? { preset: use, weight: hit[1] * 0.35 } : { preset: null, weight: 0 };
     return;
   }
@@ -455,19 +478,18 @@ function updateEmotion(vrm, dt) {
   // Beat expired: hand the face back to resting affect.
   if (emo.beatUntil && performance.now() > emo.beatUntil) {
     emo.beatUntil = 0;
-    for (const k of EMOTIVE) emo.target[k] = 0;
+    for (const k of emo.channels) emo.target[k] = 0;
     if (emo.resting.preset) emo.target[emo.resting.preset] = emo.resting.weight;
     stats.beat = "";
   }
   // Cross-fade, never snap. Rising faster than falling: a reaction should arrive
   // promptly and leave slowly, which is also how the sprite swap used to feel.
-  for (const k of EMOTIVE) {
-    if (!emo.supported.has(k)) continue;
+  for (const k of emo.channels) {
     const up = emo.target[k] > emo.weights[k];
     emo.weights[k] += (emo.target[k] - emo.weights[k]) * Math.min(1, dt * (up ? 4.5 : 1.8));
     em.setValue(k, emo.weights[k]);
   }
-  stats.emotion = EMOTIVE.filter(k => emo.weights[k] > 0.02)
+  stats.emotion = emo.channels.filter(k => emo.weights[k] > 0.02)
     .map(k => `${k} ${emo.weights[k].toFixed(2)}`).join(" ") || "neutral";
 }
 

@@ -146,6 +146,7 @@ tests/smoke_web.py      # Playwright smoke test (WRITES: run on a scratch librar
                         #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
 tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep marks
 scripts/web-dev.sh      # run Pantheon host-side against a scratch library
+scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
@@ -531,7 +532,11 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   Tuning lives in `static/js/vtuber.mjs` (`idleGain` 2, `armRestDeg` 72, `mouthGain` 6) and is
   adjustable live from `/static/avatar-test.html`. ✅ **3d emotion+gesture done** — the Phase 2
   `avatar:expr` beats now drive the face: Core-8/Full-28 → VRM presets with weight as intensity,
-  cross-faded, presets detected per model (VRM 0.x has no `surprised`, so it falls back). Procedural
+  cross-faded, presets detected per model (VRM 0.x has no `surprised`, so it falls back). **Custom
+  expressions win:** a VRM 1.0 custom expression named after an emotion label (`fear`, `pride`,
+  `embarrassed`…) is used at full weight instead of the preset mapping (`resolveLabel`, `CUSTOM_ALIAS`;
+  shown as `stats.custom`). `data/vrm/Butler2.vrm` = Butler1 + 12 such faces mixed from VRoid's `Fcl_*`
+  shape keys in Blender (VRM Add-on). Procedural
   gesture track (nod/tilt/leanIn/recoil/shrug; clips are Track B3) and posture bias from relationship
   stage via a new `avatar:mood` event. **Pose composition rule: `resetPose()` returns every animated
   bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
