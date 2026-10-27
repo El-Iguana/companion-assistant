@@ -26,7 +26,11 @@ done
 
 if [[ "$REBUILD" -eq 1 ]] || ! podman image exists "$IMAGE"; then
   echo "==> Building image $IMAGE …"
-  podman build --format docker -t "$IMAGE" -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
+  # amd64 pinned HERE (the workstation's build), not in the Containerfile: compose installs
+  # on other machines — Apple Silicon included — must keep building for their own arch. The
+  # pin is what keeps a wrongly-cached base from slipping in: a python:3.12-slim pulled as
+  # arm64 once had Iguana's container running under emulation (2026-10-27).
+  podman build --format docker --platform linux/amd64 -t "$IMAGE" -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 fi
 
 if podman container exists "$CONTAINER"; then

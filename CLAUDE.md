@@ -100,6 +100,10 @@ Traps, all measured:
   unhealthy; both now probe the public `/api/health`. Podman drops the Containerfile `HEALTHCHECK` without
   `--format docker`, so compose carries its own.
 - `llm-models/` and `voices/` are mounted `:z`; only ever point those at dedicated folders.
+- **amd64 is pinned in `run-podman.sh`, never in the Containerfile.** The workstation build
+  passes `--platform linux/amd64` so a wrongly-cached base can't slip in (a `python:3.12-slim`
+  cached as arm64 had Iguana running under emulation until 2026-10-27). Compose installs build
+  for their own machine — Apple Silicon included — so the Containerfile must stay unpinned.
 
 ## Container topology
 
