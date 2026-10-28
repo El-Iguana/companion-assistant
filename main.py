@@ -442,6 +442,22 @@ async def tts_synth(body: dict, _: User = Depends(current_user)):
     return Response(content=wav, media_type="audio/wav")
 
 
+@app.post("/api/tts/engine")
+async def tts_engine(body: dict, _: User = Depends(current_user)):
+    """Orpheus is loaded only while a voice that uses it is on: {on: true} loads it and
+    answers once it is ready or has failed (3–15 s; voice.js does not wait on it),
+    {on: false} unloads it and frees ≈3 GB of VRAM.
+    Returns {state: ready|released|unavailable}."""
+    from services import orpheus
+    try:
+        if body.get("on"):
+            return {"state": await asyncio.to_thread(orpheus.warm, True)}
+        await asyncio.to_thread(orpheus.release)
+        return {"state": "released"}
+    except orpheus.OrpheusUnavailable as e:
+        return {"state": "unavailable", "detail": str(e)}
+
+
 @app.get("/api/tts/voices")
 async def tts_voices(_: User = Depends(current_user)):
     return {"voices": await asyncio.to_thread(tts.voices)}

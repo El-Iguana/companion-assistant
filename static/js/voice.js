@@ -57,7 +57,39 @@
     return { speaker: ttsEnabled, handsFree: !!settings.hands_free, hfActive, listening: hfCapturing,
              awake, recording, busy: pttBusy, speaking: !!ttsSource, avatar: avatarActive };
   }
-  const repaint = () => emit("state", state());
+  const repaint = () => { syncEngine(); emit("state", state()); };
+
+  // ---- on-demand Orpheus voice -------------------------------------------------------
+  // The Orpheus model takes ~3 GB of VRAM, so it is loaded only while voice is on for a
+  // card that uses it (speaker or hands-free), and released when that stops. Checked on
+  // every repaint, which follows every state change. Turning off waits: a quick toggle
+  // or switching chats should not unload and reload 3 GB. The service also unloads by
+  // itself when idle, which covers a closed tab (services/orpheus.py).
+  const ENGINE_OFF_DELAY = 20000;
+  let engineOn = false, engineTimer = null, engineWarned = false;
+  function syncEngine() {
+    const want = attached && !!card && String(card.tts_voice || "").startsWith("orpheus:")
+      && (ttsEnabled || !!settings.hands_free);
+    clearTimeout(engineTimer); engineTimer = null;
+    if (want === engineOn) return;
+    engineTimer = setTimeout(() => {
+      engineTimer = null; engineOn = want; postEngine(want);
+    }, want ? 0 : ENGINE_OFF_DELAY);
+  }
+  async function postEngine(on) {
+    try {
+      const r = await fetch("/pmedia/tts/engine", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+        body: JSON.stringify({ on }) });
+      const s = r.ok ? await r.json() : { state: "unavailable" };
+      console.log("[voice] orpheus " + (on ? "load" : "release") + ": " + s.state);
+      if (on && s.state === "unavailable" && !engineWarned) {
+        engineWarned = true;
+        toast("The Orpheus voice could not load (not enough GPU memory, or the service is " +
+              "down) — speaking with a standard voice instead.", "warning");
+      }
+    } catch (e) { console.warn("[voice] orpheus engine call failed:", e); }
+  }
 
   // ---- TTS --------------------------------------------------------------------
   let audioCtx = null, ttsSource = null, ttsLevel = 0, ttsHangoverUntil = 0, mouthRAF = null;

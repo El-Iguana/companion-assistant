@@ -57,6 +57,7 @@ PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
 | `PANTHEON_BIND` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
 | `PANTHEON_DATA_DIR` | `./data` | another library (dev/test); read by `main.py` |
 | `KOBOLD_URL` / `COMFYUI_URL` | `http://koboldcpp:5001` / `http://comfyui:8188` | backends |
+| `ORPHEUS_URL` | `http://orpheus-tts:5005` | the stack's on-demand Orpheus TTS (expressive voice); absent → those voices aren't offered |
 
 Health: `GET /api/health` (public, `{"ok": true}`) — what `stack status` and the compose
 healthchecks probe. `stack companion` opens `http://localhost:7861/`, which redirects.
@@ -112,6 +113,7 @@ Traps, all measured:
 | companion  | ai-net | `127.0.0.1:7861`                | this app      |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
+| orpheus-tts | ai-net         | `orpheus-tts:5005`              | voice (on demand) |
 
 ## File structure
 
@@ -131,7 +133,8 @@ services/
   embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
-  tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
+  tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`) + Orpheus (`orpheus:<name>`), text -> WAV, strips *action* narration
+  orpheus.py            # Orpheus TTS client: load/release on the orpheus-tts service, prompt, SNAC ONNX decode (CPU)
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
@@ -445,6 +448,19 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   `<name>.onnx` + `<name>.onnx.json` pair in there needs only a container restart, no rebuild. Piper honours
   each voice's own `inference` block; `speed` scales its `length_scale` inversely. Note Piper voices carry
   their own sample rate (jarvis = 22.05 kHz vs Kokoro's 24 kHz).
+- **Orpheus voices** (`orpheus:tara` … `services/orpheus.py`, 2026-10-28): the expressive voice, a 3B model
+  in the stack's `orpheus-tts` container (`ai-stack/orpheus-tts/CLAUDE.md`). It costs ~3 GB of VRAM, so it
+  is **loaded only while voice is on**: `voice.js syncEngine()` (run on every repaint) posts
+  `/pmedia/tts/engine {on}` when the speaker or hands-free is on for a card with an `orpheus:` voice, and
+  `{on:false}` 20 s after that stops (a quick toggle or chat switch doesn't reload 3 GB). The service also
+  unloads itself after 10 min idle (closed tab), and `koboldcpp/start.sh` unloads it before a model swap.
+  A load that fails (out of VRAM) is seen in ~5 s from the admin API's idle → down → idle and toasts once;
+  every line then falls back to Kokoro (`fallback_voice`: af_heart / am_michael, tags stripped) — for 60 s
+  without retrying, or until voice is toggled. Model output is SNAC codes, decoded on the CPU by the
+  baked ONNX decoder (`SNAC_DECODER`, 52 MB) — no torch, no VRAM. Measured: ~1.5× real time per
+  sentence, load 3 s cached / 15 s cold. The voices are listed only when the service answers.
+  Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>` —
+  nothing prompts the model to write them yet.
 - **What gets spoken** (`feedSpeech` in `static/js/voice.js`): roleplay cards speak only the **quoted dialogue**,
   skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
   **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no

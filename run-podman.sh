@@ -49,6 +49,7 @@ if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
   KOBOLD_URL="http://koboldcpp:5001"
   COMFYUI_URL="http://comfyui:8188"
+  ORPHEUS_URL="http://orpheus-tts:5005"
   echo "==> Joining network: $NETWORK (backends reachable by container name)"
 else
   NET_ARG="--network=host"
@@ -56,6 +57,7 @@ else
   BIND_ARG=(-e "PANTHEON_BIND=127.0.0.1")
   KOBOLD_URL="http://localhost:5001"
   COMFYUI_URL="http://localhost:8188"
+  ORPHEUS_URL="http://localhost:5005"
   echo "==> Network '$NETWORK' not found; falling back to host networking"
 fi
 
@@ -94,6 +96,7 @@ podman run -d \
   "${BIND_ARG[@]}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
+  -e "ORPHEUS_URL=${ORPHEUS_URL}" \
   -e "TZ=${TZ_VAL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \

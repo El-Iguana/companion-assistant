@@ -1,9 +1,11 @@
-"""Local text-to-speech — Kokoro (default) + Piper (per-voice ONNX models).
+"""Local text-to-speech — Kokoro (default) + Piper (per-voice ONNX models) + Orpheus.
 
 Both run on the onnxruntime already present for rembg — no torch, no cloud. Kokoro is
 one model + a bank of style embeddings ("af_sarah"); Piper is one .onnx per voice, so
 its voices are namespaced `piper:<name>` and loaded from /app/models/piper (see
-Containerfile). Anything without the prefix goes to Kokoro.
+Containerfile). `orpheus:<name>` is the expressive voice served by the stack's
+orpheus-tts container (services/orpheus.py); it falls back to a Kokoro voice whenever
+Orpheus can't speak. Anything without a prefix goes to Kokoro.
 """
 from __future__ import annotations
 
@@ -58,7 +60,13 @@ def voices() -> list[str]:
         out = sorted(_kokoro().get_voices())
     except Exception:
         out = ["af_sarah"]
-    return out + [PIPER_PREFIX + n for n in _piper_names()]
+    out += [PIPER_PREFIX + n for n in _piper_names()]
+    # Listed only when the service is there, so a compose install without it never
+    # offers a voice that can only ever fall back.
+    from services import orpheus
+    if orpheus.available():
+        out += [orpheus.PREFIX + n for n in orpheus.VOICES]
+    return out
 
 
 def _clean(text: str) -> str:
@@ -97,6 +105,18 @@ def synth_wav(text: str, voice: str = "af_sarah", speed: float = 1.0) -> bytes:
     """Synthesize `text` to WAV bytes, routed by voice id (`piper:<name>` -> Piper)."""
     clean = _clean(text)
     speed = min(max(speed, SPEED_MIN), SPEED_MAX)
+    from services import orpheus
+    if voice.startswith(orpheus.PREFIX):
+        name = voice[len(orpheus.PREFIX):]
+        try:
+            return orpheus.synth_wav(clean, name)
+        except Exception as e:
+            # Never silent: an unloaded/unreachable Orpheus speaks the line in Kokoro.
+            # Its tags would be read aloud by Kokoro, so they go.
+            import logging
+            logging.getLogger("tts").warning("orpheus failed, falling back to Kokoro: %s", e)
+            voice = orpheus.fallback_voice(name)
+            clean = re.sub(r"<(%s)>" % "|".join(orpheus.TAGS), " ", clean).strip() or "..."
     if voice.startswith(PIPER_PREFIX):
         return _piper_wav(clean, voice[len(PIPER_PREFIX):], speed)
     import soundfile as sf
