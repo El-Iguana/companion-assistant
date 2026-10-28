@@ -319,6 +319,37 @@ def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
     )
 
 
+# Orpheus voices perform these instead of reading them (services/orpheus.py). Offered
+# only to cards whose voice is Orpheus; the chat view hides them, Kokoro strips them.
+# A subset of what Orpheus knows: cough/sniffle/yawn read as noise in conversation.
+VOICE_TAGS = ("laugh", "chuckle", "sigh", "gasp", "groan")
+
+
+def voice_tag_note(card, assistant: bool) -> str:
+    """Tell an Orpheus-voiced card it may write sound tags. Shown by example, like the
+    expression beats: a small model copies a demonstrated shape far more reliably than
+    it follows a described one. Trailing, after ASSISTANT_FORMAT_NOTE, because that note
+    forbids stage directions and the later instruction is the one that wins."""
+    if not str(getattr(card, "tts_voice", "") or "").startswith("orpheus:"):
+        return ""
+    where = ("where the sound happens, usually at the very start of the reply" if assistant else
+             "INSIDE the quoted dialogue where the sound happens — only quoted speech is voiced")
+    eg = ("<chuckle> That is exactly what I said. You just did not believe me."
+          if assistant else
+          '"<chuckle> That is exactly what I said. You just did not believe me."')
+    return (
+        "Voice tags: your replies are spoken by a voice that can really laugh, chuckle, "
+        "sigh, gasp and groan. React with one when the moment calls for it — something "
+        "funny or absurd: <laugh> or <chuckle>; a setback or something tiresome: <sigh> or "
+        "<groan>; a real surprise: <gasp>. Write the tag " + where + ".\n"
+        "Example: " + eg + "\n"
+        "At most one per reply; plain questions and requests need none. Use only these five "
+        "tags, written exactly so. They are the one allowed exception to having no stage "
+        "directions; never describe a sound in words instead (no \"haha\", no *laughs*). "
+        "They are performed, not shown, so never mention them."
+    )
+
+
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
                    boundary_note: str = "", longterm_note: str = "",
@@ -432,6 +463,9 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         tail.append(expr_hint)
     if assistant:
         tail.append(ASSISTANT_FORMAT_NOTE.format(char=char_name, user=user_name))
+    voice_hint = voice_tag_note(card, assistant)
+    if voice_hint:
+        tail.append(voice_hint)
     if boundary_note:
         tail.append(sub(boundary_note))
     if last_user:

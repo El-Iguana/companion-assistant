@@ -50,6 +50,8 @@
   function caption(text, holdMs) {
     clearTimeout(capTimer);
     if (!text) { cap.classList.remove("show"); return; }
+    // Orpheus sound tags (<laugh> …) are heard, not shown.
+    text = text.replace(/[ \t]*<(?:laugh|chuckle|sigh|gasp|cough|sniffle|groan|yawn)>/g, "");
     cap.textContent = text.length > 320 ? "…" + text.slice(-320) : text;
     cap.classList.add("show");
     if (holdMs) capTimer = setTimeout(() => cap.classList.remove("show"), holdMs);

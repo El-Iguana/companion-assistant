@@ -66,9 +66,14 @@ def _js(obj):
     return js.JSON.parse(json.dumps(obj))
 
 
+# Sound tags an Orpheus voice performs (<laugh> …, services/orpheus.py TAGS). Heard, not
+# shown — the same split as the [expr:x] beats, which never reach the transcript at all.
+_VOICE_TAG = re.compile(r"[ \t]*<(?:laugh|chuckle|sigh|gasp|cough|sniffle|groan|yawn)>")
+
+
 def md(text: str) -> str:
     """Escape, then Pantheon's light markup: *actions*, **bold**, line breaks."""
-    html = esc(text or "")
+    html = esc(_VOICE_TAG.sub("", text or ""))
     html = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", html)
     html = re.sub(r"\*([^*\n]+)\*", r'<em class="pt-act">\1</em>', html)
     paras = [p.replace("\n", "<br>") for p in re.split(r"\n{2,}", html.strip())]

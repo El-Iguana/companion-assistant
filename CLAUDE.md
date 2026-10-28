@@ -459,8 +459,14 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   without retrying, or until voice is toggled. Model output is SNAC codes, decoded on the CPU by the
   baked ONNX decoder (`SNAC_DECODER`, 52 MB) — no torch, no VRAM. Measured: ~1.5× real time per
   sentence, load 3 s cached / 15 s cold. The voices are listed only when the service answers.
-  Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>` —
-  nothing prompts the model to write them yet.
+  Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>`.
+  **Cards with an `orpheus:` voice are taught five of them** (`prompt_builder.voice_tag_note`, trailing,
+  after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins; roleplay
+  cards are told to put them inside quotes, the only part spoken). The note maps moments to tags (funny →
+  laugh/chuckle, setback → sigh/groan, surprise → gasp) and leads its example with one — the first,
+  permissive wording got 1/12 on inviting messages; this one 9/12 inviting, 2/12 neutral, 0 invented,
+  1 double (Mira's live history, 2026-10-28). Tags are hidden in the chat view (`md()`), the chat-list
+  preview (`shell._preview`) and the desktop caption, and stripped before Kokoro/Piper speak.
 - **What gets spoken** (`feedSpeech` in `static/js/voice.js`): roleplay cards speak only the **quoted dialogue**,
   skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
   **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no

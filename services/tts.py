@@ -112,11 +112,11 @@ def synth_wav(text: str, voice: str = "af_sarah", speed: float = 1.0) -> bytes:
             return orpheus.synth_wav(clean, name)
         except Exception as e:
             # Never silent: an unloaded/unreachable Orpheus speaks the line in Kokoro.
-            # Its tags would be read aloud by Kokoro, so they go.
             import logging
             logging.getLogger("tts").warning("orpheus failed, falling back to Kokoro: %s", e)
             voice = orpheus.fallback_voice(name)
-            clean = re.sub(r"<(%s)>" % "|".join(orpheus.TAGS), " ", clean).strip() or "..."
+    # Kokoro and Piper would read a sound tag out loud ("less than laugh greater than").
+    clean = re.sub(r"\s*<(%s)>\s*" % "|".join(orpheus.TAGS), " ", clean).strip() or "..."
     if voice.startswith(PIPER_PREFIX):
         return _piper_wav(clean, voice[len(PIPER_PREFIX):], speed)
     import soundfile as sf

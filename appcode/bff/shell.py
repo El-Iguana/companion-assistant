@@ -9,14 +9,19 @@ Holds nothing between calls (pytincture re-executes this module per call).
 """
 from __future__ import annotations
 
+import re
+
 from pytincture.dataclass import backend_for_frontend
 
 THEMES = ("bone", "ember", "moss", "dusk", "harbor")
 
 
+_VOICE_TAG = re.compile(r"<(?:laugh|chuckle|sigh|gasp|cough|sniffle|groan|yawn)>")
+
+
 def _preview(session) -> str:
     for m in reversed(session.messages):
-        text = " ".join((m.content or "").split())
+        text = " ".join(_VOICE_TAG.sub(" ", m.content or "").split())
         if text:
             return text[:80]
     return ""
