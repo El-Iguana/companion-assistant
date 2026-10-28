@@ -474,6 +474,29 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   full stop. Measured server-side, send → first audio: 3.2–13.4 s before, 1.8–2.3 s after (idle GPU),
   ~1–3 s under contention. A failed Orpheus streams its Kokoro fallback (also 24 kHz). Kokoro/Piper
   voices still use whole WAVs via `/pmedia/tts`.
+- **Pauses between sentences** (2026-10-28, measured on a real 195-word Mira reply):
+  - **The SNAC decoder is capped at 2 CPU threads** (`SNAC_THREADS`). onnxruntime's default (all 24)
+    starved the chat model, which runs 8 of its 41 layers on the CPU: Rocinante took 55–60 s for 250
+    tokens beside Orpheus vs 13.6 s alone, and that long overlap was what slowed Orpheus to
+    0.65–0.9× and made her pause mid-reply. Capped: 18–19 s, Orpheus 0.85× during the overlap, 1.4×
+    after. The decoder itself is faster on 2 threads (32 windows/s) than on all (27/s); real time
+    needs ~12/s.
+  - **Generation is pipelined** (`queueGeneration`): each Orpheus sentence starts generating as soon
+    as its text exists and the previous one has finished generating, never waiting on playback.
+    Fetching one sentence ahead of playback left 1.3–1.9 s of silence in a long reply; pipelined, 0.
+  - **KoboldCPP's idle timer counts from the last generate request, not from a load**, so a server
+    idle past `--adminunloadtimeout` unloaded the model ~1 s after loading it ("Inactive for over
+    871 s"); `warm()` then read the idle model as a failed load and the whole reply fell back to
+    Kokoro. `warm()` now sends a 1-token request before the load (any generate resets the timer,
+    even one that errors with no model) and after it (`_settle_ready`, which also absorbs the ~7 s
+    first-request warm-up), and tracks `_inflight` so "loaded, then unloaded" just loads again.
+    `voice.js beginReply` re-posts `/tts/engine {on}` so an unload is repaired while the first
+    sentence is being written.
+  - **A mid-sentence ellipsis no longer ends a piece** (`feedSpeechWhole`): "yes... there's" stays one
+    utterance; Orpheus voices the "..." pause itself.
+  - **CUDA MPS was tried and dropped**: with the thread cap in place it gave Orpheus 0.93× instead of
+    0.85× during the overlap and nothing for the chat model, at the cost of a host daemon at every
+    boot — and quitting it crashed both attached containers.
   Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>`.
   **Cards with an `orpheus:` voice are taught five of them** (`prompt_builder.voice_tag_note`, trailing,
   after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins; roleplay

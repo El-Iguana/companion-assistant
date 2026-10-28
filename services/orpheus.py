@@ -41,6 +41,7 @@ log = logging.getLogger("orpheus")
 _lock = threading.Lock()
 _load_requested = 0.0               # monotonic time of the last load request
 _failed_at = 0.0                    # monotonic time of the last failed load
+_inflight = False                   # a load we requested hasn't been seen to finish yet
 _decoder = None
 
 
@@ -83,34 +84,63 @@ def loaded() -> bool:
     return _probe() == "ready"
 
 
+def _settle_ready() -> None:
+    """First sight of a model this process asked for: mark the load finished and send a
+    1-token request, so KoboldCPP's idle countdown starts from now. Its timer counts from
+    the last generate request, not from the load: measured, a server idle since its
+    restart unloaded the model 2 s after it loaded ("Inactive for over 871 s"), and the
+    first reply then fell back to Kokoro. warm() also sends one just before the load."""
+    global _inflight
+    with _lock:
+        if not _inflight:
+            return
+        _inflight = False
+    try:
+        _call("/api/v1/generate", {"prompt": "<custom_token_3>", "max_length": 1}, timeout=15)
+    except Exception as e:
+        log.info("orpheus: idle-timer touch failed: %s", e)
+
+
 def warm(wait: bool = False) -> str:
     """Make sure the model is loaded (or loading). Returns 'ready' or 'loading'.
 
-    One load request per LOAD_TIMEOUT window: a second reload_config while the first
-    is still loading would restart it. With `wait`, blocks until it is ready and raises
-    OrpheusUnavailable as soon as the load is seen to fail. After a failure, calls
-    within FAIL_COOLDOWN raise at once, so each sentence falls back to Kokoro instead
-    of retrying a load that cannot fit.
+    A load is requested whenever the model isn't loaded and no load of ours is still in
+    flight — so a model that loaded and was later unloaded (idle timeout, a KoboldCPP
+    restart) is simply loaded again. It used to be judged by the time of the last
+    request alone, which read "loaded, then unloaded" as a failed load. With `wait`,
+    blocks until it is ready and raises OrpheusUnavailable as soon as the load is seen
+    to fail. After a real failure, calls within FAIL_COOLDOWN raise at once, so each
+    sentence falls back to Kokoro instead of retrying a load that cannot fit.
     """
-    global _load_requested, _failed_at
+    global _load_requested, _inflight
     if loaded():
+        _settle_ready()
         return "ready"
     if time.monotonic() - _failed_at < FAIL_COOLDOWN:
         raise OrpheusUnavailable("orpheus failed to load recently; using the fallback voice")
     with _lock:
-        if time.monotonic() - _load_requested > LOAD_TIMEOUT and not loaded():
+        stale = time.monotonic() - _load_requested > LOAD_TIMEOUT
+        if (not _inflight or stale) and not loaded():
+            # Reset KoboldCPP's idle timer BEFORE loading too: the load itself doesn't
+            # count as activity, so a server idle past the timeout unloads the model about
+            # a second after it finishes loading — before anyone sees it ready. Any
+            # generate request resets it, even one that errors because no model is loaded.
+            try:
+                _call("/api/v1/generate", {"prompt": "x", "max_length": 1}, timeout=10)
+            except Exception:
+                pass
             try:
                 _call("/api/admin/reload_config", {"filename": CONFIG}, timeout=10)
             except Exception as e:
                 raise OrpheusUnavailable(f"orpheus-tts not reachable at {URL}: {e}") from e
-            _load_requested = time.monotonic()
+            _load_requested, _inflight = time.monotonic(), True
             log.info("orpheus: load requested")
     if not wait:
         return "loading"
 
     def failed(why: str):
-        global _load_requested, _failed_at
-        _failed_at, _load_requested = time.monotonic(), 0.0
+        global _load_requested, _failed_at, _inflight
+        _failed_at, _load_requested, _inflight = time.monotonic(), 0.0, False
         log.warning("orpheus: %s", why)
         return OrpheusUnavailable(why)
 
@@ -118,6 +148,7 @@ def warm(wait: bool = False) -> str:
     while time.monotonic() < _load_requested + LOAD_TIMEOUT:
         state = _probe()
         if state == "ready":
+            _settle_ready()
             return "ready"
         if state == "down":
             seen_down = True
@@ -132,14 +163,15 @@ def release() -> None:
 
     Also clears a recent failure: switching voice off and on again is the user asking
     for another try (say, after closing whatever was holding the GPU)."""
-    global _load_requested, _failed_at
+    global _load_requested, _failed_at, _inflight
     try:
-        if loaded() or time.monotonic() - _load_requested < LOAD_TIMEOUT:
+        if loaded() or _inflight:
             _call("/api/admin/reload_config", {"filename": "unload_model"}, timeout=10)
             log.info("orpheus: unloaded")
     except Exception as e:
         log.info("orpheus: unload skipped: %s", e)
     _load_requested = _failed_at = 0.0
+    _inflight = False
 
 
 # ---- speech -----------------------------------------------------------------------
@@ -157,22 +189,12 @@ def _codes(text: str, voice: str) -> list[int]:
 
 
 def _decode(nums: list[int]):
-    import numpy as np
-    global _decoder
-    if _decoder is None:
-        import onnxruntime as ort
-        _decoder = ort.InferenceSession(DECODER, providers=["CPUExecutionProvider"])
-    ids = np.array([n - 10 - (i % 7) * 4096 for i, n in enumerate(nums)], dtype=np.int64)
-    ids = ids[: len(ids) // 7 * 7].reshape(-1, 7)
-    if not len(ids):
+    """Whole-sentence decode (synth_wav). Same thread-limited session as the stream."""
+    ids = _ids_for(nums, 0)
+    ids = ids[: len(ids) // 7 * 7]
+    if not ids:
         raise OrpheusUnavailable("orpheus returned no audio")
-    ids = ids.clip(0, 4095)
-    feeds = {
-        "audio_codes.0": ids[:, 0][None, :],
-        "audio_codes.1": ids[:, [1, 4]].reshape(1, -1),
-        "audio_codes.2": ids[:, [2, 3, 5, 6]].reshape(1, -1),
-    }
-    return _decoder.run(None, feeds)[0].reshape(-1)
+    return _decode_frames(ids)
 
 
 # ---- streaming ---------------------------------------------------------------------
@@ -201,7 +223,15 @@ def _decode_frames(ids: list[int]):
     global _decoder
     if _decoder is None:
         import onnxruntime as ort
-        _decoder = ort.InferenceSession(DECODER, providers=["CPUExecutionProvider"])
+        # Two threads, not onnxruntime's default of every core. The chat model runs some
+        # of its layers on the CPU, and a decoder spread over all 24 threads starved it:
+        # Rocinante took 60.6 s for 250 tokens beside decoding vs 14.4 s beside Orpheus's
+        # GPU generation alone. The decoder doesn't even benefit — 2 threads: 32 windows/s,
+        # all threads: 27/s; real time needs ~12/s.
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = int(os.environ.get("SNAC_THREADS", "2"))
+        opts.inter_op_num_threads = 1
+        _decoder = ort.InferenceSession(DECODER, opts, providers=["CPUExecutionProvider"])
     f = np.array(ids, dtype=np.int64).reshape(-1, 7).clip(0, 4095)
     feeds = {"audio_codes.0": f[:, 0][None, :],
              "audio_codes.1": f[:, [1, 4]].reshape(1, -1),

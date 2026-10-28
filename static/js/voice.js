@@ -96,6 +96,7 @@
   let ttsRun = 0, speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
   let firstPiece = true;            // the next segment opens a reply (see enqueueSpeech)
   const liveStreams = new Set();    // AbortControllers of streamed sentences in flight
+  let genQueue = [], genBusy = false; // Orpheus sentences waiting to be generated, in order
   let exprPending = null, exprLive = null, forced = false;
   const spokenRecent = [];          // what she said lately, for the self-hearing guard
   let selfHeardCount = 0;
@@ -122,6 +123,9 @@
     firstPiece = true;
     for (const c of liveStreams) { try { c.abort(); } catch {} }
     liveStreams.clear();
+    // Sentences that never started: mark them finished so a player waiting on one returns.
+    for (const c of genQueue) { c.done = true; const w = c.wake; c.wake = null; if (w) w(); }
+    genQueue = []; genBusy = false;
     try { if (ttsSource) ttsSource.stop(); } catch {}
     ttsSource = null; ttsLevel = 0;
     if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
@@ -153,20 +157,49 @@
   const PREBUFFER = 0.3;            // s, the floor
   const SEC_PER_WORD = 0.42;
   function readyToPlay(clip, have) {
-    if (have < PREBUFFER) return false;
+    if (!clip.started || have < PREBUFFER) return false;
     const elapsed = (performance.now() - clip.t0) / 1000;
     const rate = have / Math.max(elapsed, 0.01);          // s of audio per s, so far
     if (rate >= 1) return true;
     const est = Math.max(1, (clip.text.match(/\S+/g) || []).length * SEC_PER_WORD);
     return have >= Math.max(0, est - have) * (1 / rate - 1) * 1.15;
   }
-  function streamTTS(sentence) {
+  function makeClip(sentence) {
+    return { chunks: [], done: false, rate: 24000, wake: null, text: sentence,
+             t0: Infinity, started: false };
+  }
+  const streamTTS = (sentence) => { const c = makeClip(sentence); startClip(c); return c; };
+
+  // Each sentence is generated as soon as its text exists and the one before it has
+  // finished generating — never waiting on playback. Fetching only one sentence ahead of
+  // what was playing left Orpheus idle and turned any slowdown into a pause before the
+  // next sentence; on a 195-word reply that cost 1.3–1.9 s of silence, pipelined 0 s.
+  // One at a time and in order, so sentence 2 never competes with sentence 1 for the GPU.
+  function queueGeneration(clip) {
+    genQueue.push(clip);
+    pumpGeneration();
+  }
+  async function pumpGeneration() {
+    if (genBusy) return;
+    const clip = genQueue.shift();
+    if (!clip) return;
+    genBusy = true;
+    const run = ttsRun;
+    await startClip(clip);
+    if (run !== ttsRun) return;              // stopSpeaking reset the queue meanwhile
+    genBusy = false;
+    pumpGeneration();
+  }
+
+  function startClip(clip) {
+    if (clip.started) return Promise.resolve();
+    clip.started = true;
+    clip.t0 = performance.now();
+    const sentence = clip.text;
     const ctl = new AbortController();
     liveStreams.add(ctl);
-    const clip = { chunks: [], done: false, rate: 24000, wake: null,
-                   text: sentence, t0: performance.now() };
     const notify = () => { const w = clip.wake; clip.wake = null; if (w) w(); };
-    (async () => {
+    return (async () => {
       try {
         const r = await fetch("/pmedia/tts/stream", { method: "POST", credentials: "same-origin",
           signal: ctl.signal,
@@ -194,7 +227,6 @@
       clip.done = true;
       notify();
     })();
-    return clip;
   }
 
   // Lip-sync off the playback level — shared by whole clips and streams.
@@ -370,7 +402,9 @@
     if (!clean) return;
     spokenRecent.push({ text: clean.toLowerCase(), t: performance.now() });
     if (spokenRecent.length > 40) spokenRecent.shift();
-    speechQueue.push({ text: clean, run: ttsRun, expr: exprPending });
+    const item = { text: clean, run: ttsRun, expr: exprPending };
+    if (usesStream()) { item.clip = makeClip(clean); queueGeneration(item.clip); }
+    speechQueue.push(item);
     exprPending = null;
     consumeSpeech();
   }
@@ -383,9 +417,12 @@
     while (speechQueue.length) {
       const item = speechQueue.shift();
       if (item.run !== ttsRun) { prefetch = null; continue; }
-      const audio = (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchAudio(item.text);
-      const nxt = speechQueue[0];               // prefetch the next while this one plays
-      prefetch = nxt ? { item: nxt, promise: fetchAudio(nxt.text) } : null;
+      // Orpheus items are already generating (queueGeneration); whole-WAV voices
+      // prefetch the next sentence while this one plays.
+      const audio = item.clip ? { clip: item.clip }
+        : (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchAudio(item.text);
+      const nxt = speechQueue[0];
+      prefetch = (nxt && !nxt.clip) ? { item: nxt, promise: fetchAudio(nxt.text) } : null;
       if (item.expr && item.run === ttsRun) applyExpr(item.expr);
       if (item.run === ttsRun) await playAudio(ctx, audio, () => item.run === ttsRun);
     }
@@ -421,7 +458,15 @@
     const SENT = /[.!?…]["')\]]*\s/g;
     SENT.lastIndex = speechFedLen;
     let end = -1, m;
-    while ((m = SENT.exec(fullText))) end = m.index + m[0].length;
+    while ((m = SENT.exec(fullText))) {
+      // An ellipsis followed by a lowercase word is a pause inside the thought, not its
+      // end: "but yes... there's some truth" was cut in two, and the halves were spoken
+      // as separate utterances with a gap between. Orpheus voices the "..." pause itself.
+      const at = m.index, next = fullText.slice(at + m[0].length).match(/^\S/);
+      const ellipsis = fullText[at] === "\u2026" || fullText.slice(Math.max(0, at - 2), at + 1) === "...";
+      if (ellipsis && (!next || /[a-z]/.test(next[0]))) continue;
+      end = at + m[0].length;
+    }
     if (end > speechFedLen) {
       enqueueSpeech(fullText.slice(speechFedLen, end));
       speechFedLen = end;
@@ -1002,7 +1047,13 @@
       const m = await importAvatarModule();
       return m.captureStill(url);
     },
-    beginReply() { stopSpeaking(); if (ttsEnabled) ensureAudioCtx(); },
+    beginReply() {
+      stopSpeaking();
+      if (ttsEnabled) ensureAudioCtx();
+      // Make sure Orpheus is still loaded (an idle timeout or a backend restart unloads
+      // it) while the first sentence is being written, not when it is about to be spoken.
+      if (engineOn) postEngine(true);
+    },
     feed(text, final) { feedSpeech(String(text || ""), !!final); },
     expr(label) { pendingExpr(String(label || "")); },
     flushExpr,
