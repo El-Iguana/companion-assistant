@@ -62,17 +62,59 @@ def _wav_samples(audio: bytes):
     return x
 
 
+# --- hallucination guards -----------------------------------------------------
+# Whisper invents speech from near-silence: faint echo of the character's own voice
+# on an echo-cancelled mic became a 74-word "user" message ("Alright. Okay. Let's go
+# down there...") out of 1.26 s of sound, and was sent as if the user had said it.
+# Thresholds measured in the image (base.en, Kokoro speech at full/0.3/0.1 gain vs
+# chopped faint echo and noise; 2026-10-28):
+#   real speech:  no_speech_prob <= 0.34, avg_logprob >= -0.95, <= 3.1 words/s of VAD audio
+#   faint echo:   no_speech_prob up to 0.75, avg_logprob down to -1.39
+# Only a third of echo hallucinations are separable this way — the rest score like
+# speech — so these catch the unconfident ones and the impossible runs, nothing more.
+MAX_WORDS_PER_SEC = 6.0      # of speech left after VAD; real speech peaked at 3.1
+NO_SPEECH_DROP = 0.5         # segment dropped when no_speech_prob is above this...
+LOGPROB_DROP = -0.7          # ...and avg_logprob is below this (confident words stay)
+COMPRESSION_DROP = 2.4       # Whisper's own repetition-loop threshold
+
+
+def _accept(segments, speech_s: float) -> str:
+    """Join the segments that pass the guards; '' when the whole thing is implausible."""
+    import logging
+    log = logging.getLogger("stt")
+    kept = []
+    for s in segments:
+        t = s.text.strip()
+        if not t:
+            continue
+        if s.compression_ratio > COMPRESSION_DROP or (
+                s.no_speech_prob > NO_SPEECH_DROP and s.avg_logprob < LOGPROB_DROP):
+            log.info("stt: dropped segment (no_speech %.2f, logprob %.2f, compression %.2f): %r",
+                     s.no_speech_prob, s.avg_logprob, s.compression_ratio, t[:120])
+            continue
+        kept.append(t)
+    text = " ".join(kept).strip()
+    words = len(text.split())
+    if words and words / max(speech_s, 0.5) > MAX_WORDS_PER_SEC:
+        log.info("stt: rejected %d words from %.2f s of speech: %r", words, speech_s, text[:120])
+        return ""
+    return text
+
+
 def transcribe(audio: bytes, language: str | None = None) -> str:
     """Transcribe audio bytes (any ffmpeg-decodable container) to plain text.
 
     `vad_filter` trims leading/trailing silence so push-to-talk clips with a bit
-    of dead air don't hallucinate; `beam_size=1` keeps it snappy.
+    of dead air don't hallucinate; `beam_size=1` keeps it snappy. Not conditioning
+    on previous text stops one invented segment from seeding the next, which is
+    how a hallucination turns into a run. `_accept` drops what is left over.
     """
     samples = _wav_samples(audio)
-    segments, _info = _whisper().transcribe(
+    segments, info = _whisper().transcribe(
         samples if samples is not None else io.BytesIO(audio),
         language=language,
         beam_size=1,
         vad_filter=True,
+        condition_on_previous_text=False,
     )
-    return " ".join(s.text.strip() for s in segments).strip()
+    return _accept(list(segments), info.duration_after_vad or info.duration or 0.0)
