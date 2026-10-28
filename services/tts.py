@@ -95,6 +95,32 @@ def _piper_wav(text: str, name: str, speed: float) -> bytes:
     return buf.getvalue()
 
 
+def stream_pcm(text: str, voice: str):
+    """Orpheus voices, streamed: raw PCM s16le 24 kHz mono chunks as they are generated
+    (services/orpheus.stream_pcm). If Orpheus can't speak, the line is spoken whole in
+    its Kokoro fallback voice, which is 24 kHz too, so the stream format never changes."""
+    from services import orpheus
+    clean = _clean(text)
+    name = voice[len(orpheus.PREFIX):] if voice.startswith(orpheus.PREFIX) else ""
+    started = False
+    try:
+        for chunk in orpheus.stream_pcm(clean, name):
+            started = True
+            yield chunk
+        return
+    except Exception as e:
+        if started:                     # mid-sentence: nothing sensible to splice in
+            import logging
+            logging.getLogger("tts").warning("orpheus stream broke off: %s", e)
+            return
+        import logging
+        logging.getLogger("tts").warning("orpheus failed, falling back to Kokoro: %s", e)
+    wav = synth_wav(re.sub(r"\s*<(%s)>\s*" % "|".join(orpheus.TAGS), " ", clean),
+                    orpheus.fallback_voice(name))
+    with wave.open(io.BytesIO(wav)) as w:
+        yield w.readframes(w.getnframes())
+
+
 # Bounds for the speaking pace, matching CharacterCard.tts_speed. Clamped here as well
 # because /api/tts takes a raw dict, not a validated model — a 0 or a negative divides
 # through in _piper_wav and is meaningless to Kokoro.

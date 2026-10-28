@@ -458,7 +458,22 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   every line then falls back to Kokoro (`fallback_voice`: af_heart / am_michael, tags stripped) — for 60 s
   without retrying, or until voice is toggled. Model output is SNAC codes, decoded on the CPU by the
   baked ONNX decoder (`SNAC_DECODER`, 52 MB) — no torch, no VRAM. Measured: ~1.5× real time per
-  sentence, load 3 s cached / 15 s cold. The voices are listed only when the service answers.
+  sentence alone, 0.65–1.0× while the chat model is still writing; load 3 s cached / 15 s cold. The
+  voices are listed only when the service answers.
+- **Orpheus is streamed** (2026-10-28): voice.js fetches `/pmedia/tts/stream` for `orpheus:` voices —
+  raw PCM s16le 24 kHz (`X-Sample-Rate`) as it is generated (`orpheus.stream_pcm`: KoboldCPP
+  `/api/extra/generate/stream`, SNAC decoded in sliding 4-frame windows like Canopy's decoder, but the
+  first frame and the last two are kept and each join is crossfaded over 256 samples — extra
+  discontinuity at joins ≤0.007 vs the whole-sentence decode, correlation 0.995+). The browser reads
+  each stream into memory as it arrives (a prefetched sentence keeps generating) and schedules the
+  chunks back to back. **Start rule (`readyToPlay`)**: play once the buffer covers the rest of the
+  sentence at the measured arrival rate (est. 0.42 s/word) — a fixed 0.3 s buffer stalled up to 48
+  times per sentence under GPU contention; this rule had 0 stalls in 6 contended runs. **First
+  piece kept short** (`enqueueSpeech`/`clauseCut`): an opening sentence >14 words splits at its first
+  clause break after 6+ words, and while streaming a clause break after 8+ words is spoken before the
+  full stop. Measured server-side, send → first audio: 3.2–13.4 s before, 1.8–2.3 s after (idle GPU),
+  ~1–3 s under contention. A failed Orpheus streams its Kokoro fallback (also 24 kHz). Kokoro/Piper
+  voices still use whole WAVs via `/pmedia/tts`.
   Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>`.
   **Cards with an `orpheus:` voice are taught five of them** (`prompt_builder.voice_tag_note`, trailing,
   after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins; roleplay

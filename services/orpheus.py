@@ -175,6 +175,102 @@ def _decode(nums: list[int]):
     return _decoder.run(None, feeds)[0].reshape(-1)
 
 
+# ---- streaming ---------------------------------------------------------------------
+# One SNAC frame (7 codes) is FRAME samples of audio. Codes are decoded in sliding
+# windows of WINDOW frames, as Canopy's own decoder does, and each window contributes
+# the frame second from its start: a window's edges are less accurate than its middle.
+# Canopy drops the stream's first frame and last two; here the first window also gives
+# frame 0 and the last window gives its tail, so nothing is lost.
+FRAME = 2048
+WINDOW = 4
+# Each window also predicts the frame after the one it emits; the next window emits that
+# frame from its own decode, and the two differ slightly at the join (measured: typical
+# jump 0.003, worst 0.04 — a faint tick). The first XFADE samples of each emitted frame
+# are blended from that prediction, which is continuous with what was just played.
+XFADE = 256
+
+
+def _ids_for(nums: list[int], start: int):
+    """Raw custom-token numbers -> SNAC code ids; `start` is the index of nums[0]."""
+    return [n - 10 - ((start + i) % 7) * 4096 for i, n in enumerate(nums)]
+
+
+def _decode_frames(ids: list[int]):
+    """Decode whole frames of code ids (len a multiple of 7) to float audio."""
+    import numpy as np
+    global _decoder
+    if _decoder is None:
+        import onnxruntime as ort
+        _decoder = ort.InferenceSession(DECODER, providers=["CPUExecutionProvider"])
+    f = np.array(ids, dtype=np.int64).reshape(-1, 7).clip(0, 4095)
+    feeds = {"audio_codes.0": f[:, 0][None, :],
+             "audio_codes.1": f[:, [1, 4]].reshape(1, -1),
+             "audio_codes.2": f[:, [2, 3, 5, 6]].reshape(1, -1)}
+    return _decoder.run(None, feeds)[0].reshape(-1)
+
+
+def _pcm(audio) -> bytes:
+    import numpy as np
+    return (np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+
+
+def stream_pcm(text: str, voice: str):
+    """Speak `text` as it is generated: yields raw PCM (s16le, 24 kHz, mono) chunks of
+    about one frame (85 ms) each, the first ~0.3 s after the request instead of after
+    the whole sentence. Raises OrpheusUnavailable before the first chunk if it can't."""
+    if voice not in VOICES:
+        voice = VOICES[0]
+    warm(wait=True)
+    prompt = (f"<custom_token_3><|begin_of_text|>{voice}: {text}<|eot_id|>"
+              f"<custom_token_4><custom_token_5><custom_token_1>")
+    cap = max(400, min(3600, 60 * len(text.split()) + 300))
+    body = json.dumps({"prompt": prompt, "max_length": cap, "max_context_length": 4096,
+                       "temperature": 0.6, "top_p": 0.8, "rep_pen": 1.3,
+                       "stop_sequence": ["<custom_token_2>"]}).encode()
+    req = urllib.request.Request(URL + "/api/extra/generate/stream", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    import numpy as np
+    ramp = np.linspace(0.0, 1.0, XFADE, dtype=np.float32)
+    ids: list[int] = []
+    pending = ""
+    emitted = 0                       # windows decoded so far
+    last = None                       # the last decoded window
+    ahead = None                      # its prediction of the next frame
+    token_re = re.compile(r"<custom_token_(\d+)>")
+    with urllib.request.urlopen(req, timeout=120) as r:
+        for raw in r:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            try:
+                pending += json.loads(line[5:]).get("token", "")
+            except ValueError:
+                continue
+            # Whole tokens only; keep a partial "<custom_tok…" for the next event.
+            cut = pending.rfind(">") + 1
+            nums = [int(n) for n in token_re.findall(pending[:cut])]
+            pending = pending[cut:]
+            ids += _ids_for(nums, len(ids))
+            frames = len(ids) // 7
+            while frames - WINDOW >= emitted:          # a new full window is available
+                w = _decode_frames(ids[emitted * 7:(emitted + WINDOW) * 7])
+                if emitted == 0:
+                    out = w[: 2 * FRAME]
+                else:
+                    out = w[FRAME: 2 * FRAME].copy()
+                    out[:XFADE] = ahead[:XFADE] * (1 - ramp) + out[:XFADE] * ramp
+                ahead, last = w[2 * FRAME: 3 * FRAME], w
+                yield _pcm(out)
+                emitted += 1
+    frames = len(ids) // 7
+    if frames == 0:
+        raise OrpheusUnavailable("orpheus returned no audio")
+    if emitted == 0:                                   # shorter than one window
+        yield _pcm(_decode_frames(ids[: frames * 7]))
+    else:                                              # the last window's tail
+        yield _pcm(last[2 * FRAME:])
+
+
 def synth_wav(text: str, voice: str) -> bytes:
     """Speak `text` in Orpheus voice `voice` (e.g. 'tara'); WAV bytes, 24 kHz mono."""
     import numpy as np

@@ -94,6 +94,8 @@
   // ---- TTS --------------------------------------------------------------------
   let audioCtx = null, ttsSource = null, ttsLevel = 0, ttsHangoverUntil = 0, mouthRAF = null;
   let ttsRun = 0, speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
+  let firstPiece = true;            // the next segment opens a reply (see enqueueSpeech)
+  const liveStreams = new Set();    // AbortControllers of streamed sentences in flight
   let exprPending = null, exprLive = null, forced = false;
   const spokenRecent = [];          // what she said lately, for the self-hearing guard
   let selfHeardCount = 0;
@@ -117,6 +119,9 @@
     // Beats belong to the reply that was speaking. Called at the top of every reply too,
     // so this is also the per-reply reset: a repeated label still re-applies next time.
     exprPending = null; exprLive = null;
+    firstPiece = true;
+    for (const c of liveStreams) { try { c.abort(); } catch {} }
+    liveStreams.clear();
     try { if (ttsSource) ttsSource.stop(); } catch {}
     ttsSource = null; ttsLevel = 0;
     if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
@@ -132,6 +137,140 @@
     } catch { return null; }
   }
 
+  // ---- streamed Orpheus speech ------------------------------------------------------
+  // Orpheus voices arrive as raw PCM (s16le, 24 kHz) while the server is still generating
+  // them (/pmedia/tts/stream), so a sentence starts playing ~0.4 s in rather than after
+  // all of it exists — 1.8–8 s for one sentence, measured. The request is read into memory
+  // as it arrives, so a prefetched sentence keeps generating while the previous one plays.
+  const usesStream = () => String(currentVoice()).startsWith("orpheus:");
+  // Start playing once what is buffered covers the rest of the sentence at the rate audio
+  // is arriving, so playback never catches up with generation. Orpheus runs ~1.5x real
+  // time alone but 0.65–1.0x while the chat model is still writing the reply on the same
+  // GPU; a fixed 0.3 s buffer stalled up to 48 times in one sentence there (measured).
+  // With this rule: 0 stalls in 6 contended runs, starting 1.1–2.8 s into a 7–15 word
+  // piece — the old whole-sentence wait was 3–8 s. Speech length is estimated from the
+  // words (0.42 s/word, measured on Orpheus "tara").
+  const PREBUFFER = 0.3;            // s, the floor
+  const SEC_PER_WORD = 0.42;
+  function readyToPlay(clip, have) {
+    if (have < PREBUFFER) return false;
+    const elapsed = (performance.now() - clip.t0) / 1000;
+    const rate = have / Math.max(elapsed, 0.01);          // s of audio per s, so far
+    if (rate >= 1) return true;
+    const est = Math.max(1, (clip.text.match(/\S+/g) || []).length * SEC_PER_WORD);
+    return have >= Math.max(0, est - have) * (1 / rate - 1) * 1.15;
+  }
+  function streamTTS(sentence) {
+    const ctl = new AbortController();
+    liveStreams.add(ctl);
+    const clip = { chunks: [], done: false, rate: 24000, wake: null,
+                   text: sentence, t0: performance.now() };
+    const notify = () => { const w = clip.wake; clip.wake = null; if (w) w(); };
+    (async () => {
+      try {
+        const r = await fetch("/pmedia/tts/stream", { method: "POST", credentials: "same-origin",
+          signal: ctl.signal,
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+          body: JSON.stringify({ text: sentence, voice: currentVoice() }) });
+        if (!r.ok || !r.body) throw new Error("status " + r.status);
+        clip.rate = Number(r.headers.get("X-Sample-Rate")) || 24000;
+        const reader = r.body.getReader();
+        let carry = null;                       // an odd byte split across reads
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          let b = value;
+          if (carry) { const j = new Uint8Array(carry.length + b.length); j.set(carry); j.set(b, carry.length); b = j; carry = null; }
+          const even = b.length & ~1;
+          if (even < b.length) carry = b.slice(even);
+          if (!even) continue;
+          const v = new DataView(b.buffer, b.byteOffset, even), f = new Float32Array(even / 2);
+          for (let i = 0; i < f.length; i++) f[i] = v.getInt16(i * 2, true) / 32768;
+          clip.chunks.push(f);
+          notify();
+        }
+      } catch (e) { if (e.name !== "AbortError") console.warn("[tts] stream failed:", e); }
+      liveStreams.delete(ctl);
+      clip.done = true;
+      notify();
+    })();
+    return clip;
+  }
+
+  // Lip-sync off the playback level — shared by whole clips and streams.
+  function startMouth(analyser) {
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0; for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
+      const amp = Math.sqrt(sum / data.length);
+      ttsLevel = amp;
+      const img = portraitEl();
+      if (img && !img.hidden) img.style.transform = `scaleY(${1 + Math.min(amp * 0.5, 0.06)})`;
+      if (avatarActive) window.dispatchEvent(new CustomEvent("avatar:speak", { detail: { amp } }));
+      mouthRAF = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  function endMouth() {
+    if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
+    const img = portraitEl(); if (img) img.style.transform = "";
+    // Tail: ignore reverb/echo for a moment after she stops.
+    ttsSource = null; ttsLevel = 0; ttsHangoverUntil = performance.now() + 400;
+    repaint();
+  }
+
+  // Schedules the chunks back to back as they arrive. `ttsSource` is a handle whose
+  // stop() silences everything scheduled, which is all barge-in and stopSpeaking need.
+  function playStream(ctx, clip, valid) {
+    return new Promise(async (resolve) => {
+      const buffered = (from) => clip.chunks.slice(from).reduce((n, c) => n + c.length, 0) / clip.rate;
+      while (!clip.done && !readyToPlay(clip, buffered(0))) {
+        await new Promise(r => { clip.wake = r; });
+        if (!valid()) return resolve();
+      }
+      if (!valid() || !clip.chunks.length) return resolve();
+      const analyser = ctx.createAnalyser(); analyser.fftSize = 256;
+      analyser.connect(ctx.destination);
+      const playing = new Set();
+      let next = 0, idx = 0, over = false;
+      const finish = () => { if (over) return; over = true; endMouth(); resolve(); };
+      ttsSource = { stop() { for (const s of playing) { try { s.stop(); } catch {} } playing.clear(); finish(); } };
+      repaint();
+      startMouth(analyser);
+      for (;;) {
+        while (idx < clip.chunks.length) {
+          const pcm = clip.chunks[idx++];
+          const buf = ctx.createBuffer(1, pcm.length, clip.rate);
+          buf.getChannelData(0).set(pcm);
+          const src = ctx.createBufferSource(); src.buffer = buf; src.connect(analyser);
+          // Fell behind (generation slower than playback): leave a short gap rather
+          // than scheduling in the past, which would garble the audio.
+          if (next < ctx.currentTime + 0.02) next = ctx.currentTime + 0.05;
+          src.start(next); next += buf.duration;
+          playing.add(src);
+          src.onended = () => {
+            playing.delete(src);
+            if (clip.done && idx >= clip.chunks.length && !playing.size) finish();
+          };
+        }
+        if (over || !valid()) return finish();
+        if (clip.done) { if (!playing.size) finish(); return; }
+        await new Promise(r => { clip.wake = r; });
+      }
+    });
+  }
+
+  // Whole WAV for Kokoro/Piper; the streamed path for Orpheus.
+  async function fetchAudio(text) {
+    return usesStream() ? { clip: streamTTS(text) } : { buf: await fetchTTS(text) };
+  }
+  function playAudio(ctx, a, valid) {
+    if (!a) return Promise.resolve();
+    if (a.clip) return playStream(ctx, a.clip, valid);
+    return a.buf ? playBuffer(ctx, a.buf, valid) : Promise.resolve();
+  }
+
   function playBuffer(ctx, arrayBuf, valid) {
     return new Promise(async (resolve) => {
       let audio;
@@ -142,26 +281,8 @@
       src.connect(analyser); analyser.connect(ctx.destination);
       ttsSource = src;
       repaint();
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteTimeDomainData(data);
-        let sum = 0; for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
-        const amp = Math.sqrt(sum / data.length);
-        ttsLevel = amp;
-        const img = portraitEl();
-        if (img && !img.hidden) img.style.transform = `scaleY(${1 + Math.min(amp * 0.5, 0.06)})`;
-        if (avatarActive) window.dispatchEvent(new CustomEvent("avatar:speak", { detail: { amp } }));
-        mouthRAF = requestAnimationFrame(tick);
-      };
-      tick();
-      src.onended = () => {
-        if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
-        const img = portraitEl(); if (img) img.style.transform = "";
-        // Tail: ignore reverb/echo for a moment after she stops.
-        ttsSource = null; ttsLevel = 0; ttsHangoverUntil = performance.now() + 400;
-        repaint();
-        resolve();
-      };
+      startMouth(analyser);
+      src.onended = () => { endMouth(); resolve(); };
       src.start();
     });
   }
@@ -212,8 +333,39 @@
     if (exprPending) { applyExpr(exprPending); exprPending = null; }
   }
 
+  // The first thing she says decides how long you wait, so a reply's first piece is kept
+  // short: a long opening sentence is split at its first clause break (after 6+ words),
+  // and while it streams, a clause break after 8+ words is spoken without waiting for
+  // the full stop. Later pieces stay whole sentences, which sound more natural.
+  const CLAUSE = /[,;:\u2014\u2013](?=\s)|\s[-\u2013\u2014](?=\s)/g;
+  const wordCount = (t) => (t.trim().match(/\S+/g) || []).length;
+  function clauseCut(text, minWords) {
+    CLAUSE.lastIndex = 0;
+    let m;
+    while ((m = CLAUSE.exec(text))) {
+      const end = m.index + m[0].length;
+      if (wordCount(text.slice(0, end)) >= minWords) return end;
+    }
+    return -1;
+  }
+
   function enqueueSpeech(segment) {
     if (!speakingOn()) return;
+    if (firstPiece) {
+      firstPiece = false;
+      if (wordCount(segment) > 14) {
+        const cut = clauseCut(segment, 6);
+        if (cut > 0 && wordCount(segment.slice(cut)) >= 4) {
+          enqueueOne(segment.slice(0, cut));
+          enqueueOne(segment.slice(cut));
+          return;
+        }
+      }
+    }
+    enqueueOne(segment);
+  }
+
+  function enqueueOne(segment) {
     const clean = cleanForTTS(segment);
     if (!clean) return;
     spokenRecent.push({ text: clean.toLowerCase(), t: performance.now() });
@@ -231,11 +383,11 @@
     while (speechQueue.length) {
       const item = speechQueue.shift();
       if (item.run !== ttsRun) { prefetch = null; continue; }
-      const buf = (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchTTS(item.text);
+      const audio = (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchAudio(item.text);
       const nxt = speechQueue[0];               // prefetch the next while this one plays
-      prefetch = nxt ? { item: nxt, promise: fetchTTS(nxt.text) } : null;
+      prefetch = nxt ? { item: nxt, promise: fetchAudio(nxt.text) } : null;
       if (item.expr && item.run === ttsRun) applyExpr(item.expr);
-      if (buf && item.run === ttsRun) await playBuffer(ctx, buf, () => item.run === ttsRun);
+      if (item.run === ttsRun) await playAudio(ctx, audio, () => item.run === ttsRun);
     }
     speechConsuming = false;
     if (speechQueue.some(i => i.run === ttsRun)) consumeSpeech();
@@ -273,6 +425,10 @@
     if (end > speechFedLen) {
       enqueueSpeech(fullText.slice(speechFedLen, end));
       speechFedLen = end;
+    } else if (firstPiece && !final) {
+      // No full stop yet: the opening clause can go now.
+      const rest = fullText.slice(speechFedLen), cut = clauseCut(rest, 8);
+      if (cut > 0) { enqueueSpeech(rest.slice(0, cut)); speechFedLen += cut; }
     }
     if (final) {
       if (speechFedLen < fullText.length) enqueueSpeech(fullText.slice(speechFedLen));
@@ -288,8 +444,8 @@
       const ctx = ensureAudioCtx();
       stopSpeaking();
       const run = ttsRun;
-      const buf = await fetchTTS(text);
-      if (buf && run === ttsRun) await playBuffer(ctx, buf, () => run === ttsRun);
+      const audio = await fetchAudio(text);
+      if (run === ttsRun) await playAudio(ctx, audio, () => run === ttsRun);
     } catch (e) { console.warn("[tts] line failed:", e); }
   }
 

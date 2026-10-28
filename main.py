@@ -442,6 +442,20 @@ async def tts_synth(body: dict, _: User = Depends(current_user)):
     return Response(content=wav, media_type="audio/wav")
 
 
+@app.post("/api/tts/stream")
+async def tts_stream(body: dict, _: User = Depends(current_user)):
+    """One sentence in an Orpheus voice, streamed as it is generated: raw PCM s16le,
+    24 kHz, mono (X-Sample-Rate). voice.js uses this for orpheus: voices, so playback
+    starts ~0.3 s in instead of after the whole sentence has been generated."""
+    from fastapi.responses import StreamingResponse
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+    return StreamingResponse(tts.stream_pcm(text, str(body.get("voice") or "orpheus:tara")),
+                             media_type="application/octet-stream",
+                             headers={"X-Sample-Rate": "24000", "Cache-Control": "no-store"})
+
+
 @app.post("/api/tts/engine")
 async def tts_engine(body: dict, _: User = Depends(current_user)):
     """Orpheus is loaded only while a voice that uses it is on: {on: true} loads it and
