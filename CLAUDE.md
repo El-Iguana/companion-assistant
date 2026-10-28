@@ -591,6 +591,13 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   Because the failure is silent, two guards: Settings warns if full-duplex is on with a non-cancelled
   mic, and at runtime a transcript that is >70% her own recent words is discarded — twice in a row
   disables interruption with a toast.
+  **Echo residue also makes Whisper INVENT speech** that shares none of her words, which that guard
+  cannot see (2026-10-28: 1.26 s of AEC leftovers became a 74-word "user" message). `stt._accept`
+  drops impossible transcripts (>6 words/s of VAD speech) and unconfident segments; clips that
+  overlapped her turn (`voice.js herTurn`: streaming, line queued/playing, or <1.5 s after) are sent
+  with `strict=1` and held to tighter limits (`STRICT_NO_SPEECH` / `STRICT_LOGPROB`). Measured on
+  synthetic speech vs faint echo: real speech kept 108/108 normal, 102/108 strict; echo
+  hallucinations through 19/30 unguarded, 11/30 normal, 1/30 strict.
   **Measured, and it explains the failed earlier attempt:** during her speech the raw mic hears her at
   **+26 dB** over the noise floor, the AEC source at **−39 dB** — no level threshold can bridge that, so
   `echo_suppress` was a dead end and is gone from the UI. Over speakers BOTH halves are needed: pick

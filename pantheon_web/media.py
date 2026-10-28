@@ -17,7 +17,7 @@ import re
 
 import hmac
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 router = APIRouter(prefix="/pmedia")
@@ -175,13 +175,14 @@ async def tts(request: Request):
 
 
 @router.post("/stt")
-async def stt(request: Request, file: UploadFile = File(...)):
-    """A recorded utterance (WAV) -> {text} (``main.stt_transcribe``)."""
+async def stt(request: Request, file: UploadFile = File(...), strict: str = Form("")):
+    """A recorded utterance (WAV) -> {text} (``main.stt_transcribe``). ``strict=1`` when
+    the clip overlapped the character speaking (voice.js herTurn)."""
     import main
 
     _ctx(request)
     _require_csrf(request)
-    return await main.stt_transcribe(file, None)
+    return await main.stt_transcribe(file, None, strict=strict == "1")
 
 
 @router.get("/card/{card_id}/avatar.vrm")

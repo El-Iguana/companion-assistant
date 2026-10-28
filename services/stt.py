@@ -76,9 +76,15 @@ MAX_WORDS_PER_SEC = 6.0      # of speech left after VAD; real speech peaked at 3
 NO_SPEECH_DROP = 0.5         # segment dropped when no_speech_prob is above this...
 LOGPROB_DROP = -0.7          # ...and avg_logprob is below this (confident words stay)
 COMPRESSION_DROP = 2.4       # Whisper's own repetition-loop threshold
+# Strict: the clip overlapped the character speaking (voice.js herTurn), so echo of her
+# voice is the likely source. Same measurements, applied per segment:
+#   kept real speech 102/108 (losses mostly at 0.1 gain, i.e. very quiet);
+#   faint-echo hallucinations getting through 11/19 -> 1/19.
+STRICT_NO_SPEECH = 0.2       # dropped above this...
+STRICT_LOGPROB = -0.9        # ...or below this
 
 
-def _accept(segments, speech_s: float) -> str:
+def _accept(segments, speech_s: float, strict: bool = False) -> str:
     """Join the segments that pass the guards; '' when the whole thing is implausible."""
     import logging
     log = logging.getLogger("stt")
@@ -92,6 +98,10 @@ def _accept(segments, speech_s: float) -> str:
             log.info("stt: dropped segment (no_speech %.2f, logprob %.2f, compression %.2f): %r",
                      s.no_speech_prob, s.avg_logprob, s.compression_ratio, t[:120])
             continue
+        if strict and (s.no_speech_prob > STRICT_NO_SPEECH or s.avg_logprob < STRICT_LOGPROB):
+            log.info("stt: dropped segment, strict (no_speech %.2f, logprob %.2f): %r",
+                     s.no_speech_prob, s.avg_logprob, t[:120])
+            continue
         kept.append(t)
     text = " ".join(kept).strip()
     words = len(text.split())
@@ -101,7 +111,7 @@ def _accept(segments, speech_s: float) -> str:
     return text
 
 
-def transcribe(audio: bytes, language: str | None = None) -> str:
+def transcribe(audio: bytes, language: str | None = None, strict: bool = False) -> str:
     """Transcribe audio bytes (any ffmpeg-decodable container) to plain text.
 
     `vad_filter` trims leading/trailing silence so push-to-talk clips with a bit
@@ -117,4 +127,4 @@ def transcribe(audio: bytes, language: str | None = None) -> str:
         vad_filter=True,
         condition_on_previous_text=False,
     )
-    return _accept(list(segments), info.duration_after_vad or info.duration or 0.0)
+    return _accept(list(segments), info.duration_after_vad or info.duration or 0.0, strict)

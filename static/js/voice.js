@@ -262,10 +262,13 @@
   }
 
   // ---- STT ------------------------------------------------------------------
-  async function transcribeBlob(blob) {
+  // `strict`: the clip overlapped her turn, so the server holds it to tighter
+  // confidence limits (services/stt.py STRICT_*) — echo of her voice is the likely source.
+  async function transcribeBlob(blob, strict = false) {
     try {
       const fd = new FormData();
       fd.append("file", blob, "speech.wav");
+      if (strict) fd.append("strict", "1");
       const r = await fetch("/pmedia/stt", { method: "POST", credentials: "same-origin",
         headers: { "X-CSRF-Token": csrf() }, body: fd });
       return r.ok ? ((await r.json()).text || "") : "";
@@ -507,6 +510,15 @@
   // Set when an utterance opened while she was audible: the barge-in waits until the
   // transcript proves it was not her own voice. See hfTick / hfOnUtterance.
   let hfPendingBargeIn = false;
+  // Set when any part of the utterance overlapped her turn. Whisper turns faint echo of
+  // her voice into invented sentences that score like real speech under the normal
+  // limits; while she is talking the transcript has to clear stricter ones.
+  let hfStrict = false;
+  // Her turn: the reply is streaming, a voice line is queued or playing, or she stopped
+  // under 1.5 s ago. Wider than `audible`, which drops 0.4 s after each line, so a clip
+  // that opens in the gap between two lines and then records the next one still counts.
+  const herTurn = (now) => !!ttsSource || speechConsuming || speechQueue.length > 0 ||
+    streaming || now < ttsHangoverUntil + 1500;
   const HF_PRE_ROLL = 8;            // ~0.7 s of 4096-frame blocks kept before the gate
 
   function hfStartUtterance() {
@@ -524,13 +536,13 @@
 
   async function hfOnUtterance() {
     // Read and clear together: no early return may leave a stale barge-in armed.
-    const pendingBargeIn = hfPendingBargeIn;
-    hfPendingBargeIn = false;
+    const pendingBargeIn = hfPendingBargeIn, strict = hfStrict;
+    hfPendingBargeIn = false; hfStrict = false;
     const blob = wav(hfPcm, (hfCtx && hfCtx.sampleRate) || 48000);
     hfPcm = []; hfPre = [];
     if (!blob.size || !hfActive) return;
-    const raw = (await transcribeBlob(blob)).trim();
-    console.log("[mic] transcript: " + JSON.stringify(raw));
+    const raw = (await transcribeBlob(blob, strict)).trim();
+    console.log("[mic] transcript" + (strict ? " (strict)" : "") + ": " + JSON.stringify(raw));
     if (awake) awakeUntil = Date.now() + wakeTimeoutMs();   // any speech keeps it open
     if (!raw) return;
     if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
@@ -566,6 +578,7 @@
       const selfActive = audible && !settings.full_duplex;
       if (!selfActive && rms > base) {
         hfStartUtterance();
+        hfStrict = herTurn(now);
         hfSpeaking = true; hfSilenceStart = 0;
         // Energy cannot tell your voice from her echo, and only the transcript can — so
         // while she is audible the abort waits for it (one STT round-trip of latency, and
@@ -574,6 +587,7 @@
         else if (ttsSource || streaming) abortAndWait();
       }
     } else {
+      if (herTurn(now)) hfStrict = true;
       if (rms > base) hfSilenceStart = 0;
       else if (!hfSilenceStart) hfSilenceStart = now;
       else if (now - hfSilenceStart > (settings.vad_silence_ms ?? 800)) {
