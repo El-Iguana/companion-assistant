@@ -187,7 +187,8 @@ class KoboldClient:
 
         If the model hits the token limit mid-sentence (finish_reason == "length"),
         transparently continues generating until a natural sentence boundary is
-        reached, up to 3 extra rounds. The caller sees one seamless stream.
+        reached, with one extra round that resumes the same reply (assistant prefill).
+        The caller sees one seamless stream.
         """
         buf = ""
         in_think = False
@@ -195,10 +196,6 @@ class KoboldClient:
         in_expr = False
         full_text = ""
         current_messages = list(messages)
-        # A trailing system message (the relationship boundary reminder) is placed last
-        # deliberately. The continuation round below appends turns after it, which would
-        # demote it out of that position — so re-append it to keep it last every round.
-        tail_system = (messages[-1] if messages and messages[-1].get("role") == "system" else None)
 
         for _round in range(2):  # initial + up to 1 continuation (avoids rambling/repetition)
             finish_reason = None
@@ -284,13 +281,25 @@ class KoboldClient:
                     buf = ""
                 break
 
-            # Mid-sentence: continue from where we left off
-            current_messages = list(messages) + [
-                {"role": "assistant", "content": full_text},
-                {"role": "user", "content": "Continue."},
-            ]
-            if tail_system:
-                current_messages.append(tail_system)
+            # Mid-sentence: resume the SAME reply. A trailing assistant message is
+            # treated by KoboldCPP as a prefill and generation picks up mid-sentence
+            # (verified live: "...and her captain" -> " is a fearsome woman named
+            # Sarah."). This replaced a fake user turn saying "Continue.", which the
+            # model read as a new turn and answered by recapping the scene — the
+            # recap was then glued onto the reply. Nothing may follow the prefill,
+            # so the trailing system note stays where it already is, just before it.
+            # The extra round only needs to finish a sentence, so it gets a small cap.
+            visible = re.sub(r"<think>.*?(</think>|$)", "", full_text, flags=re.DOTALL).lstrip()
+            if not visible:
+                # The whole round went on <think> and nothing was said. Start the
+                # reply over with an empty think block prefilled, which skips the
+                # reasoning, at the full token budget.
+                buf, in_think = "", False
+                current_messages = list(messages) + [
+                    {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]
+                continue
+            current_messages = list(messages) + [{"role": "assistant", "content": visible}]
+            params = {**params, "max_tokens": min(int(params.get("max_tokens") or 80), 80)}
 
         else:
             # Exhausted all continuation rounds — flush whatever we have

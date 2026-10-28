@@ -227,7 +227,15 @@ Login-gated, role-based, per-user isolated libraries.
   ignore, which is the part that works. `memory.summarize()` is mode-aware for the same reason — the
   roleplay prompt's "third person, present tense" prose was being injected as "Story so far:" and read
   as a worked example of narrating; assistants get notes, labelled "Notes from earlier in this
-  conversation".
+  conversation". Roleplay summaries are past-tense notes too (2026-10-28): the prose version read as
+  a recap to imitate. They end in a `Where things stand:` line, and the card's scenario is labelled
+  "Opening premise", so long chats stop getting pulled back to the first scene.
+  **Everything after the history is one system message ending in `focus_note()`**, which quotes the
+  latest user message back. Four separate trailing blocks used to sit between the user's line and the
+  reply, and the model answered them instead (measured: unprompted date/time in 7/15 assistant
+  replies before, 1/15 after). The exact time trails only when asked; the date sits in the system block.
+  `kobold.chat_generate_stream` continues a cut-off reply by **assistant prefill**, never a fake
+  "Continue." user turn (that produced a recap glued onto the reply, 3/5 cut-off replies).
   The same note also bans closing offers of help, initiative questions, and any mention of a body,
   senses, hardware or location. `prompt_builder.strip_initiative_question()` then removes a
   trailing courtesy question in code — measured, the prompt rule alone moved it 9/15 -> 8/15 and

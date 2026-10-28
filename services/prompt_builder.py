@@ -196,7 +196,12 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
         parts.append(f"{char_name}'s personality: " +
                      substitute_macros(card.personality, char_name, user_name))
     if card.scenario:
-        parts.append("Scenario: " + substitute_macros(card.scenario, char_name, user_name))
+        # The card's scenario is where the story STARTED, and it stays in every
+        # prompt. Labelled plainly "Scenario:" it read as the current situation, so
+        # long chats kept getting dragged back to the opening scene.
+        parts.append("Opening premise (where the story began; the chat may have moved "
+                     "on since, so follow where it is now): " +
+                     substitute_macros(card.scenario, char_name, user_name))
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -276,6 +281,44 @@ def expression_note(labels: List[str], assistant: bool = False) -> str:
     )
 
 
+# A question about the clock or calendar. Only then does the exact time trail the
+# prompt; otherwise the system block's date line is all the model gets.
+_ASKS_TIME = re.compile(
+    r"\b(time|date|day|today|tonight|tomorrow|yesterday|clock|hour|o'?clock|"
+    r"week|weekend|month|year|morning|afternoon|evening)\b.*\?|"
+    r"\b(what time|what day|what date|what's the date|whats the date|today's date|"
+    r"the time|the date)\b", re.I)
+
+_FOCUS_QUOTE_CHARS = 200
+
+
+def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
+    """The closing line of every prompt: answer THIS, from where things stand now.
+
+    Quotes the message back (shortened) because a small model's attention fades
+    across the rules between the history and the reply; one short quote right at
+    the end puts the moment back in front of it. Roleplay and assistant differ
+    only in what "drifting" looks like for each."""
+    q = " ".join(last_user.split())
+    if len(q) > _FOCUS_QUOTE_CHARS:
+        q = q[:_FOCUS_QUOTE_CHARS].rsplit(" ", 1)[0] + " …"
+    if assistant:
+        return (
+            f"[Now] Reply to {user}'s latest message: \"{q}\"\n"
+            f"Respond to exactly that, in the context of the conversation so far. Do not "
+            f"repeat an earlier reply of yours or bring up topics {user} did not raise, and "
+            f"do not announce the date or time unless asked — even if earlier replies did. "
+            f"If it is a short answer like \"yes\" or \"go on\", act on what was just "
+            f"being discussed.")
+    return (
+        f"[Now] Reply to {user}'s latest message: \"{q}\"\n"
+        f"Continue the scene from exactly where it stands at this moment — same place, "
+        f"same people, same thread. Do not recap or re-describe what already happened "
+        f"or the setting, do not restart the scene, and do not jump to a new topic or "
+        f"location unless {user} takes it there. Write {char}'s next beat only."
+    )
+
+
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
                    boundary_note: str = "", longterm_note: str = "",
@@ -331,7 +374,25 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         # live 51-turn session: 1851 chars of it, opening with a hardcoded date.
         # `assistant_memory.fold()` clears the stored copy once that material is
         # safely in directives/facts/notes; this skips it in the meantime.
-        sys_parts.append("Story so far:\n" + sub(mem.summary))
+        # Framed as finished events: the model is to build on this, not retell it.
+        # The messages after the system block continue from its "Where things
+        # stand" line (see memory.summarize).
+        sys_parts.append(
+            "Story so far (already happened — never retell it; the messages below "
+            "continue from where it leaves off):\n" + sub(mem.summary))
+
+    # Assistant cards get the DATE here, not the time. It changes once a day, so it
+    # costs one cache miss a day instead of one a minute. The minute-accurate time
+    # used to trail every prompt, and sitting last it was the loudest thing in the
+    # prompt: replies volunteered the clock unasked ("Mirror." got an answer about
+    # being synchronised to 11:57 AM; the time was written into the middle of a
+    # generated system prompt). The exact time now trails only when asked for.
+    if assistant:
+        today = datetime.now().astimezone()
+        sys_parts.append(
+            f"Today is {today.strftime('%A, %B')} {today.day}, {today.year}. You are not "
+            f"told the time of day, so never state or guess one. Mention the date only "
+            f"when {user_name} asks for it.")
 
     messages: List[Dict] = [{"role": "system", "content": "\n\n".join(p for p in sys_parts if p.strip())}]
 
@@ -347,46 +408,36 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     if card.post_history_instructions:
         messages.append({"role": "system", "content": sub(card.post_history_instructions)})
 
-    # --- current date/time, for assistant-mode characters only ---
-    # Nothing else in the prompt carries the date, so asked the time the model simply
-    # invented one ("Monday, October 24 ... 9:15 AM"). Gated on assistant mode: a roleplay
-    # character announcing the real-world date breaks the scene.
-    # Placed AFTER the history, not in the system block, for two reasons: this string
-    # changes every minute, and KoboldCPP only reuses its cached prefix up to the first
-    # changed token — in the system block that would re-process the entire history every
-    # turn. Trailing also puts it where small models weight it most, the same finding that
-    # drove boundary_note's placement.
-    if assistant:
+    # --- ONE trailing note: everything that must sit after the history ---
+    # These used to be up to four separate system turns after {{user}}'s message
+    # (time, expression rules, format reminder, boundary note), so the last thing
+    # the model read before replying was a wall of rules rather than what was just
+    # said — and it answered the rules: drifting off topic, re-describing the scene.
+    # Merged into one message that ENDS by pointing back at the latest message.
+    # The order inside is the old order, so the measured placements still hold:
+    # expression beats trail (see expression_note), and the boundary note stays
+    # after any UJB and as late as possible (see PROMPT_BUDGET.md).
+    last_user = next((m.content for m in reversed(session.messages)
+                      if m.role == "user" and m.content and m.content.strip()), "")
+    tail: list[str] = []
+    if assistant and _ASKS_TIME.search(last_user):
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "12"
-        messages.append({"role": "system", "content": (
+        tail.append(
             f"Current date and time: {now.strftime('%A, %B')} {now.day}, {now.year}, "
             f"{hour}:{now.strftime('%M %p')} {now.strftime('%Z')}. "
-            f"This is authoritative — use it when asked about the date or time, never guess.")})
-
-    # --- expression beats: trailing, for the same recency reason as boundary_note ---
-    # Measured, not assumed. With the instruction in the system block the 9B tagged 1 of
-    # 6 replies (and invented a label); moved here it tagged 3 of 6 with none invalid.
-    # The system block is many turns back by mid-conversation and the trailing boundary
-    # reminder was out-weighting it. Placed before boundary_note so that still goes last.
+            f"This is authoritative — use it, never guess.")
     expr_hint = expression_note(expr_labels or [], assistant=assistant)
     if expr_hint:
-        messages.append({"role": "system", "content": expr_hint})
-
-    # --- assistant format reminder goes LAST, the slot boundary_note holds for
-    # roleplay cards. Nothing else in the prompt sits after the history, which is
-    # where the narration is being learned from.
+        tail.append(expr_hint)
     if assistant:
-        messages.append({"role": "system",
-                         "content": ASSISTANT_FORMAT_NOTE.format(
-                             char=char_name, user=user_name)})
-
-    # --- physical boundary goes LAST, after any UJB ---
-    # The full relationship descriptor is in the system message, but by mid-conversation
-    # that is many turns back and small models weight recent tokens far more heavily.
-    # Deliberately placed after post_history_instructions so a card's UJB cannot bury it.
+        tail.append(ASSISTANT_FORMAT_NOTE.format(char=char_name, user=user_name))
     if boundary_note:
-        messages.append({"role": "system", "content": sub(boundary_note)})
+        tail.append(sub(boundary_note))
+    if last_user:
+        tail.append(focus_note(sub(last_user), char_name, user_name, assistant))
+    if tail:
+        messages.append({"role": "system", "content": "\n\n".join(tail)})
 
     return messages
 

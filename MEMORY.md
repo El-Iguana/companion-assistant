@@ -38,12 +38,14 @@ to branch, and a branch is a place the next feature forgets.
 |---|---|---|---|
 | Verbatim turns | session | `session.messages[last_summarized_index:]` | the history itself |
 | Pinned facts | session | `MemoryState.pinned` | `Important facts:` |
-| Rolling summary | session | `MemoryState.summary` | `Story so far:` |
+| Rolling summary | session | `MemoryState.summary` | `Story so far (already happened — never retell it…):` — past-tense notes ending in a `Where things stand:` line |
 | Long-term memory | character x persona | `data/u/<uid>/memories/{cid}__{pid}.json` | `What {{char}} remembers about {{user}}…` |
 | Semantic recall | character x persona | `data/u/<uid>/memories/{cid}__{pid}.vec.npz` | `Things from earlier that may be relevant:` |
 
 Order inside the system block: pinned facts -> `longterm_note` (long-term + recall, joined) ->
-`Story so far` -> history -> `post_history_instructions` -> date/time -> boundary note.
+`Story so far` -> (assistant: today's date) -> history -> `post_history_instructions` -> ONE trailing
+note: [time, only when asked] + expression beats + assistant format note + boundary note + `focus_note`
+(quotes the latest user message; always last).
 
 ## Per-session rolling summary — `summarize()`
 

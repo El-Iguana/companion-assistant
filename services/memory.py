@@ -116,9 +116,19 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
         "notes only: no scene, no narration, no description of anyone, and do not write "
         "it as a story."
         if getattr(card, "chat_mode", "roleplay") == "assistant" else
-        "Summarize the roleplay so far into a concise memory (a few paragraphs). "
-        "Preserve key facts, relationship developments, promises, and unresolved threads. "
-        "Write in third person, present tense."
+        # Notes in the past tense, not story prose. "A few paragraphs, third person,
+        # present tense" produced a retelling of the story, which then sat in every
+        # prompt as a worked example of recapping — and replies recapped. The
+        # closing line gives the model a "you are here" for the moment the verbatim
+        # messages pick up from, which nothing in the prompt carried before.
+        f"Write the memory of this roleplay as compact notes in the past tense: key "
+        f"events in order, facts established, relationship developments between "
+        f"{char_name} and {user_name}, promises, and unresolved threads. Plain notes, "
+        f"not a story: no scene-setting, no description for its own sake. End with ONE "
+        f"line that starts \"Where things stand:\" saying where {char_name} and "
+        f"{user_name} are, who is with them, and what is happening at the last moment "
+        f"covered. If the existing memory already has that line, replace it — keep only "
+        f"one, describing the newest moment."
     )
 
     for end, transcript in chunks:
