@@ -48,7 +48,7 @@ PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871 (PANTHEON
 PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
   CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
   uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
-.venv/bin/python -m pytest -q tests/test_messages.py tests/test_chat_stream.py
+.venv/bin/python -m pytest -q tests/test_messages.py tests/test_chat_stream.py tests/test_roleplay_scene.py
 ```
 
 | var | default | what |
@@ -326,6 +326,10 @@ POST   /api/sessions/{id}/messages/{mid}/truncate   drop everything after it ("S
        — all three keep memory.last_summarized_index and the pairing's swept_sessions mark
          consistent; a truncate below the summary resets it, like clearing (tests/test_messages.py)
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
+                                           continue_turn: roleplay Continue — her turn with no new user message
+POST /api/narrate                          roleplay: SSE narrator event, saved as a role "narrator" message
+                                           ({session_id, direction?, replace?} — replace re-rolls a trailing narration)
+POST /api/draft                            roleplay: SSE draft of {{user}}'s next message for the composer; never saved
 ```
 
 ## How it works
@@ -337,6 +341,20 @@ POST /api/chat                             SSE stream; done carries {expression,
   writing for {{user}}; a stop-sequence on the user's turn is added. After the reply: classify emotion,
   update mood + relationship (skipped on re-rolls), save, send `done` — then memory maintenance in the
   background (`_memory_job`, see Conventions).
+- **Narrator / Continue / Write for me (roleplay only; assistant chats get a 400 and no buttons):**
+  the bar above the composer. *Narrate* streams a neutral scene event (`build_narrator_messages`:
+  its own short prompt — the scene as a labelled transcript in one user turn, rules restated
+  last, one paragraph via a `"\n\n"` stop; without those it slid into writing her lines) and
+  saves it as `role="narrator"` onto a fresh load, so an edit made meanwhile isn't rolled back;
+  text typed in the box steers it. In her prompt a narration is a `[Narrator] …` **system**
+  turn (as a user turn she took it for {{user}}'s words) and the trailing note becomes
+  `roleplay_turn_note`: react to the event, or — Continue, she spoke last — carry the scene on.
+  *Continue* is `chat(continue_turn=True)`: no user message is appended; mood, relationship and
+  memory run as for any reply. *Write for me* (`build_draft_messages`) streams {{user}}'s reply
+  into the composer in their own style; nothing is saved. Narrations never touch mood,
+  relationship or sprites; memory transcripts label them `Narrator:`. "Another take" on a reply
+  is withheld while a narration is the last message (the re-roll would answer the narration);
+  a trailing narration has its own Another take. `_keepalive()` wraps all three streams.
 - **Swipes:** alternates per message; each swipe's emotion cached in `swipe_expressions`. `▶` past the end regenerates.
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
 - **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;
@@ -416,7 +434,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 |---|---|
 | `pantheon.py` | the shell: 292 px rail (tile nav, Recent chats, Your characters, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Create), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
 | `ui/discover.py` · `ui/profile.py` | gallery home (search, tags, sort) · character profile modal (greetings, start / continue / scenario wizard) |
-| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
+| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, roleplay bar (Narrate / {name} continues·responds / Write for me) + narrator bubbles, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
 | `ui/chats.py` | all chats |
 | `ui/studio.py` | the card editor: every V2/V3 field, greetings, starters, lorebook, power/social, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
 | `ui/people.py` | personas + presets |

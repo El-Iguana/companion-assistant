@@ -1,4 +1,5 @@
-"""BFF: one chat — open it, stream replies, swipe, edit, delete, resend, clear, sweep.
+"""BFF: one chat — open it, stream replies, swipe, edit, delete, resend, clear, sweep, and
+(roleplay) narrator events, Continue and drafts of the user's reply.
 
 Every method is a thin call into Pantheon's own handlers (``main.*``), so generation,
 swipes, mood, the relationship, memory folding and the idle sweep behave exactly as on
@@ -86,20 +87,46 @@ class Chat:
         }
 
     @bff_stream()
-    async def send(self, session_id: str, text: str, regenerate: bool = False):
+    async def send(self, session_id: str, text: str, regenerate: bool = False, cont: bool = False):
+        """A chat turn. ``cont``: roleplay Continue — she goes on with no new message."""
+        from models.schema import ChatRequest
+
+        async for ev in self._relay("chat", lambda: ChatRequest(
+                session_id=session_id, input_text=text or "", regenerate=bool(regenerate),
+                continue_turn=bool(cont))):
+            yield ev
+
+    @bff_stream()
+    async def narrate(self, session_id: str, direction: str = "", replace: bool = False):
+        """A neutral narrator event, saved into the chat (roleplay only)."""
+        from models.schema import SceneRequest
+
+        async for ev in self._relay("narrate", lambda: SceneRequest(
+                session_id=session_id, direction=direction or "", replace=bool(replace))):
+            yield ev
+
+    @bff_stream()
+    async def draft(self, session_id: str, direction: str = ""):
+        """{{user}}'s next message written for the composer; not saved (roleplay only)."""
+        from models.schema import SceneRequest
+
+        async for ev in self._relay("draft_reply", lambda: SceneRequest(
+                session_id=session_id, direction=direction or "")):
+            yield ev
+
+    async def _relay(self, handler: str, make_req):
+        """Run an SSE handler in main and yield its events as dicts."""
         import json
 
         import main
         from fastapi import HTTPException
-        from models.schema import ChatRequest
 
         cur = self._cur()
         if cur is None:
             yield {"error": "not signed in"}
             return
         try:
-            resp = await main.chat(ChatRequest(session_id=session_id, input_text=text or "",
-                                               regenerate=bool(regenerate)), cur=cur)
+            resp = await getattr(main, handler)(make_req(), cur=cur)
         except HTTPException as exc:
             yield {"error": str(exc.detail)}
             return

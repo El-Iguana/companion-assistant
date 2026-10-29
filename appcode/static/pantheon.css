@@ -376,6 +376,13 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 .pt-msg.user .pt-bubble { background: var(--grad); color: var(--ink); border-color: transparent;
   border-bottom-left-radius: 16px; border-bottom-right-radius: 6px; }
 .pt-msg.user .pt-act { color: inherit; opacity: .75; }
+/* Narration (roleplay): a scene event from neither of them — centred, no avatar, quieter. */
+.pt-msg.narrator { justify-content: center; }
+.pt-msg.narrator .pt-msg-col { max-width: min(88%, 720px); align-items: center; }
+.pt-msg.narrator .pt-msg-head { letter-spacing: .3px; }
+.pt-msg.narrator .pt-bubble { background: transparent; border: 1px dashed var(--accLine); border-radius: 12px;
+  font-style: italic; color: var(--txt); }
+.pt-msg.narrator .pt-macts { justify-content: center; }
 .pt-macts { display: flex; align-items: center; gap: 4px; margin: 4px 2px 0; opacity: 0; transition: opacity .15s; }
 .pt-msg:hover .pt-macts, .pt-macts:focus-within { opacity: 1; }
 .pt-msg.live .pt-macts { display: none; }
@@ -413,6 +420,13 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 .pt-sug { flex: none; font: 600 13px var(--sans); padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accLine);
   background: var(--accSoft); color: var(--txt); cursor: pointer; white-space: nowrap; }
 .pt-sug:hover { background: color-mix(in srgb, var(--acc) 22%, transparent); }
+.pt-rpbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 8px; }
+.pt-rpbtn { font: 600 12.5px var(--sans); display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--bg2); color: var(--txt); cursor: pointer; }
+.pt-rpbtn:hover:not(:disabled) { border-color: var(--accLine); background: var(--accSoft); }
+.pt-rpbtn:disabled { opacity: .45; cursor: default; }
+.pt-rpbtn .mdi { font-size: 15px; color: var(--accText); }
+@media (max-width: 520px) { .pt-rpbar { gap: 5px; flex-wrap: nowrap; } .pt-rpbtn { padding: 5px 9px; font-size: 12px; gap: 4px; white-space: nowrap; } }
 .pt-inrow { display: flex; align-items: flex-end; gap: 8px; background: var(--bg2); border: 1px solid var(--line);
   border-radius: 20px; padding: 8px; }
 .pt-inrow:focus-within { border-color: var(--accLine); }

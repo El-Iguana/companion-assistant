@@ -319,6 +319,135 @@ def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
     )
 
 
+def roleplay_turn_note(latest, char: str, user: str, sub) -> str:
+    """The closing line when {user} didn't speak last: the narrator did, or {char} did and
+    is asked to go on (Continue). Same role as focus_note; roleplay only."""
+    if latest.role == "narrator":
+        q = " ".join(sub(latest.content).split())
+        if len(q) > _FOCUS_QUOTE_CHARS:
+            q = q[:_FOCUS_QUOTE_CHARS].rsplit(" ", 1)[0] + " …"
+        return (
+            f"[Now] Something just happened in the scene (narration, not {user}'s words): \"{q}\"\n"
+            f"React to it as {char}, in the moment, from where the scene stands — same place, "
+            f"same people. Write {char}'s next beat only; do not decide how {user} reacts, "
+            f"and do not retell the event.")
+    return (
+        f"[Now] {user} has not spoken yet — {char} carries the scene on. Take it one beat "
+        f"further on {char}'s own initiative: do, say or notice something new that follows "
+        f"from {char}'s last message. Do not repeat or restate it, do not answer for {user}, "
+        f"and do not wrap the scene up. Write {char}'s next beat only.")
+
+
+# ---------------------------------------------------------------------------
+# Narrator events and drafts of {{user}}'s reply (roleplay only)
+#
+# Both are their own short prompts rather than build_messages() variants: the narrator is
+# not {{char}} and the draft is written as {{user}}, so neither may carry {{char}}'s
+# system prompt, relationship framing or boundary note. The scene goes in as a labelled
+# transcript in one user turn, so the model writes the requested piece instead of
+# continuing the chat as {{char}}.
+# ---------------------------------------------------------------------------
+NARRATION_LABEL = "[Narrator] "
+SCENE_TURNS = 16                 # recent messages the narrator / draft prompt sees
+
+NARRATOR_SYSTEM = (
+    "You are the narrator of an ongoing roleplay between {{char}} and {{user}}. You are not "
+    "a character in it. Write ONE short narration of something that happens in the scene "
+    "right now — something in the surroundings, a sound, a change in light or weather, "
+    "someone else arriving, an object, news, an interruption — that gives both of them "
+    "something to react to.\n"
+    "Keep it neutral: it takes no side, resolves nothing, and does not push the scene toward "
+    "romance, intimacy or violence. Third person, present tense, two to four sentences. "
+    "Never write dialogue, actions, thoughts, feelings or decisions for {{char}} or {{user}}; "
+    "describe only the world and anyone else in it. Stay consistent with the setting and "
+    "what has happened. Do not recap, and never mention being a narrator or an AI."
+)
+
+DRAFT_SYSTEM = (
+    "You write {{user}}'s next message in an ongoing roleplay with {{char}}. Write ONLY "
+    "{{user}}'s single next reply, in {{user}}'s own voice — what {{user}} says, and briefly "
+    "what {{user}} does — reacting to the latest moment. Never write anything {{char}} says, "
+    "does, thinks or feels, and do not narrate the world. Write it the way {{user}}'s own "
+    "earlier messages are written — same person, tense and style (first person if there are "
+    "none) — and include something {{user}} says out loud. Keep it short: one to three "
+    "sentences. No preamble, no name label, no quotation marks around the whole reply."
+)
+
+
+def speaker(m, char: str, user: str) -> str:
+    return char if m.role == "char" else "Narrator" if m.role == "narrator" else user
+
+
+def shown(m) -> str:
+    """The text on screen: a reply's selected swipe, else the content."""
+    return m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
+
+
+def scene_transcript(session: ChatSession, char: str, user: str, turns: int = SCENE_TURNS) -> str:
+    msgs = [m for m in session.messages[session.memory.last_summarized_index:] if m.role != "system"]
+    return "\n\n".join(f"{speaker(m, char, user)}: {substitute_macros(shown(m), char, user)}"
+                        for m in msgs[-turns:])
+
+
+def _scene_context(card: CharacterCard, persona: Persona, session: ChatSession) -> str:
+    char, user = card.name or "Companion", persona.name or "User"
+    parts = []
+    block = _char_block(card, char, user)
+    if block:
+        parts.append(f"About {char}:\n{block}")
+    bits = [b for b in (getattr(persona, "title", ""), persona.description,
+                        getattr(persona, "background", "")) if b and b.strip()]
+    if bits:
+        parts.append(f"About {user}: " + substitute_macros(". ".join(bits), char, user))
+    if session.memory.summary:
+        parts.append("Story so far:\n" + substitute_macros(session.memory.summary, char, user))
+    scene = scene_transcript(session, char, user)
+    parts.append("The scene, most recent last:\n" + (scene or "(nothing has happened yet)"))
+    return "\n\n".join(parts)
+
+
+def build_narrator_messages(card: CharacterCard, persona: Persona, session: ChatSession,
+                            direction: str = "") -> List[Dict]:
+    char, user = card.name or "Companion", persona.name or "User"
+    what = (f"Narrate this happening next, in your own words: {direction.strip()}. "
+            if direction.strip() else "Narrate the next event now. ")
+    # Restated last, where it counts: with the scene transcript just above, the model
+    # slid into writing the next lines for {{char}} — speech, gestures, shivers — and
+    # ran for paragraphs. The system rules alone, many hundred tokens back, didn't hold.
+    ask = (what + f"One paragraph, two to four sentences, about the world only: what "
+           f"happens, what is seen or heard. Write nothing that {char} or {user} says, does, "
+           f"thinks or feels — they react next, not you.")
+    return [
+        {"role": "system", "content": substitute_macros(NARRATOR_SYSTEM, char, user)},
+        {"role": "user", "content": _scene_context(card, persona, session) + f"\n\n[{ask}]"},
+    ]
+
+
+def build_draft_messages(card: CharacterCard, persona: Persona, session: ChatSession,
+                         direction: str = "") -> List[Dict]:
+    char, user = card.name or "Companion", persona.name or "User"
+    ask = (f"Write {user}'s next message. {user} wants to: {direction.strip()}"
+           if direction.strip() else f"Write {user}'s next message.")
+    return [
+        {"role": "system", "content": substitute_macros(DRAFT_SYSTEM, char, user)},
+        {"role": "user", "content": _scene_context(card, persona, session) + f"\n\n[{ask}]"},
+    ]
+
+
+def clean_piece(text: str, names: List[str]) -> str:
+    """Drop a leading speaker label ("Narrator:", "Brian:") and wrapping quotes."""
+    t = (text or "").strip()
+    for n in names:
+        # "Narrator: …", or inside the italics the whole piece is wrapped in: "*Narrator: …*"
+        m = re.match(r"^(\*?)\s*" + re.escape(n) + r"\s*:\s*", t, re.I) if n else None
+        if m:
+            t = m.group(1) + t[m.end():]
+            break
+    if len(t) > 1 and t[0] == t[-1] == '"' and t.count('"') == 2:
+        t = t[1:-1].strip()
+    return t
+
+
 # Orpheus voices perform these instead of reading them (services/orpheus.py). Offered
 # only to cards whose voice is Orpheus; the chat view hides them, Kokoro strips them.
 # A subset of what Orpheus knows: cough/sniffle/yawn read as noise in conversation.
@@ -431,6 +560,11 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     for m in session.messages[mem.last_summarized_index:]:
         if m.role == "system":
             continue
+        if m.role == "narrator":
+            # An event in the scene, from neither of them. As a user turn the model read
+            # it as something {{user}} said or did; as a labelled system turn it's the world.
+            messages.append({"role": "system", "content": NARRATION_LABEL + sub(m.content)})
+            continue
         role = "assistant" if m.role == "char" else "user"
         content = m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
         messages.append({"role": role, "content": sub(content)})
@@ -468,7 +602,11 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         tail.append(voice_hint)
     if boundary_note:
         tail.append(sub(boundary_note))
-    if last_user:
+    latest = next((m for m in reversed(session.messages) if m.role != "system"), None)
+    if not assistant and latest is not None and latest.role in ("narrator", "char"):
+        # A turn {{user}} didn't take: reacting to a narrated event, or Continue.
+        tail.append(roleplay_turn_note(latest, char_name, user_name, sub))
+    elif last_user:
         tail.append(focus_note(sub(last_user), char_name, user_name, assistant))
     if tail:
         messages.append({"role": "system", "content": "\n\n".join(tail)})

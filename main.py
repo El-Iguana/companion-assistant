@@ -26,6 +26,7 @@ from fastapi.responses import (
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
+    SceneRequest,
     AppSettings, AssistantMemory, CharacterMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient, ExprEvent
@@ -1452,6 +1453,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
     if not card:
         raise HTTPException(400, "session has no character")
+    if req.continue_turn and card.chat_mode == "assistant":
+        raise HTTPException(400, "Continue is for roleplay chats")
 
     if req.regenerate:
         # Re-roll: pop the last char turn (keep it + its cached emotions as swipes).
@@ -1463,7 +1466,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         _pending_swipes, _pending_exprs = prev_swipes, prev_exprs
     else:
         _pending_swipes, _pending_exprs = [], []
-        session.messages.append(ChatMessage(role="user", content=req.input_text))
+        if not req.continue_turn:          # Continue: she goes on without a new user message
+            session.messages.append(ChatMessage(role="user", content=req.input_text))
 
     scenario = session.relationship is not None
     rel = session.relationship if scenario else _load_relationship(cur, session.character_id, persona.id)
@@ -1663,42 +1667,147 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             done_evt["milestones"] = milestone_toasts
         yield _sse(done_evt)
 
-    async def gen():
-        """``_turn`` with a keep-alive. After the last token, the turn still runs model calls
-        (expression, relationship activity, the memory summary and long-term fold) and
-        sends nothing until ``done``. In a long chat that took over 30 s, pytincture's
-        BFF_STREAM_IDLE_TIMEOUT_SECONDS closed the stream, which cancelled the turn before
-        ``_save`` — the reply had streamed in full and then vanished on reload. A ``ping``
-        every few seconds of silence keeps the stream open; every client ignores it."""
-        q: asyncio.Queue = asyncio.Queue()
-        end = object()
+    return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
 
-        async def pump():
-            try:
-                async for item in _turn():
-                    await q.put(item)
-            finally:
-                await q.put(end)
 
-        task = asyncio.create_task(pump())
+async def _keepalive(turn):
+    """``turn()`` with a keep-alive. After the last token, a chat turn still runs model calls
+    (expression, relationship activity) and sends nothing until ``done``, and a long prompt
+    can sit silent before the first token. In a long chat that took over 30 s, pytincture's
+    BFF_STREAM_IDLE_TIMEOUT_SECONDS closed the stream, which cancelled the turn before it
+    was saved — the reply had streamed in full and then vanished on reload. A ``ping``
+    every few seconds of silence keeps the stream open; every client ignores it."""
+    q: asyncio.Queue = asyncio.Queue()
+    end = object()
+
+    async def pump():
         try:
-            while True:
-                try:
-                    item = await asyncio.wait_for(q.get(), STREAM_KEEPALIVE_S)
-                except asyncio.TimeoutError:
-                    yield _sse({"ping": True})
-                    continue
-                if item is end:
-                    break
-                yield item
-            await task                    # surface an exception from the turn
+            async for item in turn():
+                await q.put(item)
         finally:
-            # Client gone (Stop, closed tab): cancel the turn as before — "Stop" means
-            # the turn is not saved.
-            if not task.done():
-                task.cancel()
+            await q.put(end)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(q.get(), STREAM_KEEPALIVE_S)
+            except asyncio.TimeoutError:
+                yield _sse({"ping": True})
+                continue
+            if item is end:
+                break
+            yield item
+        await task                    # surface an exception from the turn
+    finally:
+        # Client gone (Stop, closed tab): cancel the turn — "Stop" means it is not saved.
+        if not task.done():
+            task.cancel()
+
+
+# --------------------------------------------------------------------------
+# Narrator events and drafts of {{user}}'s reply — roleplay chats only.
+# The narrator writes a neutral scene event into the chat (role "narrator"); she can
+# then react to it (chat with continue_turn) or {{user}} answers. The draft writes
+# {{user}}'s next message for the composer — streamed, never saved. Neither touches
+# mood, the relationship or expressions.
+# --------------------------------------------------------------------------
+def _scene_parts(req: SceneRequest, cur: Ctx):
+    session = _load(cur.sessions, req.session_id, ChatSession)
+    if not session:
+        raise HTTPException(404, "session not found")
+    card = _load(cur.cards, session.character_id, CharacterCard)
+    if not card:
+        raise HTTPException(400, "session has no character")
+    if card.chat_mode == "assistant":
+        raise HTTPException(400, "the narrator is for roleplay chats")
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    return session, card, persona
+
+
+def _no_think(cur: Ctx, messages: list) -> None:
+    """Same Qwen3 switch as chat(): /no_think on the last user turn when thinking is off."""
+    if _load_settings(cur).disable_thinking:
+        messages[-1]["content"] += " /no_think"
+
+
+def _scene_params(session: ChatSession, max_tokens: int, stop: list[str]) -> dict:
+    params = prompt_builder.kobold_params(session)
+    params["max_tokens"] = min(params.get("max_tokens") or max_tokens, max_tokens)
+    params["stop"] = list(params.get("stop") or []) + stop
+    return params
+
+
+async def _stream_text(messages: list, params: dict, acc: list):
+    """Tokens as SSE; the text collects in acc[0]. Expression beats are dropped."""
+    acc.append("")
+    async for tok in kobold.chat_generate_stream(messages, params):
+        if isinstance(tok, ExprEvent):
+            continue
+        acc[0] += tok
+        yield _sse({"token": tok})
+
+
+@app.post("/api/narrate")
+async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
+    session, card, persona = _scene_parts(req, cur)
+    replace_id = ""
+    if req.replace and session.messages and session.messages[-1].role == "narrator":
+        replace_id = session.messages[-1].id
+        session.messages.pop()                       # re-roll: the narration it replaces
+    messages = prompt_builder.build_narrator_messages(card, persona, session, req.direction)
+    _no_think(cur, messages)
+    # One paragraph: past a blank line the narrator had moved on to writing her lines.
+    params = _scene_params(session, 220, [f"\n{card.name}:", f"\n{persona.name}:", "\n\n"])
+
+    async def _turn():
+        acc: list = []
+        try:
+            async for ev in _stream_text(messages, params, acc):
+                yield ev
+        except Exception as e:
+            yield _sse({"error": str(e)})
+            return
+        text = prompt_builder.clean_piece(acc[0], ["Narrator", "Narration"])
+        if not text:
+            yield _sse({"error": "the narrator came up empty — try again"})
+            return
+        msg = ChatMessage(role="narrator", content=text)
+        live = _load(cur.sessions, session.id, ChatSession)     # fresh: never write an old copy
+        if live is None:
+            yield _sse({"error": "that chat no longer exists"})
+            return
+        if replace_id and live.messages and live.messages[-1].id == replace_id:
+            live.messages.pop()
+        live.messages.append(msg)
+        _save_turn(cur, live)
+        _spawn_memory_job(cur, live.id)
+        yield _sse({"done": True, "message_id": msg.id})
+
+    return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
+
+
+@app.post("/api/draft")
+async def draft_reply(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
+    """{{user}}'s next message, written for the composer. Nothing is saved."""
+    session, card, persona = _scene_parts(req, cur)
+    messages = prompt_builder.build_draft_messages(card, persona, session, req.direction)
+    _no_think(cur, messages)
+    # One paragraph: past a blank line the model moved on to her side of the scene
+    # ("*Hermione examines the letter…*") — the speaker stops alone didn't catch that.
+    params = _scene_params(session, 200, [f"\n{card.name}:", "\nNarrator:", "\n\n"])
+
+    async def _turn():
+        acc: list = []
+        try:
+            async for ev in _stream_text(messages, params, acc):
+                yield ev
+        except Exception as e:
+            yield _sse({"error": str(e)})
+            return
+        yield _sse({"done": True, "text": prompt_builder.clean_piece(acc[0], [persona.name])})
+
+    return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
 
 
 # --------------------------------------------------------------------------

@@ -190,7 +190,8 @@ class ChatView:
             '<button class="pt-jump" id="ch-jump" hidden><i class="mdi mdi-arrow-down"></i>Jump to latest</button>'
             '<div class="pt-inputbar">'
             '<div class="pt-sugs" id="ch-sugs"></div>'
-            '<div class="pt-inrow">'
+            + self._rpbar_html()
+            + '<div class="pt-inrow">'
             '<button class="pt-ibtn" data-menu="input" title="More options"><i class="mdi mdi-menu"></i></button>'
             f'<textarea id="ch-input" rows="1" placeholder="Message {esc(card["name"])}…" '
             'aria-label="Message"></textarea>'
@@ -218,6 +219,49 @@ class ChatView:
             self.listeners.on(ptt, name, self._on_ptt)
         self._attach_voice()
         inp.focus()
+
+    def _roleplay(self) -> bool:
+        return self.data.get("card", {}).get("mode") != "assistant"
+
+    def _rpbar_html(self) -> str:
+        """Roleplay only: the narrator, her next beat, and a draft of the user's reply.
+        Assistant chats are plain back-and-forth and get none of it."""
+        if not self._roleplay():
+            return ""
+        name = esc(self._first_name())
+        return (
+            '<div class="pt-rpbar" id="ch-rpbar">'
+            '<button class="pt-rpbtn" data-rp="narrate" title="The narrator describes something '
+            'happening in the scene. Type in the box first to say what.">'
+            '<i class="mdi mdi-feather"></i>Narrate</button>'
+            f'<button class="pt-rpbtn" data-rp="continue" id="ch-rp-cont" title="{name} takes the '
+            f'next turn without you saying anything"><i class="mdi mdi-play"></i>'
+            f'<span id="ch-rp-cont-label">{name} continues</span></button>'
+            '<button class="pt-rpbtn" data-rp="draft" title="Write your reply into the box for you '
+            'to edit before sending. Type a few words first to steer it.">'
+            '<i class="mdi mdi-pencil-outline"></i>Write for me</button>'
+            '</div>')
+
+    def _first_name(self) -> str:
+        """"Hermione responds", not "Hermione Granger responds" — the bar fits a phone."""
+        return (self.data["card"]["name"] or "").split()[0] if self.data["card"]["name"].strip() else "Companion"
+
+    def _sync_rpbar(self) -> None:
+        label = by_id("ch-rp-cont-label")
+        if not label:
+            return
+        msgs = self.data["session"]["messages"]
+        name = self._first_name()
+        label.textContent = (f"{name} responds" if msgs and msgs[-1]["role"] == "narrator"
+                             else f"{name} continues")
+
+    def _rerollable(self) -> int:
+        """Index of the reply "Another take" re-rolls, or -1. Not when a narration came
+        after it: the re-roll would answer the narration and leave this reply behind."""
+        msgs = self.data["session"]["messages"]
+        if len(msgs) < 2 or msgs[-1]["role"] == "narrator":
+            return -1
+        return max((i for i, m in enumerate(msgs) if m["role"] == "char"), default=-1)
 
     def _hint(self) -> str:
         name = esc(self.data["card"]["name"])
@@ -261,20 +305,33 @@ class ChatView:
         if not box:
             return
         msgs = self.data["session"]["messages"]
-        last_char = max((i for i, m in enumerate(msgs) if m["role"] == "char"), default=-1)
+        last_char = self._rerollable()
         out, day = [], ""
         for i, m in enumerate(msgs):
-            if m["role"] not in ("char", "user"):
+            if m["role"] not in ("char", "user", "narrator"):
                 continue
             key, _t = _when(m.get("timestamp", ""))
             if key and key != day:
                 day = key
                 out.append(f'<div class="pt-day"><span>{esc(_day_label(key))}</span></div>')
-            out.append(self._msg_html(m, i, i == last_char and len(msgs) > 1))
+            out.append(self._msg_html(m, i, i == last_char))
         box.innerHTML = "".join(out)
+        self._sync_rpbar()
         self._scroll_bottom()
 
+    def _narration_html(self, m: dict) -> str:
+        _key, time = _when(m.get("timestamp", ""))
+        head = "Narrator" + (f" · {esc(time)}" if time else "")
+        body = (self._editor_html(m, m["content"]) if self.editing == m["id"]
+                else f'<div class="pt-bubble">{md(m["content"])}</div>')
+        return (f'<div class="pt-msg narrator" data-mid="{esc(m["id"])}">'
+                f'<div class="pt-msg-col"><div class="pt-msg-head"><i class="mdi mdi-feather"></i> {head}</div>'
+                f'{body}<div class="pt-macts"><button class="pt-mbtn" data-mmenu="{esc(m["id"])}" '
+                'title="Message actions"><i class="mdi mdi-dots-horizontal"></i></button></div></div></div>')
+
     def _msg_html(self, m: dict, i: int, swipeable: bool) -> str:
+        if m["role"] == "narrator":
+            return self._narration_html(m)
         card, persona = self.data["card"], self.data["persona"]
         char = m["role"] == "char"
         _key, time = _when(m.get("timestamp", ""))
@@ -315,8 +372,9 @@ class ChatView:
 
     def _editor_html(self, m: dict, content: str) -> str:
         mine = m["role"] == "user"
-        caption = ("Editing your message — Save & resend picks the story up from here."
-                   if mine else f"Editing {esc(self.data['card']['name'])}'s reply.")
+        caption = ("Editing your message — Save & resend picks the story up from here." if mine
+                   else "Editing the narration." if m["role"] == "narrator"
+                   else f"Editing {esc(self.data['card']['name'])}'s reply.")
         buttons = ('<button class="pt-btn small ghost" data-edit="cancel">Cancel</button>'
                    + ('<button class="pt-btn small" data-edit="save">Save</button>'
                       '<button class="pt-btn small primary" data-edit="resend">Save &amp; resend</button>'
@@ -394,16 +452,18 @@ class ChatView:
             btn.classList.toggle("stop", on)
             btn.title = "Stop" if on else "Send"
             btn.innerHTML = '<i class="mdi mdi-stop"></i>' if on else '<i class="mdi mdi-send"></i>'
+        for b in (self.root.querySelectorAll("[data-rp]") if self.root is not None else []):
+            b.disabled = on
 
-    def send(self, text: str, regenerate: bool = False, restore: str = "") -> None:
+    def send(self, text: str, regenerate: bool = False, restore: str = "", cont: bool = False) -> None:
         if self.streaming or not self.data:
             return
         text = (text or "").strip()
-        if not text and not regenerate:
+        if not text and not regenerate and not cont:
             return
-        self.task = spawn(self._stream(text, regenerate, restore or text), "chat")
+        self.task = spawn(self._stream(text, regenerate, restore or text, cont), "chat")
 
-    async def _stream(self, text: str, regenerate: bool, restore: str) -> None:
+    async def _stream(self, text: str, regenerate: bool, restore: str, cont: bool = False) -> None:
         card = self.data["card"]
         box = by_id("ch-msgs")
         msgs = self.data["session"]["messages"]
@@ -433,7 +493,7 @@ class ChatView:
         v = voice()
         if v:
             v.beginReply()
-        stream = Chat().send(self.sid, text, bool(regenerate))
+        stream = Chat().send(self.sid, text, bool(regenerate), bool(cont))
         try:
             async for ev in stream:
                 if not isinstance(ev, dict):
@@ -496,6 +556,121 @@ class ChatView:
         if done:
             self.app.schedule_sweep(self.sid, bool(self.data.get("scenario")))
         await self.app.refresh()
+
+    # --- narrator + draft (roleplay) ----------------------------------------------
+    def narrate(self, direction: str = "", replace: bool = False) -> None:
+        if self.streaming or not self.data or not self._roleplay():
+            return
+        self.task = spawn(self._narrate(direction.strip(), replace), "narrate")
+
+    async def _narrate(self, direction: str, replace: bool) -> None:
+        box = by_id("ch-msgs")
+        msgs = self.data["session"]["messages"]
+        if replace and msgs and msgs[-1]["role"] == "narrator" and box:
+            node = box.querySelector(f'[data-mid="{msgs[-1]["id"]}"]')
+            if node:
+                node.remove()
+        if box:
+            box.insertAdjacentHTML(
+                "beforeend",
+                '<div class="pt-msg narrator live" id="ch-live"><div class="pt-msg-col">'
+                '<div class="pt-msg-head"><i class="mdi mdi-feather"></i> Narrator</div>'
+                '<div class="pt-bubble"><span class="pt-typing"><i></i><i></i><i></i></span></div></div></div>')
+        by_id("ch-sugs").hidden = True
+        self._scroll_bottom()
+        self._set_streaming(True)
+        self.stopped = False
+        acc, done, error = "", None, ""
+        stream = Chat().narrate(self.sid, direction, bool(replace))
+        try:
+            async for ev in stream:
+                if not isinstance(ev, dict):
+                    continue
+                if "token" in ev:
+                    stick = self._near_bottom()
+                    acc += ev["token"]
+                    live = by_id("ch-live")
+                    if live:
+                        live.querySelector(".pt-bubble").innerHTML = md(acc) + '<span class="pt-cursor"></span>'
+                    if stick:
+                        self._scroll_bottom()
+                elif "error" in ev:
+                    error = str(ev["error"])
+                elif ev.get("done"):
+                    done = ev
+        except asyncio.CancelledError:
+            self.stopped = True
+        finally:
+            try:
+                await stream.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self._set_streaming(False)
+        r = await Chat().open(self.sid)
+        if isinstance(r, dict) and r.get("ok") and self.root is not None:
+            self.data = r
+            self._render_messages()
+            self._render_sugs()
+        restore = direction if (self.stopped or error) else ""
+        if self.stopped:
+            toast("Stopped — the narration was not saved.", "info", 4000)
+        elif error:
+            toast(f"The narrator could not go on: {error}", "error", 8000)
+        inp = by_id("ch-input")
+        if restore and inp and not str(inp.value or "").strip():
+            inp.value = restore
+            self._grow()
+        if done:
+            self.app.schedule_sweep(self.sid, bool(self.data.get("scenario")))
+            await self.app.refresh()
+
+    def draft(self, direction: str = "") -> None:
+        if self.streaming or not self.data or not self._roleplay():
+            return
+        self.task = spawn(self._draft(direction.strip()), "write for me")
+
+    async def _draft(self, direction: str) -> None:
+        """Stream a draft of the user's reply into the box. Nothing is sent or saved."""
+        inp = by_id("ch-input")
+        if inp is None:
+            return
+        inp.readOnly = True
+        inp.value = ""
+        inp.placeholder = "Writing your reply…"
+        self._set_streaming(True)
+        self.stopped = False
+        acc, final, error = "", None, ""
+        stream = Chat().draft(self.sid, direction)
+        try:
+            async for ev in stream:
+                if not isinstance(ev, dict):
+                    continue
+                if "token" in ev:
+                    acc += ev["token"]
+                    inp.value = acc
+                    self._grow()
+                elif "error" in ev:
+                    error = str(ev["error"])
+                elif ev.get("done"):
+                    final = str(ev.get("text") or "")
+        except asyncio.CancelledError:
+            self.stopped = True
+        finally:
+            try:
+                await stream.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self._set_streaming(False)
+            inp.readOnly = False
+            inp.placeholder = f'Message {self.data["card"]["name"]}…'
+        if final:
+            inp.value = final                       # the cleaned text (no name label)
+        elif error or not acc.strip():
+            inp.value = direction                   # give back what they typed
+            if error:
+                toast(f"Could not write your reply: {error}", "error", 8000)
+        self._grow()
+        inp.focus()
 
     def stop(self) -> None:
         if self.task is not None and not self.task.done():
@@ -601,6 +776,23 @@ class ChatView:
             else:
                 v.handsFree()
             return
+        rp = closest(ev, "[data-rp]")
+        if rp:
+            if rp.disabled or self.streaming:
+                return
+            which = attr(rp, "data-rp")
+            inp = by_id("ch-input")
+            typed = str(inp.value or "") if inp else ""
+            if which == "continue":
+                self.send("", cont=True)
+            elif which == "narrate":
+                if inp:
+                    inp.value = ""                  # the typed text steers the narrator
+                    self._grow()
+                self.narrate(typed)
+            elif which == "draft":
+                self.draft(typed)
+            return
         if closest(ev, "#ch-jump"):
             self._scroll_bottom()
             return
@@ -632,7 +824,7 @@ class ChatView:
         if self.streaming:
             return
         msgs = self.data["session"]["messages"]
-        i = max((k for k, m in enumerate(msgs) if m["role"] == "char"), default=-1)
+        i = self._rerollable()
         if i < 0:
             return
         m = msgs[i]
@@ -661,15 +853,18 @@ class ChatView:
         m = self._msg(mid)
         if m is None:
             return
-        last_char = max((i for i, x in enumerate(msgs) if x["role"] == "char"), default=-1)
+        last_char = self._rerollable()
         idx = msgs.index(m)
         items = []
-        if m["role"] == "char" and idx == last_char and len(msgs) > 1:
+        if m["role"] == "narrator" and idx == len(msgs) - 1:
+            items.append(MenuItem(id="renarrate", label="Another take", icon="mdi-autorenew"))
+        if m["role"] == "char" and idx == last_char:
             items.append(MenuItem(id="regen", label="Another take", icon="mdi-autorenew"))
         if m["role"] == "char":
             items.append(MenuItem(id="speak", label="Read aloud", icon="mdi-volume-high"))
         items += [
-            MenuItem(id="edit", label="Edit & resend" if m["role"] == "user" else "Edit reply",
+            MenuItem(id="edit", label="Edit & resend" if m["role"] == "user"
+                     else "Edit narration" if m["role"] == "narrator" else "Edit reply",
                      icon="mdi-pencil-outline"),
             MenuItem(id="copy", label="Copy", icon="mdi-content-copy"),
         ]
@@ -711,8 +906,10 @@ class ChatView:
         mid = self._menu_mid
         card = self.data["card"]
         if item == "regen":
-            if not self.streaming and len(self.data["session"]["messages"]) > 1:
+            if not self.streaming and self._rerollable() >= 0:
                 self.send("", regenerate=True)
+        elif item == "renarrate":
+            self.narrate("", replace=True)
         elif item == "edit" and mid:
             self.editing = mid
             self._render_messages()

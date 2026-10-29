@@ -202,7 +202,7 @@ class Persona(BaseModel):
 # ---------------------------------------------------------------------------
 class ChatMessage(BaseModel):
     id: str = Field(default_factory=_uid)
-    role: str                            # "char" | "user" | "system"
+    role: str                            # "char" | "user" | "narrator" (a scene event, roleplay) | "system"
     content: str
     timestamp: str = Field(default_factory=_now)
     image: Optional[str] = None          # optional inline base64 PNG
@@ -359,6 +359,13 @@ class RelationshipPreset(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
 
+class SceneRequest(BaseModel):
+    """A narrator event or a draft of {{user}}'s reply (roleplay chats only)."""
+    session_id: str
+    direction: str = ""                  # optional: what should happen / what {{user}} wants to do
+    replace: bool = False                # narrate: re-roll the narration that is the last message
+
+
 class KoboldSettings(BaseModel):
     url: str = "http://koboldcpp:5001"
 
@@ -376,3 +383,5 @@ class ChatRequest(BaseModel):
     session_id: str
     input_text: str
     regenerate: bool = False             # re-roll the last char message (swipe)
+    continue_turn: bool = False          # roleplay: she takes a turn with no new user message
+                                         # (after a narrator event, or to carry the scene on)

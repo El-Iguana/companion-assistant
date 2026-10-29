@@ -17,7 +17,7 @@ from models.schema import (ChatSession, CharacterCard, CharacterMemory,
                            MemoryFact, Persona)
 from services import embeddings
 from services.kobold import KoboldClient
-from services.prompt_builder import substitute_macros
+from services.prompt_builder import substitute_macros, speaker
 
 # Defaults for the rolling summarizer. Overridable per-user via AppSettings
 # (summarize_after / keep_recent / summary_max_tokens); these constants remain
@@ -60,7 +60,7 @@ def needs_summary(session: ChatSession, summarize_after: int = SUMMARIZE_AFTER) 
 def _transcript(messages, char_name: str, user_name: str) -> str:
     """Speaker-labelled transcript of `messages`, macros already substituted."""
     return "\n".join(
-        f"{char_name if m.role == 'char' else user_name}: "
+        f"{speaker(m, char_name, user_name)}: "
         f"{substitute_macros(m.content, char_name, user_name)}"
         for m in messages if m.role != "system"
     )
