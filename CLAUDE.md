@@ -381,6 +381,10 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   at ~85 s) — Core 8 in 402 s, Full 28 ≈ 25 min — vs ~15 s for schnell img2img. Runs beside
   KoboldCPP (9.5 GB loaded) without OOM.
 - **Mood/valence:** per reply, `EMOTION_VALENCE` → running `session.mood` via EMA; **neutral holds**.
+  The emotion behind mood and the relationship is the sprite label when the card has sprites;
+  a roleplay card **without** sprites gets its own classify over `FULL_EMOTIONS` (the stored
+  message keeps no expression). Before 2026-10-29 the classifier only ran to pick a sprite, so
+  sprite-less cards never left Stranger (`tests/test_relationship_feel.py`).
   Header mood meter shows it.
 - **Relationship (`relationship.py`):** per (character, persona), stored `data/relationships/{cid}__{pid}.json`.
   Emotions move axes each reply (`RATE`); grows/drops, **no idle decay**. Stage derived (Stranger→Intimate,

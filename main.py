@@ -1608,13 +1608,26 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                     new_expr = "neutral"
         msg.expression = new_expr or None
 
+        # The feeling that drives mood and the relationship. With sprites it's the sprite
+        # label; without, it used to be nothing at all — the classifier only ran to pick a
+        # sprite, so a roleplay card without sprites never moved off Stranger however long
+        # the chat (Hermione: 49 replies, every axis still 0). Read it from the full set
+        # instead; the stored message keeps no expression, as there is no sprite to show.
+        # Not on a re-roll: nothing below uses it there.
+        feel = new_expr
+        if not feel and not assistant and not req.regenerate:
+            try:
+                feel = await expressions.classify(kobold, reply, labels=expressions.FULL_EMOTIONS)
+            except Exception:
+                feel = "neutral"
+
         # Update the running valence/mood (inertia): neutral holds; a clear emotion
         # advances the mood and nudges valence via EMA. Foundation for a relationship score.
-        if new_expr and new_expr != "neutral":
+        if feel and feel != "neutral":
             a = 0.35
-            v = expressions.valence_of(new_expr)
+            v = expressions.valence_of(feel)
             session.mood.valence = round(max(-1.0, min(1.0, session.mood.valence * (1 - a) + v * a)), 3)
-            session.mood.mood = new_expr
+            session.mood.mood = feel
 
         # Advance the persistent relationship (skip on re-rolls to avoid double-counting).
         # Assistant-mode cards are skipped entirely: none of this reaches their prompt
@@ -1624,10 +1637,10 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # reset — inert while the card is an assistant, intact if it is ever switched back.
         milestone_toasts = []
         if not req.regenerate and not assistant:
-            relationship.update(rel, new_expr, power, social)
+            relationship.update(rel, feel, power, social)
             # Escalation: once physical intimacy has begun and she's positively engaged, actually
             # doing acts nudges willingness toward the next rung (social acceptance modulates the pace).
-            if relationship.physical_tier(rel)[0] >= 1 and expressions.valence_of(new_expr) >= 0:
+            if relationship.physical_tier(rel)[0] >= 1 and expressions.valence_of(feel) >= 0:
                 try:
                     act = await relationship.classify_activity(kobold, reply)
                 except Exception:

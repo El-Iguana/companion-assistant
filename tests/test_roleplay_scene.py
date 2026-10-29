@@ -70,8 +70,13 @@ def model(monkeypatch):
 
     monkeypatch.setattr(main.kobold, "chat_generate_stream", tokens)
     monkeypatch.setattr(main.memory, "summarize", no_summary)
+    monkeypatch.setattr(main.expressions, "classify", _neutral)   # no model in tests
     monkeypatch.setattr(main, "STREAM_KEEPALIVE_S", 0.05)
     return state
+
+
+async def _neutral(*a, **k):
+    return "neutral"
 
 
 def _events(resp_chunks) -> list[dict]:
