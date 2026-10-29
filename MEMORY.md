@@ -23,9 +23,8 @@ the other. A companion remembers a *history*; an assistant must remember *how to
 | Semantic recall | yes (`.vec.npz` sibling) | no |
 | Route | `GET/PUT /api/memories` | `GET/PUT /api/assistant-memory` |
 
-`chat()` and `POST /sessions/{id}/sweep` each choose a pipeline and never run both (the chat flow
-uses an `_AssistantMemoryDone` sentinel to skip the companion path while keeping its exact shape
-and its best-effort wrapper). A card switched between modes leaves the other store on disk, intact
+`chat()` and `POST /sessions/{id}/sweep` each choose a pipeline and never run both (the chat
+flow's `_maintain_memory` branches once on `chat_mode`). A card switched between modes leaves the other store on disk, intact
 and inert; nothing migrates between them.
 
 Why a separate module and not a branch is in `MEMORY_PLAN.md` (Phase 6) — the short version is that
@@ -68,7 +67,11 @@ Two write triggers, both through `fold_into_longterm()`:
 
 - **threshold** — the chat flow folds forward exactly what `summarize()` just folded out of the
   verbatim window (`upto=session.memory.last_summarized_index`), so nothing leaves the live prompt
-  without being recorded durably first;
+  without being recorded durably first. **It runs after the reply** (2026-10-29): the turn saves and
+  sends `done`, then `main._memory_job` does the summary + fold in the background, one job per
+  session at a time. The job writes `summary`/`last_summarized_index` onto a fresh read only if
+  neither moved and the folded turns are unchanged (else a later turn redoes it), and
+  `_save_turn` never writes back an older summary than the one on disk;
 - **idle** — `POST /api/sessions/{id}/sweep`, armed by the frontend `SWEEP_IDLE_MS` (5 min) timer, so
   a *finished* conversation gets captured instead of being cut at an arbitrary turn boundary.
 

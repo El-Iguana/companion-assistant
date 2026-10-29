@@ -1,10 +1,11 @@
-"""The chat stream keeps itself alive while a turn finishes (main.chat).
+"""The chat stream and the memory step after it (main.chat, main._memory_job).
 
-After the last token a turn still runs model calls — expression, relationship activity,
-the memory summary and long-term fold — and used to send nothing until ``done``. pytincture
-closes a BFF stream after 30 s of silence, which cancelled the turn before it was saved:
-the reply streamed in full, then vanished on reload. These tests stand in a fake model
-whose post-reply step is slower than the keep-alive interval.
+A turn saves and sends ``done`` as soon as the reply is complete. The memory summary and
+long-term fold run afterwards in a background job, so they can overlap the next turn, an
+edit or a truncate — these tests pin down that none of those loses data. The stream also
+keeps itself alive through silence: pytincture closes a BFF stream after 30 s without an
+item, which once cancelled turns before they were saved (replies streamed in full, then
+vanished on reload).
 
     .venv/bin/python -m pytest -q tests/test_chat_stream.py
 
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 
 import main  # noqa: E402
-from models.schema import CharacterCard, ChatRequest, ChatSession, User  # noqa: E402
+from models.schema import CharacterCard, ChatMessage, ChatRequest, ChatSession, User  # noqa: E402
 from services import auth  # noqa: E402
 
 
@@ -43,23 +44,46 @@ def session(cur):
     card = CharacterCard(name="Iris")
     main._save(card, cur.cards)
     s = ChatSession(character_id=card.id, persona_id=main._default_persona(cur).id)
+    s.messages = [ChatMessage(role="char", content="hello"), ChatMessage(role="user", content="m1"),
+                  ChatMessage(role="char", content="m2")]
     main._save(s, cur.sessions)
     return s
 
 
+class Gate:
+    """Holds the fake summary step open until the test releases it."""
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+
 @pytest.fixture()
-def slow_turn(monkeypatch):
-    """Tokens arrive at once; the memory step after them is silent for 0.3 s."""
+def model(monkeypatch):
+    """Instant tokens; a summary step that folds everything but the last message, and
+    waits on a Gate when one is set."""
+    state = {"gate": None, "token_delay": 0.0}
+
     async def tokens(messages, params):
+        await asyncio.sleep(state["token_delay"])
         for t in ("Hello", " there", "."):
             yield t
 
-    async def slow_summary(*a, **k):
-        await asyncio.sleep(0.3)
+    async def summarize(kobold, session, card, persona, **k):
+        gate = state["gate"]
+        if gate:
+            gate.started.set()
+            await gate.release.wait()
+        session.memory.summary = "S"
+        session.memory.last_summarized_index = len(session.messages) - 1
+
+    async def no_fold(*a, **k):
+        return False
 
     monkeypatch.setattr(main.kobold, "chat_generate_stream", tokens)
-    monkeypatch.setattr(main.memory, "summarize", slow_summary)
+    monkeypatch.setattr(main.memory, "summarize", summarize)
+    monkeypatch.setattr(main.memory, "fold_into_longterm", no_fold)
     monkeypatch.setattr(main, "STREAM_KEEPALIVE_S", 0.05)
+    return state
 
 
 def _events(chunks: list[str]) -> list[dict]:
@@ -71,31 +95,99 @@ def _events(chunks: list[str]) -> list[dict]:
     return out
 
 
-def test_slow_finish_sends_pings_then_done_and_saves(cur, session, slow_turn):
+async def _turn(cur, session, text="hi") -> list[dict]:
+    resp = await main.chat(ChatRequest(session_id=session.id, input_text=text), cur=cur)
+    return _events([c if isinstance(c, str) else c.decode() async for c in resp.body_iterator])
+
+
+async def _jobs():
+    while main._memory_tasks:
+        await asyncio.gather(*list(main._memory_tasks))
+
+
+def _reload(cur, s) -> ChatSession:
+    return main._load(cur.sessions, s.id, ChatSession)
+
+
+def test_done_arrives_before_the_memory_step_and_the_reply_is_saved(cur, session, model):
     async def go():
-        resp = await main.chat(ChatRequest(session_id=session.id, input_text="hi"), cur=cur)
-        return [c if isinstance(c, str) else c.decode() async for c in resp.body_iterator]
+        model["gate"] = gate = Gate()
+        evs = await _turn(cur, session)            # returns while the summary is held open
+        assert evs[-1].get("done")
+        saved = _reload(cur, session)
+        assert saved.messages[-1].content == "Hello there."
+        assert saved.memory.summary == ""          # memory hasn't run yet
+        await gate.started.wait()
+        gate.release.set()
+        await _jobs()
 
-    evs = _events(asyncio.run(go()))
-    assert "".join(e["token"] for e in evs if "token" in e) == "Hello there."
-    last_token = max(i for i, e in enumerate(evs) if "token" in e)
-    assert any(e.get("ping") for e in evs[last_token:]), "no keep-alive during the silent finish"
+    asyncio.run(go())
+    assert _reload(cur, session).memory.summary == "S"
+
+
+def test_next_turn_during_the_memory_step_loses_nothing(cur, session, model):
+    async def go():
+        model["gate"] = gate = Gate()
+        await _turn(cur, session, "first")
+        await gate.started.wait()                  # job 1 is mid-summary
+        model["gate"] = None
+        await _turn(cur, session, "second")        # the next turn saves meanwhile
+        gate.release.set()
+        await _jobs()
+
+    asyncio.run(go())
+    s = _reload(cur, session)
+    assert [m.content for m in s.messages if m.role == "user"][-2:] == ["first", "second"]
+    assert s.memory.summary == "S"
+    assert s.memory.last_summarized_index == len(s.messages) - 1   # job 2 re-ran on the fresh copy
+
+
+def test_stale_turn_save_does_not_roll_back_a_newer_summary(cur, session):
+    stale = _reload(cur, session)
+    fresh = _reload(cur, session)
+    fresh.memory.summary, fresh.memory.last_summarized_index = "S", 2
+    main._save(fresh, cur.sessions)
+    stale.messages.append(ChatMessage(role="user", content="late"))
+    main._save_turn(cur, stale)
+    s = _reload(cur, session)
+    assert s.messages[-1].content == "late" and s.memory.summary == "S"
+
+
+def test_editing_a_folded_turn_during_the_memory_step_drops_the_stale_summary(cur, session, model):
+    async def go():
+        model["gate"] = gate = Gate()
+        await _turn(cur, session)
+        await gate.started.wait()
+        s = _reload(cur, session)
+        await main.edit_message(session.id, s.messages[1].id, {"content": "changed"}, cur=cur)
+        gate.release.set()
+        await _jobs()
+
+    asyncio.run(go())
+    s = _reload(cur, session)
+    assert s.messages[1].content == "changed" and s.memory.summary == ""
+
+
+def test_silence_before_the_first_token_sends_keepalives(cur, session, model):
+    model["token_delay"] = 0.3                     # a long prompt being processed
+    evs = asyncio.run(_turn(cur, session))
+    first_token = min(i for i, e in enumerate(evs) if "token" in e)
+    assert any(e.get("ping") for e in evs[:first_token])
     assert evs[-1].get("done")
-    saved = main._load(cur.sessions, session.id, ChatSession)
-    assert [m.content for m in saved.messages if m.role == "char"] == ["Hello there."]
 
 
-def test_client_leaving_mid_finish_still_does_not_save(cur, session, slow_turn):
-    """Stop / a closed tab keeps its old meaning: the turn is not saved."""
+def test_client_leaving_mid_stream_does_not_save(cur, session, model):
+    """Stop / a closed tab keeps its meaning: the turn is not saved."""
+    model["token_delay"] = 0.3
+
     async def go():
         resp = await main.chat(ChatRequest(session_id=session.id, input_text="hi"), cur=cur)
         body = resp.body_iterator
         async for c in body:
             if '"ping"' in (c if isinstance(c, str) else c.decode()):
-                break                     # leave during the silent finish
+                break                              # leave before the reply exists
         await body.aclose()
-        await asyncio.sleep(0.5)          # past when the turn would have saved
+        await asyncio.sleep(0.5)
 
     asyncio.run(go())
-    saved = main._load(cur.sessions, session.id, ChatSession)
-    assert not [m for m in saved.messages if m.role == "char"]
+    assert _reload(cur, session).messages[-1].content == "m2"

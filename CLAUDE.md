@@ -152,7 +152,7 @@ desktop/                # the native shell: transparent GTK4 + WebKitGTK window 
 tests/smoke_web.py      # Playwright smoke test (WRITES: run on a scratch library); fake mic;
                         #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
 tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep marks
-tests/test_chat_stream.py # chat stream keep-alive: a slow finish still reaches done and saves
+tests/test_chat_stream.py # chat stream keep-alive + the after-done memory job vs. concurrent turns/edits
 scripts/web-dev.sh      # run Pantheon host-side against a scratch library
 scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
@@ -335,7 +335,8 @@ POST /api/chat                             SSE stream; done carries {expression,
   mode only) → **boundary note** (always last); streams via
   `kobold.chat_generate_stream()`. System prompt enforces a **single concrete beat**, no repetition, no
   writing for {{user}}; a stop-sequence on the user's turn is added. After the reply: classify emotion,
-  update mood + relationship (skipped on re-rolls), save.
+  update mood + relationship (skipped on re-rolls), save, send `done` — then memory maintenance in the
+  background (`_memory_job`, see Conventions).
 - **Swipes:** alternates per message; each swipe's emotion cached in `swipe_expressions`. `▶` past the end regenerates.
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
 - **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;
@@ -444,12 +445,19 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 
 - Rebuild after code/template/static edits (`./run-podman.sh --rebuild`); `podman exec -i` for heredocs.
 - **The chat stream sends `{"ping": true}` every `STREAM_KEEPALIVE_S` (10 s) of silence** (`main.chat`
-  `gen()` wraps `_turn()`). After the last token a turn still makes model calls — expression,
-  relationship activity, memory summary + long-term fold — before it saves and sends `done`.
-  pytincture closes a BFF stream after `BFF_STREAM_IDLE_TIMEOUT_SECONDS` (30 s) without an item,
-  and that cancelled the turn before `_save`: the reply streamed in full, then vanished on the
-  reload with no error (2026-10-29: 5 of 24 replies in a long chat). Every client ignores unknown
-  events. Stop / a closed tab still cancels the turn unsaved. Keep anything slow inside `_turn()`.
+  `gen()` wraps `_turn()`). pytincture closes a BFF stream after `BFF_STREAM_IDLE_TIMEOUT_SECONDS`
+  (30 s) without an item, and that once cancelled turns before `_save`: the reply streamed in full,
+  then vanished on the reload with no error (2026-10-29: 5 of 24 replies in a long chat, while the
+  memory step still ran before `done`). Every client ignores unknown events. Stop / a closed tab
+  still cancels the turn unsaved.
+- **Memory maintenance runs after `done`** (`_memory_job`, 2026-10-29). A turn classifies, updates
+  the relationship, saves (`_save_turn`) and sends `done`; the summary + long-term fold then run in
+  a background task, one per session at a time (`_memory_locks`), starting from a fresh read. It can
+  overlap the next turn, an edit or a truncate, so it writes only `memory.summary` /
+  `last_summarized_index`, onto a fresh read, and only if neither moved and the folded turns are
+  unchanged (`_apply_memory`); `_save_turn` never writes back an older summary than the one on
+  disk. A dropped or lost job (restart) is harmless — the next turn re-checks the threshold.
+  Tests: `tests/test_chat_stream.py`, each guard mutation-checked.
 - **TTS backends** (`services/tts.py`): voice ids prefixed **`piper:`** route to Piper (one ONNX per voice,
   loaded from `PIPER_DIR`, cached; its espeak-ng data ships in the `piper-tts` wheel), everything else to
   Kokoro. Piper voices are **mounted, not baked** (`../jarvis` → `/app/models/piper:ro,z`) — dropping a new

@@ -1319,11 +1319,119 @@ async def truncate_after(session_id: str, message_id: str, cur: Ctx = Depends(ge
 # --------------------------------------------------------------------------
 # Chat — SSE streaming
 # --------------------------------------------------------------------------
-class _AssistantMemoryDone(Exception):
-    """Control-flow marker: the assistant memory pass ran, skip the companion one.
+# ---- memory maintenance, after the reply --------------------------------------------
+# A turn saves and sends `done` first; the summary and long-term fold run afterwards in
+# _memory_job. The user may send the next message, edit, delete or truncate while that
+# job is still waiting on the model, so:
+#   - jobs for one session run one at a time (_memory_locks) and each starts from a
+#     fresh read — the next job re-checks the threshold against what the last one did;
+#   - a job writes ONLY the two fields the memory steps change (summary,
+#     last_summarized_index), onto a fresh read, and only if neither moved since it
+#     started and the turns it folded are unchanged — otherwise it drops its result and
+#     a later turn redoes it;
+#   - a turn's own save (_save_turn) adopts a newer summary instead of writing back the
+#     one it loaded before generating.
+_memory_locks: dict[str, asyncio.Lock] = {}
+_memory_tasks: set[asyncio.Task] = set()      # strong refs: the loop keeps only weak ones
 
-    A sentinel rather than restructuring the block, so the companion path keeps
-    its exact shape and its best-effort `except Exception: pass` around it."""
+
+def _save_turn(cur: Ctx, session: ChatSession) -> None:
+    """Save a finished turn without rolling back a summary a memory job wrote meanwhile."""
+    fresh = _load(cur.sessions, session.id, ChatSession)
+    if fresh and fresh.memory.last_summarized_index > session.memory.last_summarized_index:
+        session.memory = fresh.memory
+    _save(session, cur.sessions)
+
+
+def _spawn_memory_job(cur: Ctx, session_id: str) -> asyncio.Task:
+    task = asyncio.create_task(_memory_job(cur, session_id))
+    _memory_tasks.add(task)
+    task.add_done_callback(_memory_tasks.discard)
+    return task
+
+
+async def _memory_job(cur: Ctx, session_id: str) -> None:
+    lock = _memory_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        try:
+            await _maintain_memory(cur, session_id)
+        except Exception as e:  # noqa: BLE001 — best-effort, as it always was
+            print(f"memory maintenance failed for session {session_id}: {e!r}", flush=True)
+
+
+def _memory_basis(session: ChatSession) -> tuple:
+    return (session.memory.summary, session.memory.last_summarized_index,
+            tuple((m.id, m.content) for m in session.messages))
+
+
+def _apply_memory(cur: Ctx, worked: ChatSession, basis: tuple) -> bool:
+    """Write the job's summary fields onto a fresh read, if it is still valid there."""
+    summary0, index0, msgs0 = basis
+    summary1, index1 = worked.memory.summary, worked.memory.last_summarized_index
+    if (summary1, index1) == (summary0, index0):
+        return False
+    fresh = _load(cur.sessions, worked.id, ChatSession)
+    if not fresh:
+        return False
+    if (fresh.memory.summary, fresh.memory.last_summarized_index) != (summary0, index0):
+        return False              # a sweep, truncate or clear moved it: theirs wins
+    if tuple((m.id, m.content) for m in fresh.messages)[:index1] != msgs0[:index1]:
+        return False              # a turn it folded was edited or deleted meanwhile
+    fresh.memory.summary, fresh.memory.last_summarized_index = summary1, index1
+    _save(fresh, cur.sessions)
+    return True
+
+
+async def _maintain_memory(cur: Ctx, session_id: str) -> None:
+    """The memory maintenance a turn used to run before `done` (thresholds user-tunable)."""
+    session = _load(cur.sessions, session_id, ChatSession)
+    if not session:
+        return
+    card = _load(cur.cards, session.character_id, CharacterCard)
+    if not card:
+        return
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
+    scenario = session.relationship is not None
+    basis = _memory_basis(session)
+    st = _load_settings(cur)
+    if assistant:
+        # The window still has to advance or the prompt grows without bound, but
+        # nothing narrative comes out of it: the fold writes directives, facts and task
+        # notes, and leaves session.memory.summary empty — clearing a roleplay-era one
+        # if the card was switched, since nothing rewrites that field for an assistant
+        # and a stale narrative would sit in every prompt forever.
+        keep = min(st.keep_recent, st.summarize_after - 1)
+        fold_end = len(session.messages) - keep
+        if (memory.needs_summary(session, st.summarize_after)
+                and fold_end > session.memory.last_summarized_index and not scenario):
+            am = _load_assistant_memory(cur, session.character_id, persona.id)
+            if await assistant_memory.fold(
+                    kobold, am, session, card, persona, upto=fold_end,
+                    max_tokens=st.summary_max_tokens,
+                    extract_items=st.auto_facts_enabled,
+                    max_new=st.auto_facts_max_new):
+                _save_assistant_memory(cur, am)
+                session.memory.last_summarized_index = fold_end
+    else:
+        await memory.summarize(kobold, session, card, persona,
+                               summarize_after=st.summarize_after,
+                               keep_recent=st.keep_recent,
+                               max_tokens=st.summary_max_tokens)
+        # Threshold trigger: fold forward exactly what summarize() just folded out of
+        # the verbatim window, so nothing leaves the live prompt without being recorded
+        # durably first. Loaded here, right before the fold — a concurrent sweep may
+        # have advanced it, and writing back a stale copy would lose that.
+        if not scenario:
+            cm = _load_character_memory(cur, session.character_id, persona.id)
+            if await memory.fold_into_longterm(
+                    kobold, cm, session, card, persona,
+                    upto=session.memory.last_summarized_index,
+                    max_tokens=st.summary_max_tokens,
+                    index_path=_memory_index_path(cur, session.character_id, persona.id),
+                    extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new):
+                _save_character_memory(cur, cm)
+    _apply_memory(cur, session, basis)
 
 
 def _sse(obj: dict) -> str:
@@ -1540,53 +1648,12 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
 
         session.messages.append(msg)
 
-        # Best-effort long-term memory maintenance (thresholds are user-tunable).
-        try:
-            st = _load_settings(cur)
-            if assistant:
-                # The window still has to advance or the prompt grows without
-                # bound, but nothing narrative comes out of it: the fold writes
-                # directives, facts and task notes, and leaves session.memory.summary
-                # empty — clearing a roleplay-era one if the card was switched, since
-                # nothing rewrites that field for an assistant and a stale narrative
-                # would sit in every prompt forever.
-                keep = min(st.keep_recent, st.summarize_after - 1)
-                fold_end = len(session.messages) - keep
-                if (memory.needs_summary(session, st.summarize_after)
-                        and fold_end > session.memory.last_summarized_index and not scenario):
-                    am = _load_assistant_memory(cur, session.character_id, persona.id)
-                    if await assistant_memory.fold(
-                            kobold, am, session, card, persona, upto=fold_end,
-                            max_tokens=st.summary_max_tokens,
-                            extract_items=st.auto_facts_enabled,
-                            max_new=st.auto_facts_max_new):
-                        _save_assistant_memory(cur, am)
-                        session.memory.last_summarized_index = fold_end
-                raise _AssistantMemoryDone
-            await memory.summarize(kobold, session, card, persona,
-                                   summarize_after=st.summarize_after,
-                                   keep_recent=st.keep_recent,
-                                   max_tokens=st.summary_max_tokens)
-            # Threshold trigger: fold forward exactly what summarize() just folded
-            # out of the verbatim window, so nothing leaves the live prompt without
-            # being recorded durably first. Reloaded rather than reusing char_mem
-            # from above — a concurrent sweep may have advanced it mid-turn, and
-            # writing back a stale copy would lose that.
-            if not scenario:
-                cm = _load_character_memory(cur, session.character_id, persona.id)
-                if await memory.fold_into_longterm(
-                        kobold, cm, session, card, persona,
-                        upto=session.memory.last_summarized_index,
-                        max_tokens=st.summary_max_tokens,
-                        index_path=_memory_index_path(cur, session.character_id, persona.id),
-                        extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new):
-                    _save_character_memory(cur, cm)
-        except _AssistantMemoryDone:
-            pass          # assistant path finished above; the companion path is skipped
-        except Exception:
-            pass
-
-        _save(session, cur.sessions)
+        # Saved now, and memory maintenance runs after `done` in a background job
+        # (_memory_job). It is one to several model calls — the summary and the
+        # long-term fold — and the reply is complete without them; holding `done` for
+        # them kept her "thinking" for 30 s+ after the text was on screen.
+        _save_turn(cur, session)
+        _spawn_memory_job(cur, session.id)
         done_evt = {"done": True, "message_id": msg.id, "expression": msg.expression,
                     "mood": session.mood.mood, "valence": session.mood.valence,
                     # Omitted for assistants — a strip that never moves again is worse

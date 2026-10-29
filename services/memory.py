@@ -105,8 +105,8 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
     # tense" produced pages of narrative prose that then sat above an assistant's
     # history as a worked demonstration of narrating. Assistants get notes.
     #
-    # UNREACHABLE since the pipelines split: `chat()` raises `_AssistantMemoryDone`
-    # before this function's only call site, so an assistant never gets here. Kept
+    # UNREACHABLE since the pipelines split: `main._maintain_memory` takes the
+    # assistant branch before this function's only call site, so an assistant never gets here. Kept
     # as a guard, not as a live path — if a future caller does reach it, it must
     # still not emit narration. The assistant equivalent is
     # `assistant_memory.NOTES_PROMPT`; change that one.
