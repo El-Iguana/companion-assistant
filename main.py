@@ -1330,6 +1330,11 @@ def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
 
+# Seconds of silence before the chat stream sends a keep-alive. Must stay well under
+# pytincture's BFF_STREAM_IDLE_TIMEOUT_SECONDS (30 s default), which closes a quiet stream.
+STREAM_KEEPALIVE_S = 10.0
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     session = _load(cur.sessions, req.session_id, ChatSession)
@@ -1446,7 +1451,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     tagged: list[str] = []
     known = set(expressions.CORE_EMOTIONS) | set(expressions.FULL_EMOTIONS)
 
-    async def gen():
+    async def _turn():
         acc = ""
         try:
             async for tok in kobold.chat_generate_stream(messages, params):
@@ -1590,6 +1595,41 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         if milestone_toasts:
             done_evt["milestones"] = milestone_toasts
         yield _sse(done_evt)
+
+    async def gen():
+        """``_turn`` with a keep-alive. After the last token, the turn still runs model calls
+        (expression, relationship activity, the memory summary and long-term fold) and
+        sends nothing until ``done``. In a long chat that took over 30 s, pytincture's
+        BFF_STREAM_IDLE_TIMEOUT_SECONDS closed the stream, which cancelled the turn before
+        ``_save`` — the reply had streamed in full and then vanished on reload. A ``ping``
+        every few seconds of silence keeps the stream open; every client ignores it."""
+        q: asyncio.Queue = asyncio.Queue()
+        end = object()
+
+        async def pump():
+            try:
+                async for item in _turn():
+                    await q.put(item)
+            finally:
+                await q.put(end)
+
+        task = asyncio.create_task(pump())
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(q.get(), STREAM_KEEPALIVE_S)
+                except asyncio.TimeoutError:
+                    yield _sse({"ping": True})
+                    continue
+                if item is end:
+                    break
+                yield item
+            await task                    # surface an exception from the turn
+        finally:
+            # Client gone (Stop, closed tab): cancel the turn as before — "Stop" means
+            # the turn is not saved.
+            if not task.done():
+                task.cancel()
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 

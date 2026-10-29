@@ -48,7 +48,7 @@ PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871 (PANTHEON
 PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
   CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
   uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
-.venv/bin/python -m pytest -q tests/test_messages.py
+.venv/bin/python -m pytest -q tests/test_messages.py tests/test_chat_stream.py
 ```
 
 | var | default | what |
@@ -152,6 +152,7 @@ desktop/                # the native shell: transparent GTK4 + WebKitGTK window 
 tests/smoke_web.py      # Playwright smoke test (WRITES: run on a scratch library); fake mic;
                         #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
 tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep marks
+tests/test_chat_stream.py # chat stream keep-alive: a slow finish still reaches done and saves
 scripts/web-dev.sh      # run Pantheon host-side against a scratch library
 scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
@@ -442,6 +443,13 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 ## Conventions & gotchas
 
 - Rebuild after code/template/static edits (`./run-podman.sh --rebuild`); `podman exec -i` for heredocs.
+- **The chat stream sends `{"ping": true}` every `STREAM_KEEPALIVE_S` (10 s) of silence** (`main.chat`
+  `gen()` wraps `_turn()`). After the last token a turn still makes model calls — expression,
+  relationship activity, memory summary + long-term fold — before it saves and sends `done`.
+  pytincture closes a BFF stream after `BFF_STREAM_IDLE_TIMEOUT_SECONDS` (30 s) without an item,
+  and that cancelled the turn before `_save`: the reply streamed in full, then vanished on the
+  reload with no error (2026-10-29: 5 of 24 replies in a long chat). Every client ignores unknown
+  events. Stop / a closed tab still cancels the turn unsaved. Keep anything slow inside `_turn()`.
 - **TTS backends** (`services/tts.py`): voice ids prefixed **`piper:`** route to Piper (one ONNX per voice,
   loaded from `PIPER_DIR`, cached; its espeak-ng data ships in the `piper-tts` wheel), everything else to
   Kokoro. Piper voices are **mounted, not baked** (`../jarvis` → `/app/models/piper:ro,z`) — dropping a new
