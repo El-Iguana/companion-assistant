@@ -6,7 +6,7 @@ for the PNG-embedded (tEXt `chara` / `ccv3`) import + export.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime
@@ -23,6 +23,11 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 # App settings (singleton — data/settings/app.json)
 # ---------------------------------------------------------------------------
+# Context windows the Settings screen offers (tokens). 0 = Auto: use whatever the
+# backend runs at. Below 4096 the memory folds (instructions + known facts + a
+# 1200-token summary) no longer fit, so that is the floor.
+CONTEXT_SIZES = (4096, 6144, 8192, 12288, 16384, 24576, 32768)
+
 class AppSettings(BaseModel):
     """Global, non-per-character settings. Voice / hands-free config lives here."""
     hands_free: bool = False             # continuous open-mic listening on/off
@@ -55,6 +60,16 @@ class AppSettings(BaseModel):
     # no UI for choosing, so this is where the choice lives.
     desktop_card_id: str = ""
     disable_thinking: bool = False       # append /no_think so Qwen3 skips <think> reasoning (faster replies)
+    # Context window to budget prompts against (services/context.py). 0 = Auto, the
+    # backend's real limit; otherwise one of CONTEXT_SIZES, never above the backend's.
+    context_limit: int = 0
+
+    @field_validator("context_limit")
+    @classmethod
+    def _standard_context(cls, v: int) -> int:
+        if v != 0 and v not in CONTEXT_SIZES:
+            raise ValueError(f"must be 0 (Auto) or one of {', '.join(map(str, CONTEXT_SIZES))}")
+        return v
     # Long-term memory: rolling-summarizer tuning (services/memory.py).
     summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
     keep_recent: int = Field(12, ge=2, le=100)              # most recent turns always kept verbatim

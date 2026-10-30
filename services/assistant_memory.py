@@ -24,7 +24,7 @@ from datetime import datetime
 
 from models.schema import (AssistantMemory, CharacterCard, ChatSession,
                            MemoryFact, Persona)
-from services.memory import _fold_chunks, _transcript
+from services.memory import FOLD_CONTEXT_TOKENS, _fold_chunks, _transcript, fold_budget
 
 MAX_DIRECTIVES = 20       # instructions are few and load-bearing; a long list is a smell
 MAX_FACTS = 40
@@ -232,7 +232,8 @@ async def extract(kobold, mem: AssistantMemory, transcript: str,
 async def fold(kobold, mem: AssistantMemory, session: ChatSession,
                card: CharacterCard, persona: Persona, upto: int | None = None,
                max_tokens: int = 400, extract_items: bool = True,
-               max_new: int = MAX_NEW_PER_FOLD) -> bool:
+               max_new: int = MAX_NEW_PER_FOLD,
+               context_tokens: int = FOLD_CONTEXT_TOKENS) -> bool:
     """Fold this session's turns into `mem`. True if it changed. Never raises.
 
     Same high-water-mark bookkeeping and chunked passes as the companion fold —
@@ -244,7 +245,8 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
         return False
 
     char, user = card.name or "Assistant", persona.name or "User"
-    chunks = _fold_chunks(session.messages, start, upto, char, user)
+    chunks = _fold_chunks(session.messages, start, upto, char, user,
+                          fold_budget(context_tokens))
     if not chunks:
         mem.swept_sessions[session.id] = upto
         mem.updated_at = datetime.now().isoformat()

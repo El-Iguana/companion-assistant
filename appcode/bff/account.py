@@ -14,7 +14,7 @@ from pytincture.dataclass import backend_for_frontend
 
 # AppSettings fields the Settings screen edits. ``put_settings`` ignores unknown keys too.
 SETTINGS = (
-    "disable_thinking", "summarize_after", "keep_recent", "summary_max_tokens",
+    "disable_thinking", "context_limit", "summarize_after", "keep_recent", "summary_max_tokens",
     "recall_enabled", "recall_top_k", "auto_facts_enabled", "auto_facts_max_new",
     "wake_word", "wake_mode", "sleep_phrase", "farewell", "sleep_after_s",
     "vad_silence_ms", "vad_threshold", "full_duplex", "desktop_card_id",
@@ -39,7 +39,14 @@ class Account:
         cur = self._cur()
         if cur is None:
             return {"ok": False, "error": "not signed in", "signed_out": True}
-        return {"ok": True, "settings": await main.get_settings(cur=cur),
+        from models.schema import CONTEXT_SIZES
+        from services import context
+
+        settings = await main.get_settings(cur=cur)
+        backend = await main.kobold.context_limit()
+        return {"ok": True, "settings": settings,
+                "context": {"backend": backend, "sizes": list(CONTEXT_SIZES),
+                            "effective": context.effective(settings.get("context_limit") or 0, backend)},
                 "me": {"username": cur.user.username, "role": cur.user.role},
                 "characters": [{"id": c.id, "name": c.name}
                                for c in sorted(main._list(cur.cards, CharacterCard), key=lambda c: c.name.lower())]}

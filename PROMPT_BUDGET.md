@@ -4,7 +4,10 @@ Owned jointly by `RELATIONSHIP_PLAN.md` and `MEMORY_PLAN.md`. Both systems injec
 context window, both are capped only in isolation, and **nothing accounts for the total**. This file
 records what actually goes into a prompt, what happens when it overflows, and what to do about it.
 
-Status: **problem documented and measured; the fix is proposed, not built.**
+Status: **steps 1 and 3 of the proposed design are built (2026-10-30)**: the app reads the real
+limit, Settings can choose a smaller standard window, and history is trimmed by tokens to fit
+(`services/context.py`). Steps 2 (priority fill), 4–5 (eviction order and caps for the system
+block), 6 (UI warning) and 7 (slider bounds) are still open.
 
 ## The context window is the backend default, not a choice
 
@@ -19,8 +22,11 @@ build, not a configured value the app knows. The app never reads it, never sends
 and has no constant for it. Swapping models, upgrading KoboldCPP, or adding `--contextsize` changes
 the real limit and nothing in the app notices.
 
-**Decision needed:** the app should read `true_max_context_length` at startup (it already probes
-`/api/v1/model` for `GET /api/status`) and budget against the real number rather than a hardcoded one.
+**Decided and built (2026-10-30):** `kobold.context_limit()` reads `true_max_context_length`
+(cached 30 s, so a backend restart with a new `--contextsize` is seen within that; the last good
+value is kept while the backend is down, 8192 if it was never seen). ⚙ Settings → **Context
+window** offers Auto or 4096 / 6144 / 8192 / 12288 / 16384 / 24576 / 32768, clamped to the
+backend's number. The backend's own size is `KOBOLDCPP_CONTEXT` in ai-stack's `koboldcpp/model.env`.
 
 ## What overflow actually does — measured, and it's bad
 

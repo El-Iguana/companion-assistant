@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Dict
 
 from models.schema import CharacterCard, Persona, ChatSession, CharacterBook
+from services import context
 
 
 # Scene/world roleplay (the historical default).
@@ -482,7 +483,11 @@ def voice_tag_note(card, assistant: bool) -> str:
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
                    boundary_note: str = "", longterm_note: str = "",
-                   expr_labels: List[str] | None = None) -> List[Dict]:
+                   expr_labels: List[str] | None = None,
+                   context_tokens: int = 0, trimmed: list | None = None) -> List[Dict]:
+    """The chat prompt. With `context_tokens`, the oldest history turns are dropped
+    until the whole prompt plus the reply fits that window (services/context.py);
+    the count dropped is appended to `trimmed` when one is passed."""
     char_name = card.name or "Companion"
     user_name = persona.name or "User"
     assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
@@ -557,21 +562,23 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     messages: List[Dict] = [{"role": "system", "content": "\n\n".join(p for p in sys_parts if p.strip())}]
 
     # --- chat history (skip messages already folded into the summary) ---
+    history: List[Dict] = []
     for m in session.messages[mem.last_summarized_index:]:
         if m.role == "system":
             continue
         if m.role == "narrator":
             # An event in the scene, from neither of them. As a user turn the model read
             # it as something {{user}} said or did; as a labelled system turn it's the world.
-            messages.append({"role": "system", "content": NARRATION_LABEL + sub(m.content)})
+            history.append({"role": "system", "content": NARRATION_LABEL + sub(m.content)})
             continue
         role = "assistant" if m.role == "char" else "user"
         content = m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
-        messages.append({"role": role, "content": sub(content)})
+        history.append({"role": role, "content": sub(content)})
 
     # --- post-history instructions (jailbreak / UJB) go after the history ---
+    after: List[Dict] = []
     if card.post_history_instructions:
-        messages.append({"role": "system", "content": sub(card.post_history_instructions)})
+        after.append({"role": "system", "content": sub(card.post_history_instructions)})
 
     # --- ONE trailing note: everything that must sit after the history ---
     # These used to be up to four separate system turns after {{user}}'s message
@@ -609,9 +616,20 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     elif last_user:
         tail.append(focus_note(sub(last_user), char_name, user_name, assistant))
     if tail:
-        messages.append({"role": "system", "content": "\n\n".join(tail)})
+        after.append({"role": "system", "content": "\n\n".join(tail)})
 
-    return messages
+    # --- fit the window: drop the oldest verbatim turns, never the system block ---
+    # Overflow is otherwise silent and cuts from the FRONT (PROMPT_BUDGET.md), which
+    # deletes the persona, relationship and memory first. Dropping old turns instead
+    # loses only what the summary is about to absorb anyway.
+    if context_tokens:
+        history, dropped = context.fit_history(
+            messages + after, history, context_tokens,
+            context.reply_reserve(session.generation.max_tokens))
+        if trimmed is not None:
+            trimmed.append(dropped)
+
+    return messages + history + after
 
 
 def kobold_params(session: ChatSession) -> dict:

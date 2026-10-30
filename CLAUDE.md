@@ -128,6 +128,7 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note + date/time
+  context.py            # the context window: effective size (Settings vs backend), history fit, fold budget
   memory.py             # COMPANION memory: session summary + cross-session store + recall + auto-facts
   assistant_memory.py   # ASSISTANT memory: directives + facts + task notes. Separate module, not a branch
   embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
@@ -153,6 +154,8 @@ tests/smoke_web.py      # Playwright smoke test (WRITES: run on a scratch librar
                         #   PANTHEON_VOICE=1 (+ PANTHEON_FAKE_AUDIO=speech.wav) adds TTS/STT steps — container only
 tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep marks
 tests/test_chat_stream.py # chat stream keep-alive + the after-done memory job vs. concurrent turns/edits
+tests/test_context_budget.py # context window: backend probe, Settings clamp, history trim, fold budget
+tests/conftest.py       # stubs kobold.context_limit (8192) so no test probes a real backend
 scripts/web-dev.sh      # run Pantheon host-side against a scratch library
 scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
@@ -166,7 +169,7 @@ RELATIONSHIP.md         # relationship system reference — axes, ladder, bounda
 RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 done)
 MEMORY.md               # memory reference — BOTH pipelines, the layers, recall gate, auto-facts, the eval
 MEMORY_PLAN.md          # memory design + decision log (phases 1-6 done) + open questions
-PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (NOT built)
+PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (steps 1+3 built)
 SKILLS_PLAN.md          # assistant skills via tool calling: System Info + Media via Orpheus (Phase 0 done)
 eval/                   # NOT baked into the image — `podman cp eval companion:/app/eval` to run
   assistant_memory/     # 5 labelled fixtures + runner + RESULTS.md (see MEMORY.md § The eval)
@@ -292,10 +295,10 @@ tests use them; nothing listens on them. User management requires admin (403).
 ```
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
-GET  /api/status                           KoboldCPP {online, version, model}
+GET  /api/status                           KoboldCPP {online, version, model, context}
 POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
-GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, memory + recall)
+GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, context_limit, memory + recall)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -566,11 +569,19 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   (roleplay cards must not announce the real date) and placed **after the history** — it changes
   every minute, and in the system block that would invalidate KoboldCPP's cached prefix and
   re-process the whole history every turn. It sits just before `boundary_note`, which stays last.
-- **Prompt overflow is silent and truncates from the FRONT** (measured — `PROMPT_BUDGET.md`). Context
-  is KoboldCPP's default 8192 (`start.sh` sets no `--contextsize`; the app never reads it). Nothing
-  budgets the total prompt, and history is bounded by turn *count*, not tokens — so on overflow the
-  system block goes first: persona, relationship descriptor, and memory vanish with no error. The
-  `boundary_note` trailing placement makes it the most overflow-resistant part; don't move it.
+- **Prompt overflow is silent and truncates from the FRONT** (measured — `PROMPT_BUDGET.md`), so
+  the app now fits the prompt itself (`services/context.py`, 2026-10-30). The window is
+  `context.effective()`: ⚙ Settings → Model → **Context window** (`AppSettings.context_limit`, 0 =
+  Auto or one of `CONTEXT_SIZES` 4096…32768), never above what KoboldCPP reports at
+  `/api/extra/true_max_context_length` (`kobold.context_limit()`, cached 30 s, last good value kept
+  while it's down, 8192 if never seen). `build_messages(context_tokens=…)` drops the **oldest
+  verbatim turns** until system block + history + trailing notes + reply reserve fit (chars/4.0,
+  deliberately low); the newest message always stays, the system block is never touched, and a
+  trim is logged `[context] dropped N`. The memory folds size their transcript passes from the
+  same window (`memory.fold_budget`). Raising the window past 8192 needs the backend too:
+  `KOBOLDCPP_CONTEXT` in `koboldcpp/model.env` (ai-stack). Not built yet from PROMPT_BUDGET.md:
+  per-part caps and the eviction order for an oversized *system* block. The `boundary_note`
+  trailing placement makes it the most overflow-resistant part; don't move it.
 - CSS (`appcode/static/pantheon.css`): an element with its own `display` beats the `hidden`
   attribute, so each such rule carries a `[hidden] { display: none }` partner; accessible hidden
   radios use `opacity: 0`, not `display: none`.

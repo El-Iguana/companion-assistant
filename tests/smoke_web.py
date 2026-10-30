@@ -269,6 +269,19 @@ def phase6_steps(page, card_id: str) -> None:
     page.locator("#set-voice").scroll_into_view_if_needed()
     page.screenshot(path=str(SHOTS / "settings-mic.png"))
 
+    # settings: the context window round-trips, then goes back to Auto
+    page.select_option("#set-ctx", "16384")
+    page.click("[data-act=save]")
+    page.wait_for_function("document.querySelector('#set-status').textContent === 'Saved'", timeout=15_000)
+    page.reload()
+    page.wait_for_selector("#set-ctx", timeout=20_000)
+    assert page.input_value("#set-ctx") == "16384"
+    page.locator("#set-ctx").scroll_into_view_if_needed()
+    page.screenshot(path=str(SHOTS / "settings-context.png"))
+    page.select_option("#set-ctx", "0")
+    page.click("[data-act=save]")
+    page.wait_for_function("document.querySelector('#set-status').textContent === 'Saved'", timeout=15_000)
+
     if os.environ.get("PANTHEON_VOICE"):
         voice_steps(page, card_id)
 

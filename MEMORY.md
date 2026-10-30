@@ -76,7 +76,8 @@ Two write triggers, both through `fold_into_longterm()`:
   a *finished* conversation gets captured instead of being cut at an arbitrary turn boundary.
 
 A fold is **one pass per context-sized slice** of the range, not one pass overall (`_fold_chunks`,
-`FOLD_TRANSCRIPT_CHARS`). A backlog — the first idle sweep of a long finished chat — renders a
+`fold_budget(context_tokens)` — sized from the effective context window, `services/context.py`;
+`FOLD_TRANSCRIPT_CHARS` is the 8192 default). A backlog — the first idle sweep of a long finished chat — renders a
 transcript that can exceed the whole context window, and KoboldCPP truncates from the front with no
 error, so the casualty would be `LONGTERM_PROMPT` itself: the fold running with none of its rules.
 Successive passes keep every rule in every pass and lose nothing. Both pipelines use it.
@@ -289,10 +290,11 @@ everything the extractor gets wrong, which is what `origin` is for.
 
 - Long-term `facts` never expire; they stay until the user removes them. Whether they should decay is
   still open.
-- **The prompt as a whole is not budgeted.** Everything here has to fit the 8192-token context
-  alongside the card, persona and relationship blocks. The memory blocks are individually capped, but
-  on total overflow KoboldCPP truncates from the front and silently deletes them — measured and written up in
-  `PROMPT_BUDGET.md`, where the fix is proposed but not built.
+- **The prompt is budgeted by dropping old turns only.** Everything here has to fit the context
+  window (Settings → Context window, capped at the backend's real limit) alongside the card, persona
+  and relationship blocks. Since 2026-10-30 `build_messages` drops the oldest verbatim turns to fit,
+  so history overflow no longer deletes the memory blocks. A *system block* too big on its own still
+  overflows and still loses its front — the eviction order for that is in `PROMPT_BUDGET.md`, not built.
 - With the fold prompt tightened, a 7-topic conversation still fits inside the 10-bullet summary, so
   recall added nothing at that size. Its value is in pairings that accumulate well past the bullet cap
   (verified by emptying the summary and confirming a fresh session could still answer three specifics

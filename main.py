@@ -31,7 +31,7 @@ from models.schema import (
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from services import card_io, prompt_builder, memory, assistant_memory, expressions, relationship, tts, stt, auth, vrm
+from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, relationship, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent
@@ -243,6 +243,11 @@ def _load_settings(cur: Ctx) -> AppSettings:
 
 def _save_settings(cur: Ctx, s: AppSettings) -> None:
     (cur.settings / "app.json").write_text(s.model_dump_json(indent=2))
+
+
+async def _context_tokens(st: AppSettings) -> int:
+    """The window to budget against: Settings' choice, capped at what KoboldCPP really has."""
+    return context.effective(st.context_limit, await kobold.context_limit())
 
 
 def _load_relationship(cur: Ctx, character_id: str, persona_id: str) -> Relationship:
@@ -1182,11 +1187,13 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
         return {"ok": True, "swept": False, "reason": "session has no character"}
 
     st = _load_settings(cur)
+    window = await _context_tokens(st)
     if getattr(card, "chat_mode", "roleplay") == "assistant":
         am = _load_assistant_memory(cur, session.character_id, persona.id)
         changed = await assistant_memory.fold(
             kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
-            extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new)
+            extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new,
+            context_tokens=window)
         if changed:
             _save_assistant_memory(cur, am)
             session.memory.last_summarized_index = am.swept_sessions.get(
@@ -1198,7 +1205,8 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     changed = await memory.fold_into_longterm(
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
         index_path=_memory_index_path(cur, session.character_id, persona.id),
-        extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new)
+        extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
+        context_tokens=window)
     if changed:
         _save_character_memory(cur, mem)
     return {"ok": True, "swept": changed}
@@ -1396,6 +1404,7 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
     scenario = session.relationship is not None
     basis = _memory_basis(session)
     st = _load_settings(cur)
+    window = await _context_tokens(st)
     if assistant:
         # The window still has to advance or the prompt grows without bound, but
         # nothing narrative comes out of it: the fold writes directives, facts and task
@@ -1411,14 +1420,15 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
                     kobold, am, session, card, persona, upto=fold_end,
                     max_tokens=st.summary_max_tokens,
                     extract_items=st.auto_facts_enabled,
-                    max_new=st.auto_facts_max_new):
+                    max_new=st.auto_facts_max_new, context_tokens=window):
                 _save_assistant_memory(cur, am)
                 session.memory.last_summarized_index = fold_end
     else:
         await memory.summarize(kobold, session, card, persona,
                                summarize_after=st.summarize_after,
                                keep_recent=st.keep_recent,
-                               max_tokens=st.summary_max_tokens)
+                               max_tokens=st.summary_max_tokens,
+                               context_tokens=window)
         # Threshold trigger: fold forward exactly what summarize() just folded out of
         # the verbatim window, so nothing leaves the live prompt without being recorded
         # durably first. Loaded here, right before the fold — a concurrent sweep may
@@ -1430,7 +1440,8 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
                     upto=session.memory.last_summarized_index,
                     max_tokens=st.summary_max_tokens,
                     index_path=_memory_index_path(cur, session.character_id, persona.id),
-                    extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new):
+                    extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
+                    context_tokens=window):
                 _save_character_memory(cur, cm)
     _apply_memory(cur, session, basis)
 
@@ -1537,6 +1548,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # rather than shrinking her memory for a block that isn't there.
         lt_note = memory.longterm_block(char_mem, card.name, persona.name)
 
+    window = await _context_tokens(settings)
+    trimmed: list = []
     messages = prompt_builder.build_messages(
         card, persona, session, relationship_note=rel_note,
         stage_rank=relationship._stage_rank(rel),
@@ -1544,7 +1557,13 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
             rel, card.name, persona.name, pronouns=pronouns),
         longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
         # Only ask for beats we can actually render a sprite for.
-        expr_labels=sorted(card.expressions.keys()) if card.expressions else [])
+        expr_labels=sorted(card.expressions.keys()) if card.expressions else [],
+        context_tokens=window, trimmed=trimmed)
+    if trimmed and trimmed[0]:
+        # Not an error: the summary absorbs these turns on its next fold. Logged
+        # because a session that trims every turn wants a lower "Summarize after".
+        print(f"[context] dropped {trimmed[0]} oldest turn(s) of session {session.id[:8]} "
+              f"to fit {window} tokens", flush=True)
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
     # ignores it in the system prompt). The model then emits an empty <think></think>
     # (stripped client-side) so the whole token budget goes to the actual reply.

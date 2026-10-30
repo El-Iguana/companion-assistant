@@ -23,6 +23,11 @@ GROUPS = [
         ("disable_thinking", "Disable model thinking (faster replies)", "check", None,
          "Skips Qwen3's hidden &lt;think&gt; reasoning so the whole reply budget goes to the message. "
          "Turn off if replies feel less thoughtful."),
+        ("context_limit", "Context window", "context", None,
+         "How much the model reads per reply: the system prompt, memory and the recent chat. "
+         "When a chat outgrows it, the oldest messages are left out (the summary already "
+         "holds them), never the character or her memory. Larger windows remember more "
+         "word for word but reply slower and use more VRAM."),
     ]),
     ("memory", "Memory", [
         ("summarize_after", "Summarize after", "range", (6, 60, 2, "{} messages"),
@@ -91,7 +96,7 @@ class SettingsView:
         root.innerHTML = '<div class="pt-chat-loading"><span class="pt-spin"></span></div>'
         self.listeners.on(root, "click", self._on_click)
         self.listeners.on(root, "input", self._on_input)
-        self.listeners.on(root, "change", lambda _e: self._duplex_check())
+        self.listeners.on(root, "change", lambda _e: (self._duplex_check(), self._context_check()))
         spawn(self.load(), "settings")
 
     def unmount(self) -> None:
@@ -104,6 +109,7 @@ class SettingsView:
             return
         self.data = r
         self.render()
+        self._context_check()
         spawn(self._fill_mics(False), "microphones")
         if r["me"]["role"] == "admin":
             await self.load_users()
@@ -130,6 +136,20 @@ class SettingsView:
                     f'<option value="">Browser default</option>{opt}</select>'
                     '<button class="pt-btn small" data-act="mics" type="button">Find microphones</button></span>'
                     f'<small id="set-mic-warn" class="pt-warn" hidden></small><small>{hint}</small></label>')
+        if kind == "context":
+            ctx = self.data.get("context") or {}
+            backend = ctx.get("backend")
+            opts = [("0", "Auto — " + (f"{backend:,} tokens (the backend's limit)" if backend
+                                        else "the backend's limit"))]
+            opts += [(str(n), f"{n:,} tokens" + ("" if not backend or n <= backend
+                                                 else " — above the backend's limit"))
+                     for n in ctx.get("sizes") or []]
+            html = "".join(f'<option value="{o}"{" selected" if o == str(v or 0) else ""}>{esc(t)}</option>'
+                           for o, t in opts)
+            return (f'<label class="pt-setting"><span><b>{label}</b></span>'
+                    f'<select data-s="{key}" id="set-ctx">{html}</select>'
+                    '<small id="set-ctx-note" class="pt-warn" hidden></small>'
+                    f'<small>{hint}</small></label>')
         if kind in ("select", "chars"):
             options = extra if kind == "select" else (
                 [("", "her most recent chat's character")] + [(c["id"], c["name"]) for c in self.data.get("characters") or []])
@@ -236,6 +256,22 @@ class SettingsView:
         box.hidden = not (duplex.checked and not cancelled)
         box.innerHTML = ("Interruption is on but this microphone is not echo-cancelled. Fine on "
                          "<b>headphones</b>; on <b>speakers</b> she will hear herself.")
+
+    def _context_check(self) -> None:
+        """Say when the chosen window is more than KoboldCPP was started with."""
+        box, sel = by_id("set-ctx-note"), by_id("set-ctx")
+        if not box or not sel:
+            return
+        backend = (self.data.get("context") or {}).get("backend")
+        want = int(str(sel.value) or 0)
+        if not backend:
+            box.hidden = False
+            box.innerHTML = "KoboldCPP isn't answering, so its limit is unknown; 8,192 is assumed."
+            return
+        box.hidden = not (want > backend)
+        box.innerHTML = (f"KoboldCPP runs at <b>{backend:,}</b> tokens, so {backend:,} is used. "
+                         "To go higher, set <code>KOBOLDCPP_CONTEXT</code> in "
+                         "<code>koboldcpp/model.env</code> and restart KoboldCPP.")
 
     def collect(self) -> dict:
         values = {}

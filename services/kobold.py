@@ -1,6 +1,7 @@
 import httpx
 import json
 import re
+import time
 from typing import AsyncGenerator, Optional
 
 
@@ -156,9 +157,37 @@ class KoboldClient:
             data = resp.json()
             model_resp = await self.client.get(f"{self.base_url}/api/v1/model", timeout=5.0)
             model = model_resp.json().get("result", "Unknown")
-            return {"online": True, "version": data.get("result", "unknown"), "model": model}
+            return {"online": True, "version": data.get("result", "unknown"), "model": model,
+                    "context": await self.context_limit()}
         except Exception as e:
             return {"online": False, "error": str(e)}
+
+    # The backend's real context window. Asked, not assumed: swapping the model or
+    # changing --contextsize changes it, and an app budgeting against a stale number
+    # gets its prompt cut from the front. Cached briefly because every turn asks;
+    # a restart with a new size is picked up within CONTEXT_TTL_S.
+    CONTEXT_TTL_S = 30.0
+    CONTEXT_RETRY_S = 10.0     # a failed probe is not retried sooner than this
+
+    async def context_limit(self) -> Optional[int]:
+        """Tokens the loaded model accepts, or the last known value, or None if never seen."""
+        now = time.monotonic()
+        value, at, ok = getattr(self, "_ctx_cache", (None, -1e9, False))
+        if now - at < (self.CONTEXT_TTL_S if ok else self.CONTEXT_RETRY_S):
+            return value
+        try:
+            resp = await self.client.get(
+                f"{self.base_url}/api/extra/true_max_context_length", timeout=3.0)
+            resp.raise_for_status()
+            fresh = int(resp.json().get("value") or 0)
+        except Exception:
+            fresh = 0
+        if fresh > 0:
+            self._ctx_cache = (fresh, now, True)
+            return fresh
+        # Down or unreadable: keep the last good number, and don't ask again on every turn.
+        self._ctx_cache = (value, now, False)
+        return value
 
     async def generate(self, prompt: str, params: dict) -> str:
         payload = {"prompt": prompt, **params}

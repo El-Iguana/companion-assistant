@@ -15,7 +15,7 @@ import numpy as np
 
 from models.schema import (ChatSession, CharacterCard, CharacterMemory,
                            MemoryFact, Persona)
-from services import embeddings
+from services import context, embeddings
 from services.kobold import KoboldClient
 from services.prompt_builder import substitute_macros, speaker
 
@@ -33,10 +33,12 @@ LONGTERM_FACT_MAX_CHARS = 200 # one fact must not be able to dominate the block
 LONGTERM_BUDGET_CHARS = 2400  # ceiling on the injected block, at 8192 context
 LONGTERM_SUMMARY_SHARE = 0.6  # of that budget, the share the cumulative history may take
 
-# How much transcript one fold pass may carry. KoboldCPP's default context is
-# 8192 tokens and this app never probes the real value (PROMPT_BUDGET.md). A
-# range larger than this is folded in successive passes rather than truncated —
-# see _fold_chunks() for why truncation is not an option here.
+# How much transcript one fold pass may carry. Sized from the effective context
+# window (services/context.py: the backend's real limit, or the smaller one chosen
+# in Settings), passed in as `context_tokens`; FOLD_CONTEXT_TOKENS is only the
+# default when no caller says. A range larger than this is folded in successive
+# passes rather than truncated — see _fold_chunks() for why truncation is not an
+# option here.
 #
 # Budgeted at 4.0 chars/token even though PROMPT_BUDGET.md measured ~5.0: that
 # figure is an average over one corpus, not a floor, and the whole point of this
@@ -46,10 +48,15 @@ LONGTERM_SUMMARY_SHARE = 0.6  # of that budget, the share the cumulative history
 # being generated (summary_max_tokens, up to 1200). At 4.0 the worst prompt of
 # either kind lands ~6% under the window; at the measured 5.0 it is ~25% under.
 # The cost of being wrong the other way is one extra pass, so err low.
-FOLD_CONTEXT_TOKENS = 8192
+FOLD_CONTEXT_TOKENS = context.DEFAULT_CONTEXT
 FOLD_CHARS_PER_TOKEN = 4.0
 FOLD_RESERVE_TOKENS = 3000
 FOLD_TRANSCRIPT_CHARS = int((FOLD_CONTEXT_TOKENS - FOLD_RESERVE_TOKENS) * FOLD_CHARS_PER_TOKEN)
+
+
+def fold_budget(context_tokens: int) -> int:
+    """Transcript characters one fold pass may carry in a `context_tokens` window."""
+    return context.fold_transcript_chars(context_tokens, FOLD_RESERVE_TOKENS)
 
 
 def needs_summary(session: ChatSession, summarize_after: int = SUMMARIZE_AFTER) -> bool:
@@ -70,7 +77,8 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
                     card: CharacterCard, persona: Persona,
                     summarize_after: int = SUMMARIZE_AFTER,
                     keep_recent: int = KEEP_RECENT,
-                    max_tokens: int = SUMMARY_MAX_TOKENS) -> None:
+                    max_tokens: int = SUMMARY_MAX_TOKENS,
+                    context_tokens: int = FOLD_CONTEXT_TOKENS) -> None:
     """Fold older turns into session.memory.summary (mutates session).
 
     Thresholds/cap default to the module constants but can be overridden from
@@ -93,7 +101,8 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
     # transcript that overflows the context and, truncated from the front, takes
     # these instructions with it. Each pass folds into the summary the one before
     # it produced, which is what the threshold already does across turns.
-    chunks = _fold_chunks(session.messages, start, fold_end, char_name, user_name)
+    chunks = _fold_chunks(session.messages, start, fold_end, char_name, user_name,
+                          fold_budget(context_tokens))
     if not chunks:
         # Nothing summarizable in the range (system-only turns) — still advance the
         # mark so it isn't rescanned on every later turn.
@@ -346,7 +355,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              max_tokens: int = 500,
                              index_path=None,
                              extract_facts: bool = False,
-                             max_new_facts: int = AUTO_FACT_MAX_NEW) -> bool:
+                             max_new_facts: int = AUTO_FACT_MAX_NEW,
+                             context_tokens: int = FOLD_CONTEXT_TOKENS) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -368,7 +378,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     # One pass per context-sized slice of the range, oldest first, each folded into
     # the memory the pass before it produced. A single pass is still the normal
     # case; more than one only happens on a backlog that could not have fitted.
-    chunks = _fold_chunks(session.messages, start, upto, char_name, user_name)
+    chunks = _fold_chunks(session.messages, start, upto, char_name, user_name,
+                          fold_budget(context_tokens))
     if not chunks:
         # Nothing foldable in the range (system-only turns) — still advance the
         # mark so the same empty range isn't rescanned on every later sweep.
