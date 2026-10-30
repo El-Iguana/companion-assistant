@@ -232,7 +232,8 @@ class ChatView:
         return (
             '<div class="pt-rpbar" id="ch-rpbar">'
             '<button class="pt-rpbtn" data-rp="narrate" title="The narrator describes something '
-            'happening in the scene. Type in the box first to say what.">'
+            'happening in the scene, and anyone else there may speak. Type in the box first to '
+            'say what.">'
             '<i class="mdi mdi-feather"></i>Narrate</button>'
             f'<button class="pt-rpbtn" data-rp="continue" id="ch-rp-cont" title="{name} takes the '
             f'next turn without you saying anything"><i class="mdi mdi-play"></i>'

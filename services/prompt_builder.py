@@ -352,16 +352,23 @@ NARRATION_LABEL = "[Narrator] "
 SCENE_TURNS = 16                 # recent messages the narrator / draft prompt sees
 
 NARRATOR_SYSTEM = (
-    "You are the narrator of an ongoing roleplay between {{char}} and {{user}}. You are not "
-    "a character in it. Write ONE short narration of something that happens in the scene "
-    "right now — something in the surroundings, a sound, a change in light or weather, "
-    "someone else arriving, an object, news, an interruption — that gives both of them "
-    "something to react to.\n"
+    "You are the game master of an ongoing roleplay between {{char}} and {{user}}: you run the "
+    "world and play every other person in it, but never {{char}} or {{user}}. Write ONE short "
+    "beat that happens in the scene right now and gives both of them something to react to — "
+    "something in the surroundings, a sound, a change in light or weather, someone arriving, "
+    "an object, news, an interruption.\n"
+    "The other people in the scene — a barkeep, a guard, a stranger, a friend from the story — "
+    "are yours to voice, and a good beat usually has one of them say something: a line or two "
+    "in quotation marks, in their own voice (their manner, their way of talking, what they "
+    "would know). They may speak to {{char}} or {{user}}, but leave the answer to them. For "
+    "example:\n"
+    "A dockhand shoulders through the door, dripping. \"Tide's turned early,\" he mutters to "
+    "no one in particular. \"Harbourmaster's closing the outer moorings.\"\n"
     "Keep it neutral: it takes no side, resolves nothing, and does not push the scene toward "
-    "romance, intimacy or violence. Third person, present tense, two to four sentences. "
-    "Never write dialogue, actions, thoughts, feelings or decisions for {{char}} or {{user}}; "
-    "describe only the world and anyone else in it. Stay consistent with the setting and "
-    "what has happened. Do not recap, and never mention being a narrator or an AI."
+    "romance, intimacy or violence. Third person, present tense, two to five sentences. "
+    "Never write a word {{char}} or {{user}} says, nor their actions, thoughts, feelings or "
+    "decisions. Stay consistent with the setting, the people already in it and what has "
+    "happened. Do not recap, and never mention being a game master, a narrator or an AI."
 )
 
 DRAFT_SYSTEM = (
@@ -390,12 +397,22 @@ def scene_transcript(session: ChatSession, char: str, user: str, turns: int = SC
                         for m in msgs[-turns:])
 
 
-def _scene_context(card: CharacterCard, persona: Persona, session: ChatSession) -> str:
+def _scene_context(card: CharacterCard, persona: Persona, session: ChatSession,
+                   stage_rank: int = 0) -> str:
     char, user = card.name or "Companion", persona.name or "User"
     parts = []
     block = _char_block(card, char, user)
     if block:
         parts.append(f"About {char}:\n{block}")
+    # The card's lorebook entries the recent scene triggers, gated by relationship stage
+    # exactly as in her own prompt. This is where a card keeps its side characters and
+    # places, so it is what lets the narrator voice them as written rather than invent.
+    scan = card.character_book.scan_depth if card.character_book else 4
+    recent = "\n".join(m.content for m in session.messages[-scan:]) if session.messages else ""
+    before, after = select_lorebook(card.character_book, recent, stage_rank)
+    if before or after:
+        parts.append("World notes:\n" + "\n".join(substitute_macros(b, char, user)
+                                                    for b in before + after))
     bits = [b for b in (getattr(persona, "title", ""), persona.description,
                         getattr(persona, "background", "")) if b and b.strip()]
     if bits:
@@ -408,30 +425,34 @@ def _scene_context(card: CharacterCard, persona: Persona, session: ChatSession) 
 
 
 def build_narrator_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                            direction: str = "") -> List[Dict]:
+                            direction: str = "", stage_rank: int = 0) -> List[Dict]:
     char, user = card.name or "Companion", persona.name or "User"
-    what = (f"Narrate this happening next, in your own words: {direction.strip()}. "
-            if direction.strip() else "Narrate the next event now. ")
+    what = (f"Write the next beat, with this happening, in your own words: {direction.strip()}. "
+            if direction.strip() else "Write the next beat now. ")
     # Restated last, where it counts: with the scene transcript just above, the model
     # slid into writing the next lines for {{char}} — speech, gestures, shivers — and
     # ran for paragraphs. The system rules alone, many hundred tokens back, didn't hold.
-    ask = (what + f"One paragraph, two to four sentences, about the world only: what "
-           f"happens, what is seen or heard. Write nothing that {char} or {user} says, does, "
-           f"thinks or feels — they react next, not you.")
+    ask = (what + f"One paragraph, two to five sentences: what happens and what is seen or "
+           f"heard. Write nothing that {char} or {user} says, does, thinks or feels — they "
+           f"react next, not you. Everyone else is yours to play: if someone other than "
+           f"{char} and {user} is in the scene, end with a line they say out loud, in "
+           f"quotation marks, in their own voice.")
     return [
         {"role": "system", "content": substitute_macros(NARRATOR_SYSTEM, char, user)},
-        {"role": "user", "content": _scene_context(card, persona, session) + f"\n\n[{ask}]"},
+        {"role": "user", "content": _scene_context(card, persona, session, stage_rank)
+         + f"\n\n[{ask}]"},
     ]
 
 
 def build_draft_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                         direction: str = "") -> List[Dict]:
+                         direction: str = "", stage_rank: int = 0) -> List[Dict]:
     char, user = card.name or "Companion", persona.name or "User"
     ask = (f"Write {user}'s next message. {user} wants to: {direction.strip()}"
            if direction.strip() else f"Write {user}'s next message.")
     return [
         {"role": "system", "content": substitute_macros(DRAFT_SYSTEM, char, user)},
-        {"role": "user", "content": _scene_context(card, persona, session) + f"\n\n[{ask}]"},
+        {"role": "user", "content": _scene_context(card, persona, session, stage_rank)
+         + f"\n\n[{ask}]"},
     ]
 
 
@@ -447,6 +468,36 @@ def clean_piece(text: str, names: List[str]) -> str:
     if len(t) > 1 and t[0] == t[-1] == '"' and t.count('"') == 2:
         t = t[1:-1].strip()
     return t
+
+
+NARRATION_MAX_PARAGRAPHS = 3
+# Her or {{user}} doing something: the beat the narrator must leave to them.
+_ACTS = (r"says|said|asks|replies|answers|laughs|chuckles|mutters|murmurs|whispers|nods|"
+         r"smiles|grins|sighs|shrugs|leans|looks|glances|turns|reaches|takes|raises|frowns|"
+         r"winks|blushes|feels|thinks|wonders|decides")
+
+
+def trim_narration(text: str, char: str, user: str) -> str:
+    """Keep the narration's own paragraphs; drop from the first one that is theirs.
+
+    The narrator writes past a blank line now — a side character's line usually
+    opens a paragraph of its own, and stopping at the first blank line cut 7 of 8
+    of them off (measured). What used to follow a blank line was the narrator
+    carrying on as {{char}} or {{user}}, so a later paragraph that starts with
+    either name or has one of them speaking or acting ends the narration there.
+    The first paragraph always stays, as it did under the old stop.
+    """
+    paras = [p.strip() for p in re.split(r"\n\s*\n", (text or "").strip()) if p.strip()]
+    names = "|".join(re.escape(n) for n in (char, user) if n)
+    if not paras:
+        return ""
+    keep = [paras[0]]
+    for p in paras[1:NARRATION_MAX_PARAGRAPHS]:
+        if names and (re.match(rf"^[*\"“\s]*({names})\b", p)
+                      or re.search(rf"\b({names})\s+({_ACTS})\b", p)):
+            break
+        keep.append(p)
+    return "\n\n".join(keep)
 
 
 # Orpheus voices perform these instead of reading them (services/orpheus.py). Offered

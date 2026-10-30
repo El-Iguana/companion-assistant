@@ -345,10 +345,19 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   update mood + relationship (skipped on re-rolls), save, send `done` — then memory maintenance in the
   background (`_memory_job`, see Conventions).
 - **Narrator / Continue / Write for me (roleplay only; assistant chats get a 400 and no buttons):**
-  the bar above the composer. *Narrate* streams a neutral scene event (`build_narrator_messages`:
+  the bar above the composer. *Narrate* streams a neutral scene beat (`build_narrator_messages`:
   its own short prompt — the scene as a labelled transcript in one user turn, rules restated
-  last, one paragraph via a `"\n\n"` stop; without those it slid into writing her lines) and
-  saves it as `role="narrator"` onto a fresh load, so an edit made meanwhile isn't rolled back;
+  last). **The narrator is a game master** (2026-10-30): it runs the world and voices every
+  side character — anyone but {{char}} and {{user}} — in quotation marks, in their own voice,
+  and sees the card's triggered lorebook entries ("World notes", stage-gated like her prompt;
+  `main._scene_stage`) so a card's NPCs speak as written. Measured on Rocinante, tavern scene
+  with an innkeeper in the lorebook: side-character dialogue 0/8 before → 12/12 after, her or
+  {{user}} written 0 both times. **What actually unlocked it was dropping the `"\n\n"` stop**:
+  the NPC's line opens its own paragraph, so the stop cut it every time (wording alone got
+  1–2/12). That stop existed because past a blank line the narrator used to carry on as her;
+  `prompt_builder.trim_narration()` now does that job — at most 3 paragraphs, cut at the first
+  later one that starts with her/{{user}}'s name or has one of them speaking or acting. The
+  narration is saved as `role="narrator"` onto a fresh load, so an edit made meanwhile isn't rolled back;
   text typed in the box steers it. In her prompt a narration is a `[Narrator] …` **system**
   turn (as a user turn she took it for {{user}}'s words) and the trailing note becomes
   `roleplay_turn_note`: react to the event, or — Continue, she spoke last — carry the scene on.

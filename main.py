@@ -1757,6 +1757,13 @@ def _scene_parts(req: SceneRequest, cur: Ctx):
     return session, card, persona
 
 
+def _scene_stage(cur: Ctx, session: ChatSession, persona: Persona) -> int:
+    """Relationship stage for lorebook gating, chosen the way chat() chooses it."""
+    rel = session.relationship if session.relationship is not None else \
+        _load_relationship(cur, session.character_id, persona.id)
+    return relationship._stage_rank(rel)
+
+
 def _no_think(cur: Ctx, messages: list) -> None:
     """Same Qwen3 switch as chat(): /no_think on the last user turn when thinking is off."""
     if _load_settings(cur).disable_thinking:
@@ -1787,10 +1794,13 @@ async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
     if req.replace and session.messages and session.messages[-1].role == "narrator":
         replace_id = session.messages[-1].id
         session.messages.pop()                       # re-roll: the narration it replaces
-    messages = prompt_builder.build_narrator_messages(card, persona, session, req.direction)
+    messages = prompt_builder.build_narrator_messages(
+        card, persona, session, req.direction, _scene_stage(cur, session, persona))
     _no_think(cur, messages)
-    # One paragraph: past a blank line the narrator had moved on to writing her lines.
-    params = _scene_params(session, 220, [f"\n{card.name}:", f"\n{persona.name}:", "\n\n"])
+    # No blank-line stop: a side character's line usually opens its own paragraph, and
+    # that stop cut 7 of 8 of them off. trim_narration() below drops a later paragraph
+    # that slides into writing her or {{user}} instead, which is what the stop was for.
+    params = _scene_params(session, 220, [f"\n{card.name}:", f"\n{persona.name}:"])
 
     async def _turn():
         acc: list = []
@@ -1800,7 +1810,9 @@ async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
         except Exception as e:
             yield _sse({"error": str(e)})
             return
-        text = prompt_builder.clean_piece(acc[0], ["Narrator", "Narration"])
+        text = prompt_builder.trim_narration(
+            prompt_builder.clean_piece(acc[0], ["Narrator", "Narration", "Game Master", "GM"]),
+            card.name, persona.name)
         if not text:
             yield _sse({"error": "the narrator came up empty — try again"})
             return
@@ -1823,7 +1835,8 @@ async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
 async def draft_reply(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
     """{{user}}'s next message, written for the composer. Nothing is saved."""
     session, card, persona = _scene_parts(req, cur)
-    messages = prompt_builder.build_draft_messages(card, persona, session, req.direction)
+    messages = prompt_builder.build_draft_messages(
+        card, persona, session, req.direction, _scene_stage(cur, session, persona))
     _no_think(cur, messages)
     # One paragraph: past a blank line the model moved on to her side of the scene
     # ("*Hermione examines the letter…*") — the speaker stops alone didn't catch that.

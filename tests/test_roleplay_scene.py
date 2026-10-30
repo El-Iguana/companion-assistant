@@ -269,3 +269,47 @@ def test_assistant_chats_get_none_of_it(cur, model):
 
     asyncio.run(go())
     assert _roles(cur, s) == ["char", "user", "char"]
+
+
+# --- the narrator as game master: side characters speak ---------------------------
+
+def test_narrator_may_voice_other_people_but_never_her_or_the_user():
+    card, persona = CharacterCard(name="Mira"), Persona(name="Sam")
+    sys_prompt = prompt_builder.build_narrator_messages(
+        card, persona, ChatSession(messages=[ChatMessage(role="user", content="Hi.")]))[0]["content"]
+    assert "game master" in sys_prompt and "quotation marks" in sys_prompt
+    assert "Never write a word Mira or Sam says" in sys_prompt
+
+
+def test_narrator_sees_triggered_lorebook_entries_with_stage_gating():
+    from models.schema import CharacterBook, LorebookEntry
+    book = CharacterBook(entries=[
+        LorebookEntry(keys=["Bram"], content="Old Bram, the gruff innkeeper."),
+        LorebookEntry(keys=["Bram"], content="Bram's secret debt.", min_stage="Close")])
+    card, persona = CharacterCard(name="Mira", character_book=book), Persona(name="Sam")
+    s = ChatSession(messages=[ChatMessage(role="user", content="Where's Bram tonight?")])
+    early = prompt_builder.build_narrator_messages(card, persona, s)[1]["content"]
+    assert "World notes:\nOld Bram, the gruff innkeeper." in early and "secret debt" not in early
+    rank = prompt_builder.STAGE_ORDER.index("Close")
+    late = prompt_builder.build_narrator_messages(card, persona, s, stage_rank=rank)[1]["content"]
+    assert "secret debt" in late
+
+
+def test_trim_keeps_a_side_characters_own_paragraph():
+    t = 'Thunder rolls.\n\n"Rum\'s out," Bram grumbles, setting a mug down in front of Sam.'
+    assert prompt_builder.trim_narration(t, "Mira", "Sam") == t
+
+
+def test_trim_cuts_where_the_narrator_starts_writing_her_or_the_user():
+    t = 'Thunder rolls.\n\n"Rum\'s out," Bram grumbles.\n\nMira looks up. "Then whiskey."'
+    assert prompt_builder.trim_narration(t, "Mira", "Sam") == 'Thunder rolls.\n\n"Rum\'s out," Bram grumbles.'
+    t2 = 'Thunder rolls.\n\nThe door bangs; *Sam nods at the stranger.*'
+    assert prompt_builder.trim_narration(t2, "Mira", "Sam") == "Thunder rolls."
+    t3 = 'Thunder rolls.\n\n*Mira shivers.*'
+    assert prompt_builder.trim_narration(t3, "Mira", "Sam") == "Thunder rolls."
+
+
+def test_trim_caps_the_paragraphs_and_always_keeps_the_first():
+    assert prompt_builder.trim_narration("A.\n\nB.\n\nC.\n\nD.", "Mira", "Sam") == "A.\n\nB.\n\nC."
+    assert prompt_builder.trim_narration("Mira looks up.", "Mira", "Sam") == "Mira looks up."
+    assert prompt_builder.trim_narration("", "Mira", "Sam") == ""
