@@ -29,8 +29,11 @@ intimacy/consent). Relationship design detail in `RELATIONSHIP_PLAN.md`.
 
 **`http://127.0.0.1:7861/`, this computer only.** pytincture signs users in over plain HTTP only
 on a literal loopback Host, so the container publishes `127.0.0.1:7861` and `localhost` is
-redirected to `127.0.0.1` (`service.LocalhostRedirect`). Phones and other machines need TLS in
-front — PYTINCTURE_PLAN.md Phase 8. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
+redirected to `127.0.0.1` (`service.LocalhostRedirect`). **LAN mode** (Phase 8): set
+`PANTHEON_PUBLIC_ORIGIN=https://NAME:8761` (ai-stack's `stack lan on` does) and ai-stack's
+`lan-proxy` serves Pantheon there over HTTPS; `service._network_settings` then switches pytincture to
+its production login (password only, exact hosts, `Secure` cookies, proxy headers trusted), and the
+loopback address redirects to the HTTPS one except `/api/health`. Unset = loopback-only. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
 The container runs **`service.py`**: `main` (Pantheon itself — accounts, data, clients, every

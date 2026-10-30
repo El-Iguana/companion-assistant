@@ -118,7 +118,7 @@ These are UI affordances Ember has and Pantheon's API lacks. No new behaviour.
 | 5 | **The rest.** Personas, presets, memory modal, relationship context, settings (voice, memory, thinking), users (admin), help. | Feature parity. |
 | 6 | **Voice + avatar islands.** Read aloud, auto-voice, push-to-talk, hands-free, full duplex, VRM canvas. | Voice and avatar parity, re-checked against `MEMORY.md`/`CLAUDE.md`'s measured behaviour. |
 | 7 | **Switch-over.** 7861 serves the new page; `/desktop` moves to a small `voice.js` + `vtuber.mjs` page; delete `templates/index.html`, `app.js`, `style.css` and the routes only they used; publish on 127.0.0.1; docs. | One UI. |
-| 8 | *(later)* LAN access behind a TLS proxy. | Phones work, with login over HTTPS. |
+| 8 | LAN access behind a TLS proxy — **built 2026-10-30** (ai-stack `lan-proxy/`, `PANTHEON_PUBLIC_ORIGIN`); not yet tried from a phone. | Phones work, with login over HTTPS. |
 
 Each phase ends with the Playwright smoke test (every screen, zero console errors) and screenshots,
 like `ai-stack/stack-ui/tests/smoke.py`.

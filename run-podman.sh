@@ -69,6 +69,15 @@ if [[ -n "${COMPANION_ADMIN_PASSWORD:-}" ]]; then
   echo "==> Seeding the admin password from COMPANION_ADMIN_PASSWORD (first run only)"
 fi
 
+# LAN mode: ai-stack's `stack lan on` exports the HTTPS address its proxy serves Pantheon
+# on, and the server switches to pytincture's production login for it (service.py).
+# Unset = loopback only, as before.
+LAN_ARG=()
+if [[ -n "${PANTHEON_PUBLIC_ORIGIN:-}" ]]; then
+  LAN_ARG=(-e "PANTHEON_PUBLIC_ORIGIN=${PANTHEON_PUBLIC_ORIGIN}")
+  echo "==> LAN mode: served by the ai-stack proxy at ${PANTHEON_PUBLIC_ORIGIN}/"
+fi
+
 # Timezone. The container clock is NOT wrong — it shares the host kernel, so the instant
 # is identical. But the image ships no TZ and /etc/localtime -> Etc/UTC, so everything the
 # app renders as local time came out in UTC: `created_at` on cards/sessions/memories, log
@@ -100,11 +109,16 @@ podman run -d \
   -e "TZ=${TZ_VAL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \
+  "${LAN_ARG[@]}" \
   "${PIPER_ARG[@]}" \
   "$IMAGE"
 
 echo ""
 echo "✓  Pantheon is running."
-echo "   Open: http://127.0.0.1:${PORT}/   (this computer only; localhost redirects there)"
+if [[ -n "${PANTHEON_PUBLIC_ORIGIN:-}" ]]; then
+  echo "   Open: ${PANTHEON_PUBLIC_ORIGIN}/   (any device on the LAN; the loopback address redirects there)"
+else
+  echo "   Open: http://127.0.0.1:${PORT}/   (this computer only; localhost redirects there)"
+fi
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"
