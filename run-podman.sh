@@ -44,7 +44,6 @@ mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,
 # here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite
 # generation died on DNS while chat worked — on exactly the path someone without the
 # full ai-stack takes.
-BIND_ARG=()
 if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
   KOBOLD_URL="http://koboldcpp:5001"
@@ -53,8 +52,6 @@ if podman network exists "$NETWORK"; then
   echo "==> Joining network: $NETWORK (backends reachable by container name)"
 else
   NET_ARG="--network=host"
-  # Host networking ignores -p, so the server must bind loopback itself.
-  BIND_ARG=(-e "PANTHEON_BIND=127.0.0.1")
   KOBOLD_URL="http://localhost:5001"
   COMFYUI_URL="http://localhost:8188"
   ORPHEUS_URL="http://localhost:5005"
@@ -67,15 +64,6 @@ SEED_ARG=()
 if [[ -n "${COMPANION_ADMIN_PASSWORD:-}" ]]; then
   SEED_ARG=(-e "COMPANION_ADMIN_PASSWORD=${COMPANION_ADMIN_PASSWORD}")
   echo "==> Seeding the admin password from COMPANION_ADMIN_PASSWORD (first run only)"
-fi
-
-# LAN mode: ai-stack's `stack lan on` exports the HTTPS address its proxy serves Pantheon
-# on, and the server switches to pytincture's production login for it (service.py).
-# Unset = loopback only, as before.
-LAN_ARG=()
-if [[ -n "${PANTHEON_PUBLIC_ORIGIN:-}" ]]; then
-  LAN_ARG=(-e "PANTHEON_PUBLIC_ORIGIN=${PANTHEON_PUBLIC_ORIGIN}")
-  echo "==> LAN mode: served by the ai-stack proxy at ${PANTHEON_PUBLIC_ORIGIN}/"
 fi
 
 # Timezone. The container clock is NOT wrong — it shares the host kernel, so the instant
@@ -100,25 +88,19 @@ podman run -d \
   --name "$CONTAINER" \
   --restart unless-stopped \
   $NET_ARG \
-  -p "127.0.0.1:${PORT}:${PORT}" \
+  -p "${PORT}:${PORT}" \
   -e "PANTHEON_PORT=${PORT}" \
-  "${BIND_ARG[@]}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
   -e "ORPHEUS_URL=${ORPHEUS_URL}" \
   -e "TZ=${TZ_VAL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \
-  "${LAN_ARG[@]}" \
   "${PIPER_ARG[@]}" \
   "$IMAGE"
 
 echo ""
 echo "✓  Pantheon is running."
-if [[ -n "${PANTHEON_PUBLIC_ORIGIN:-}" ]]; then
-  echo "   Open: ${PANTHEON_PUBLIC_ORIGIN}/   (any device on the LAN; the loopback address redirects there)"
-else
-  echo "   Open: http://127.0.0.1:${PORT}/   (this computer only; localhost redirects there)"
-fi
+echo "   Open: http://127.0.0.1:${PORT}/   (other devices: http://$(hostname -s).local:${PORT}/)"
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

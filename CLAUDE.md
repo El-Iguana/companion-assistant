@@ -27,13 +27,13 @@ intimacy/consent). Relationship design detail in `RELATIONSHIP_PLAN.md`.
 # logs: podman logs -f companion ; stop: podman stop companion
 ```
 
-**`http://127.0.0.1:7861/`, this computer only.** pytincture signs users in over plain HTTP only
-on a literal loopback Host, so the container publishes `127.0.0.1:7861` and `localhost` is
-redirected to `127.0.0.1` (`service.LocalhostRedirect`). **LAN mode** (Phase 8): set
-`PANTHEON_PUBLIC_ORIGIN=https://NAME:8761` (ai-stack's `stack lan on` does) and ai-stack's
-`lan-proxy` serves Pantheon there over HTTPS; `service._network_settings` then switches pytincture to
-its production login (password only, exact hosts, `Secure` cookies, proxy headers trusted), and the
-loopback address redirects to the HTTPS one except `/api/health`. Unset = loopback-only. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
+**`http://<host>:7861/`, any device on the LAN, plain HTTP.** Pantheon is a local product for
+whoever installs it; security against the LAN is not a goal. pytincture's
+`allow_development_auth_origin` mode signs users in over HTTP on whatever address the browser used,
+but answers 403 to non-loopback clients, so `service.LanAsLoopback` (outermost) presents every
+client as 127.0.0.1 — the spike. The container publishes `0.0.0.0:7861`; `localhost` is redirected
+to `127.0.0.1` (`service.LocalhostRedirect`) so this computer keeps one sign-in. The microphone
+needs a secure context, so voice input works on this computer only. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
 The container runs **`service.py`**: `main` (Pantheon itself — accounts, data, clients, every
@@ -203,7 +203,7 @@ Login-gated, role-based, per-user isolated libraries.
   `_announce_seed_password()` prints a startup banner + writes `data/auth/INITIAL_PASSWORD` (0600) —
   the container runs detached, so stdout alone isn't findable enough. **Never reintroduce a constant
   here:** this repo is shared, and a literal would be the known default admin credential of every
-  install (and of every LAN exposure once Phase 8 puts TLS in front). Seeding only runs when no users exist.
+  install (and the app answers on the whole LAN). Seeding only runs when no users exist.
 - **Frontend**: signed out, every page route goes to `/pantheon/login` (and `/desktop` returns to
   itself after sign-in via `session["return_to"]`); a BFF answer with `signed_out` sends the page
   there too (`ui.common.failed`). The rail foot shows the account and Sign out.
@@ -612,8 +612,8 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 ## Roadmap / next
 
 - **pytincture page** (`PYTINCTURE_PLAN.md`): ✅ Phases 0–7 — the page replaced the classic one on
-  2026-10-26. ◻ **Phase 8: other devices** — TLS in front (pytincture only signs in over plain HTTP on
-  loopback), then phones work again.
+  2026-10-26. ✅ **Phase 8: other devices** (2026-10-30) — plain
+  HTTP on the LAN through `LanAsLoopback`, no TLS (an HTTPS proxy was built and dropped the same day).
 - ✅ **Relationship Phase 2 (done)** — milestones: `relationship.MILESTONES` + `newly_reached()`; crossing a
   stage/tier fires a one-time toast (chat `done.milestones`) and injects a one-time beat via
   `session.pending_milestone` into the next reply; recorded in `Relationship.milestones`.

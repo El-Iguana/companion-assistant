@@ -9,14 +9,13 @@ app built here (``appcode/``): its BFF classes call ``main``'s handlers directly
 signed-in user's context, and ``pantheon_web/`` adds the plain routes a JSON BFF cannot
 serve (images, uploads, audio, the VRM model, the desktop avatar's page).
 
-**Loopback only, by default.** pytincture signs users in over plain HTTP only on a literal
-loopback Host, so the address is ``http://127.0.0.1:7861/``. ``localhost`` is redirected there.
-
-**LAN mode** (``PANTHEON_PUBLIC_ORIGIN``, set by ai-stack's ``stack lan on``): the ai-stack
-HTTPS proxy serves Pantheon at that address, and pytincture runs in its production mode for
-it: password login only, exact hosts, ``Secure`` cookies, forwarded headers trusted. A page
-load on the loopback address is then sent to the HTTPS one, because the cookies and the
-origin check only work there. ``/api/health`` stays answerable on loopback for ``stack``.
+**Any device on the LAN, plain HTTP.** Pantheon is a local product for whoever installs it,
+so it answers on every interface at ``http://<host>:7861/``. pytincture's
+``allow_development_auth_origin`` mode does exactly that (origin taken from the request,
+non-``Secure`` cookies, no host list) but refuses any client that isn't loopback, so
+``LanAsLoopback`` tells it every client is. ``localhost`` is redirected to ``127.0.0.1``.
+Browsers allow the microphone only on ``localhost``/``127.0.0.1`` or HTTPS, so voice input
+works on this computer, not from other devices over plain HTTP.
 
 ``main.app`` (the old FastAPI app with its ``/api`` routes) is no longer served; it remains
 the home of the handlers and is what the unit tests exercise.
@@ -26,9 +25,8 @@ Environment:
 | var | default | what |
 |---|---|---|
 | ``PANTHEON_PORT`` | 7861 | listen port, and the port in the browser's address — publish it on the same number |
-| ``PANTHEON_BIND`` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
+| ``PANTHEON_BIND`` | 0.0.0.0 | listen address |
 | ``PANTHEON_DATA_DIR`` | ./data | a throwaway library for dev/test |
-| ``PANTHEON_PUBLIC_ORIGIN`` | (unset) | LAN mode: the proxy's ``https://host:port`` for Pantheon |
 """
 from __future__ import annotations
 
@@ -37,7 +35,6 @@ import os
 import secrets
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 APPCODE = HERE / "appcode"
@@ -59,16 +56,8 @@ logging.basicConfig(level=logging.INFO)
 
 APPLICATION = "pantheon"
 PORT = int(os.environ.get("PANTHEON_PORT", "7861"))
-BIND = os.environ.get("PANTHEON_BIND", "127.0.0.1")
-# The address the browser uses. A literal IP: pytincture refuses "localhost" with
-# loopback login, so it is http://127.0.0.1:7861/, never localhost.
-LOOPBACK_ORIGIN = f"http://127.0.0.1:{PORT}"
-PUBLIC_ORIGIN = os.environ.get("PANTHEON_PUBLIC_ORIGIN", "").strip().rstrip("/")
-if PUBLIC_ORIGIN:
-    _pub = urlsplit(PUBLIC_ORIGIN)
-    if _pub.scheme != "https" or not _pub.hostname or _pub.path or _pub.query:
-        raise SystemExit(f"PANTHEON_PUBLIC_ORIGIN must be https://host[:port], got {PUBLIC_ORIGIN!r}")
-ORIGIN = PUBLIC_ORIGIN or LOOPBACK_ORIGIN
+BIND = os.environ.get("PANTHEON_BIND", "0.0.0.0")
+ORIGIN = f"http://127.0.0.1:{PORT}"   # what the startup line prints; any host name works
 
 
 def _session_secret() -> str:
@@ -111,16 +100,29 @@ class BlobImagesMiddleware:
         await self.app(scope, receive, patched)
 
 
+class LanAsLoopback:
+    """Present every client to pytincture as 127.0.0.1 (the LAN spike).
+
+    ``allow_development_auth_origin`` is the pytincture mode that signs users in over plain
+    HTTP on whatever address the browser used, but a middleware of its own answers 403 to
+    any non-loopback client. Pantheon is never exposed beyond the home network, so the
+    check is answered here. Outermost, ahead of that middleware.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and scope.get("client"):
+            scope = dict(scope, client=("127.0.0.1", scope["client"][1]))
+        await self.app(scope, receive, send)
+
+
 class LocalhostRedirect:
     """``localhost`` -> ``127.0.0.1``, same port and path.
 
-    pytincture's host check only admits the literal IP (its plain-HTTP login is loopback
-    only), so a bookmark, a launcher or the desktop shell pointing at localhost would get a
-    bare 400. Outermost, so it answers before that check.
-
-    In LAN mode both loopback names go to ``PUBLIC_ORIGIN`` instead: there the session
-    cookie is ``Secure`` and the origin check expects the HTTPS address, so signing in on
-    ``http://127.0.0.1`` would fail. The health probe is left alone.
+    Sessions are per host name, so one name for this computer keeps one sign-in (it was
+    required when pytincture's host check admitted only the literal IP).
     """
 
     def __init__(self, app) -> None:
@@ -130,14 +132,10 @@ class LocalhostRedirect:
         if scope["type"] == "http":
             host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
             name, _, port = host.partition(":")
-            name = name.lower()
-            lan = PUBLIC_ORIGIN and name in ("localhost", "127.0.0.1") \
-                and scope.get("path") != "/api/health"
-            if lan or name == "localhost":
+            if name.lower() == "localhost":
                 path = scope.get("raw_path") or scope.get("path", "/").encode()
                 qs = scope.get("query_string") or b""
-                base = PUBLIC_ORIGIN if lan else f"http://127.0.0.1:{port or PORT}"
-                target = f"{base}{path.decode('latin-1')}" + (
+                target = f"http://127.0.0.1:{port or PORT}{path.decode('latin-1')}" + (
                     f"?{qs.decode('latin-1')}" if qs else "")
                 await send({"type": "http.response.start", "status": 307,
                             "headers": [(b"location", target.encode("latin-1")),
@@ -147,30 +145,16 @@ class LocalhostRedirect:
         await self.app(scope, receive, send)
 
 
-def _network_settings() -> dict:
-    """pytincture's host/origin/login settings: loopback dev mode, or LAN mode."""
-    if not PUBLIC_ORIGIN:
-        # Loopback plain-HTTP login only (pytincture's development login).
-        return {"enable_dev_email_login": True, "allowed_hosts": ("127.0.0.1",)}
-    # Production mode behind the proxy. 127.0.0.1 stays allowed for the health probe and
-    # for LocalhostRedirect's answer; it can't sign in there (Secure cookie, origin check).
-    return {
-        "enable_dev_email_login": False,
-        "allowed_hosts": ("127.0.0.1", urlsplit(PUBLIC_ORIGIN).hostname),
-        "trusted_proxy_headers": True,
-        "session_https_only": True,
-    }
-
-
 def build_web_app():
     application = create_app(PytinctureConfig(
         modules_path=str(APPCODE),
         default_application=APPLICATION,
         enable_user_login=True,
+        # Password login over plain HTTP on any address (see LanAsLoopback).
+        allow_development_auth_origin=True,
+        session_https_only=False,
         allow_microphone=True,           # hands-free and push-to-talk (Phase 6)
         session_secret=_session_secret(),
-        **_network_settings(),
-        canonical_origin=ORIGIN,
         cookie_namespace="pantheon",
         environment={
             # Pantheon's own accounts and scrypt hashes (pantheon_web/auth.py).
@@ -224,7 +208,8 @@ def build_web_app():
 
     application.router.lifespan_context = lifespan
 
-    application.add_middleware(LocalhostRedirect)        # last added = outermost
+    application.add_middleware(LocalhostRedirect)
+    application.add_middleware(LanAsLoopback)            # last added = outermost
     return application
 
 
