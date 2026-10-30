@@ -581,7 +581,7 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 - **Prompt overflow is silent and truncates from the FRONT** (measured — `PROMPT_BUDGET.md`), so
   the app now fits the prompt itself (`services/context.py`, 2026-10-30). The window is
   `context.effective()`: ⚙ Settings → Model → **Context window** (`AppSettings.context_limit`, 0 =
-  Auto or one of `CONTEXT_SIZES` 4096…32768), never above what KoboldCPP reports at
+  Auto or one of `CONTEXT_SIZES` 4096…131072, 48K+ for the AMD box), never above what KoboldCPP reports at
   `/api/extra/true_max_context_length` (`kobold.context_limit()`, cached 30 s, last good value kept
   while it's down, 8192 if never seen). `build_messages(context_tokens=…)` drops the **oldest
   verbatim turns** until system block + history + trailing notes + reply reserve fit (chars/4.0,

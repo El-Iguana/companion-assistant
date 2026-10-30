@@ -25,7 +25,8 @@ the real limit and nothing in the app notices.
 **Decided and built (2026-10-30):** `kobold.context_limit()` reads `true_max_context_length`
 (cached 30 s, so a backend restart with a new `--contextsize` is seen within that; the last good
 value is kept while the backend is down, 8192 if it was never seen). ⚙ Settings → **Context
-window** offers Auto or 4096 / 6144 / 8192 / 12288 / 16384 / 24576 / 32768, clamped to the
+window** offers Auto or 4096 / 6144 / 8192 / 12288 / 16384 / 24576 / 32768 (and 48K–128K for
+the AMD box), clamped to the
 backend's number. The backend's own size is `KOBOLDCPP_CONTEXT` in ai-stack's `koboldcpp/model.env`.
 
 ## What overflow actually does — measured, and it's bad

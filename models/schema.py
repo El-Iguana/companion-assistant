@@ -26,7 +26,7 @@ def _now() -> str:
 # Context windows the Settings screen offers (tokens). 0 = Auto: use whatever the
 # backend runs at. Below 4096 the memory folds (instructions + known facts + a
 # 1200-token summary) no longer fit, so that is the floor.
-CONTEXT_SIZES = (4096, 6144, 8192, 12288, 16384, 24576, 32768)
+CONTEXT_SIZES = (4096, 6144, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072)
 
 class AppSettings(BaseModel):
     """Global, non-per-character settings. Voice / hands-free config lives here."""
