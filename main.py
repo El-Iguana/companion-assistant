@@ -427,6 +427,74 @@ async def reset_password(uid: str, body: dict, _: User = Depends(require_admin))
     return {"ok": True}
 
 
+COPY_KINDS = ("character", "persona", "preset")
+
+
+@app.post("/api/users/{uid}/copy")
+async def copy_to_user(uid: str, body: dict, admin: User = Depends(require_admin)):
+    """Copy characters, personas and presets from the admin's library into another user's.
+
+    ``body.items`` is ``[{"kind": "character"|"persona"|"preset", "id": …}]``. Each copy is
+    a clone under a new id, so it carries everything stored on the record: portrait,
+    sprites, voice and speed, wake word, VRM assignment and its still. VRM files are
+    shared by every user in ``data/vrm/``, so the model needs no copying.
+
+    A preset's character/persona pairing points at ids in the admin's library. When the
+    paired item is copied in the same call, the pairing follows the new copy; otherwise
+    it is cleared, since the old id means nothing in the other library.
+    Copied personas are never the target's default, so their active persona stays put.
+    """
+    target = _user_by_id(uid)
+    if not target:
+        raise HTTPException(404, "user not found")
+    if target.id == admin.id:
+        raise HTTPException(400, "that is your own library — use Duplicate instead")
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, "nothing selected")
+    src, dst = _ctx_for(admin), _ctx_for(target)
+    folders = {"character": (src.cards, dst.cards, CharacterCard),
+               "persona": (src.personas, dst.personas, Persona),
+               "preset": (src.presets, dst.presets, RelationshipPreset)}
+
+    # Load everything first so a bad id fails the call before anything is written.
+    loaded = []
+    for it in items:
+        kind, id_ = (it or {}).get("kind"), (it or {}).get("id") or ""
+        if kind not in COPY_KINDS:
+            raise HTTPException(400, f"unknown kind: {kind}")
+        obj = _load(folders[kind][0], id_, folders[kind][2])
+        if obj is None:
+            raise HTTPException(404, f"{kind} not found: {id_}")
+        loaded.append((kind, obj))
+
+    new_ids: dict[tuple[str, str], str] = {}
+    copies = []
+    for kind, obj in loaded:
+        data = obj.model_dump(exclude={"id", "created_at", "updated_at"})
+        if kind == "persona":
+            data["is_default"] = False
+        copy = folders[kind][2](**data)
+        new_ids[(kind, obj.id)] = copy.id
+        copies.append((kind, copy))
+
+    out = []
+    for kind, copy in copies:
+        note = ""
+        if kind == "preset":
+            for field, k in (("character_id", "character"), ("persona_id", "persona")):
+                old = getattr(copy, field)
+                if old:
+                    setattr(copy, field, new_ids.get((k, old), ""))
+                    if not getattr(copy, field):
+                        note = "pairing cleared (paired item not copied)"
+        if kind == "character" and copy.vrm and not (_vrm_dir() / Path(copy.vrm).name).is_file():
+            note = f"VRM model {copy.vrm} is missing"
+        _save(copy, folders[kind][1])
+        out.append({"kind": kind, "id": copy.id, "name": copy.name, "note": note})
+    return {"ok": True, "user": target.username, "copied": out}
+
+
 # --------------------------------------------------------------------------
 # Status / voice (auth required)
 # --------------------------------------------------------------------------
@@ -741,7 +809,13 @@ async def upload_vrm(file: UploadFile = File(...), _: User = Depends(current_use
 async def delete_vrm(name: str, cur: Ctx = Depends(get_ctx)):
     """Remove a model. Refused while a card still points at it."""
     path = _vrm_path(name)
-    users = [c.name for c in _list(cur.cards, CharacterCard) if c.vrm == path.name]
+    # Models are shared by every user, so check every library, not just this one:
+    # a card copied to someone else would otherwise lose its avatar.
+    users = []
+    for root in sorted(UROOT.glob("*/characters")):
+        for c in _list(root, CharacterCard):
+            if c.vrm == path.name:
+                users.append(c.name if root == cur.cards else f"{c.name} (another user)")
     if users:
         raise HTTPException(409, "in use by: " + ", ".join(users))
     path.unlink()

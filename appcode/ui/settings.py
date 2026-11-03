@@ -15,7 +15,7 @@ import js
 from wapyt import message
 
 from bff.account import Account
-from ui.common import Listeners, attr, by_id, closest, esc, failed, spawn, toast
+from ui.common import Listeners, Modal, attr, by_id, closest, esc, failed, spawn, toast
 
 # (key, label, kind, extra, hint). kind: check | range(min, max, step, fmt) | text | select(options)
 GROUPS = [
@@ -199,6 +199,8 @@ class SettingsView:
                 f'<span class="pt-tag">{esc(u["role"])}</span>{"<span class=pt-dim>you</span>" if me else ""}'
                 '<span class="pt-flex"></span>'
                 f'<button class="pt-btn small" data-reset="{esc(u["id"])}" data-name="{esc(u["username"])}">Reset password</button>'
+                + ("" if me else f'<button class="pt-btn small" data-ucopy="{esc(u["id"])}" data-name="{esc(u["username"])}">'
+                   '<i class="mdi mdi-content-copy"></i>Copy to…</button>')
                 + ("" if me else f'<button class="pt-btn small danger" data-udel="{esc(u["id"])}" data-name="{esc(u["username"])}">Delete</button>')
                 + '</div>')
         box.innerHTML = (
@@ -308,6 +310,10 @@ class SettingsView:
         if reset:
             spawn(self._reset(attr(reset, "data-reset"), attr(reset, "data-name")), "reset password")
             return
+        ucopy = closest(ev, "[data-ucopy]")
+        if ucopy:
+            CopyToUserModal(attr(ucopy, "data-ucopy"), attr(ucopy, "data-name"))
+            return
         udel = closest(ev, "[data-udel]")
         if udel:
             spawn(self._delete_user(attr(udel, "data-udel"), attr(udel, "data-name")), "delete user")
@@ -361,6 +367,68 @@ class SettingsView:
         if not failed(r, f"delete {name}"):
             toast(f"{name} deleted.", "success")
             await self.load_users()
+
+
+_COPY_GROUPS = (("character", "Characters", "Portrait, sprites, voice and VRM come along."),
+                ("persona", "Personas", "Copies are never made their active persona."),
+                ("preset", "Presets", "A pairing follows only if its character/persona is copied too."))
+
+
+class CopyToUserModal:
+    """Admin: copy items from your own library into another user's."""
+
+    def __init__(self, user_id: str, username: str) -> None:
+        self.uid, self.name = user_id, username
+        self.modal = Modal('<div class="pt-prof-loading"><span class="pt-spin"></span></div>', cls="pt-narrow")
+        self.modal.listeners.on(self.modal.panel, "click", self._on_click)
+        spawn(self.load(), "copy to user")
+
+    async def load(self) -> None:
+        r = await Account().copy_sources()
+        if not self.modal.open:
+            return
+        if failed(r, "list your library"):
+            self.modal.close()
+            return
+        groups = []
+        for kind, title, hint in _COPY_GROUPS:
+            rows = r.get(kind) or []
+            if not rows:
+                continue
+            boxes = "".join(
+                f'<label class="pt-check plain"><input type="checkbox" data-kind="{kind}" value="{esc(x["id"])}">'
+                f'{esc(x["name"])}' + (f' <span class="pt-dim">{esc(x["extras"])}</span>' if x.get("extras") else "")
+                + '</label>' for x in rows)
+            groups.append(f'<div><h3>{title}</h3><p class="pt-dim">{hint}</p>{boxes}</div>')
+        body = "".join(groups) or '<p class="pt-dim">Your library is empty — nothing to copy.</p>'
+        self.modal.set_html(
+            '<div class="pt-form">'
+            f'<h2>Copy to <span class="pt-dim">{esc(self.name)}</span></h2>'
+            '<p class="pt-dim">Copies go into their library; your originals are unchanged. '
+            'Chats, memories and relationships are not copied.</p>'
+            + body +
+            '<div class="pt-form-actions"><button class="pt-btn ghost" data-close="1">Cancel</button>'
+            '<button class="pt-btn primary" data-copy="1"><i class="mdi mdi-content-copy"></i>Copy</button></div></div>')
+
+    def _on_click(self, ev) -> None:
+        if closest(ev, "[data-copy]"):
+            spawn(self._copy(), "copy to user")
+
+    async def _copy(self) -> None:
+        items = [{"kind": attr(el, "data-kind"), "id": str(el.value)}
+                 for el in self.modal.panel.querySelectorAll("input[data-kind]:checked")]
+        if not items:
+            toast("Pick at least one item to copy.", "warning")
+            return
+        r = await Account().copy_to_user(self.uid, items)
+        if failed(r, f"copy to {self.name}"):
+            return
+        self.modal.close()
+        done = r.get("copied") or []
+        notes = [f'{c["name"]}: {c["note"]}' for c in done if c.get("note")]
+        toast(f"Copied {len(done)} item{'s' if len(done) != 1 else ''} to {r.get('user') or self.name}."
+              + (" " + "; ".join(notes) if notes else ""), "warning" if notes else "success",
+              timeout_ms=8000 if notes else 4000)
 
 
 class HelpView:

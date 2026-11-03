@@ -298,6 +298,8 @@ tests use them; nothing listens on them. User management requires admin (403).
 ```
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
+POST /api/users/{id}/copy                  ADMIN: clone characters/personas/presets from your library into theirs
+                                           (new ids; sprites/portrait/voice/VRM ride along; preset pairings remap or clear)
 GET  /api/status                           KoboldCPP {online, version, model, context}
 POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})

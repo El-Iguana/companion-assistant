@@ -106,6 +106,43 @@ class Account:
     async def reset_password(self, user_id: str, password: str) -> dict:
         return await self._admin_call("reset_password", user_id or "", {"password": password or ""})
 
+    async def copy_sources(self) -> dict:
+        """What the admin can copy to another user: their own characters, personas, presets."""
+        import main
+        from models.schema import CharacterCard, Persona, RelationshipPreset
+
+        cur, err = self._admin()
+        if err:
+            return err
+
+        def rows(folder, cls):
+            return [{"id": x.id, "name": x.name}
+                    for x in sorted(main._list(folder, cls), key=lambda x: x.name.lower())]
+
+        cards = []
+        for c in sorted(main._list(cur.cards, CharacterCard), key=lambda c: c.name.lower()):
+            extras = [f"{len(c.expressions)} sprites"] if c.expressions else []
+            if c.vrm:
+                extras.append("VRM")
+            if c.tts_voice:
+                extras.append("voice")
+            cards.append({"id": c.id, "name": c.name, "extras": " · ".join(extras)})
+        return {"ok": True, "character": cards, "persona": rows(cur.personas, Persona),
+                "preset": rows(cur.presets, RelationshipPreset)}
+
+    async def copy_to_user(self, user_id: str, items: list) -> dict:
+        """Copy the chosen items into ``user_id``'s library (``main.copy_to_user``)."""
+        import main
+        from fastapi import HTTPException
+
+        cur, err = self._admin()
+        if err:
+            return err
+        try:
+            return await main.copy_to_user(user_id or "", {"items": list(items or [])}, cur.user)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail)}
+
     async def _admin_call(self, handler: str, *args) -> dict:
         """main's admin handlers take the acting admin as their last argument."""
         import main
