@@ -6,7 +6,8 @@ Actions, in Ember's order with Pantheon's extras:
   as the active persona. ``main.create_session`` does the rest, unchanged.
 - **Scenario…** — Pantheon's preset wizard: persona, preset, and whether the preset's
   numbers apply (``scenario``) or the persistent relationship carries on (``continue``).
-- **Edit** (the Studio, Phase 4) · **Export** (V2/V3 PNG) · **Delete** (confirmed).
+- **Edit** (the Studio, Phase 4) · **Export** (V2/V3 PNG) · **Copy to user…** (admins: a clone
+  into another account's library, ``main.copy_to_user``) · **Delete** (confirmed).
 
 The relationship strip shows where this character stands with the active persona —
 roleplay cards only; assistant cards are outside the relationship system entirely.
@@ -17,6 +18,7 @@ import js
 
 from wapyt import ContextMenu, ContextMenuConfig, MenuItem, message
 
+from bff.account import Account
 from bff.library import Library
 from ui.common import Modal, ago, attr, avatar_html, closest, esc, failed, portrait_url, spawn, toast
 
@@ -112,6 +114,11 @@ class ProfileModal:
         actions += [
             f'<a class="pt-btn" href="#/create/{esc(c["id"])}"><i class="mdi mdi-pencil-outline"></i>Edit</a>',
             '<button class="pt-btn" data-act="export"><i class="mdi mdi-export-variant"></i>Export</button>',
+        ]
+        if ((self.app.shell or {}).get("me") or {}).get("role") == "admin":
+            actions.append('<button class="pt-btn" data-act="copyto"><i class="mdi mdi-account-arrow-right-outline"></i>'
+                           'Copy to user…</button>')
+        actions += [
             '<button class="pt-btn danger" data-act="delete"><i class="mdi mdi-delete-outline"></i>Delete</button>',
             '<button class="pt-btn ghost" data-close="1">Close</button>',
         ]
@@ -196,6 +203,8 @@ class ProfileModal:
             ScenarioDialog(self.app, self.data, self.greeting)
         elif which == "export":
             self._export_menu(act)
+        elif which == "copyto":
+            CopyCharacterDialog(self.card_id, self.data["card"]["name"])
         elif which == "delete":
             spawn(self._delete(), "delete character")
 
@@ -237,6 +246,55 @@ class ProfileModal:
         toast(f"{name} deleted.", "success")
         self.close()
         await self.app.refresh()
+
+
+class CopyCharacterDialog:
+    """Admin: pick another account and copy this character into its library."""
+
+    def __init__(self, card_id: str, name: str) -> None:
+        self.card_id, self.name = card_id, name
+        self.modal = Modal('<div class="pt-prof-loading"><span class="pt-spin"></span></div>', cls="pt-narrow")
+        self.modal.listeners.on(self.modal.panel, "click", self._on_click)
+        spawn(self.load(), "copy to user")
+
+    async def load(self) -> None:
+        r = await Account().users()
+        if not self.modal.open:
+            return
+        if failed(r, "list accounts"):
+            self.modal.close()
+            return
+        others = [u for u in r.get("users") or [] if u["id"] != r.get("me")]
+        rows = "".join(
+            f'<button class="pt-btn pt-copyto" data-uid="{esc(u["id"])}" data-name="{esc(u["username"])}">'
+            f'<i class="mdi mdi-account-circle-outline"></i>{esc(u["username"])}'
+            f'<span class="pt-tag">{esc(u["role"])}</span></button>' for u in others)
+        self.modal.set_html(
+            '<div class="pt-form">'
+            f'<h2>Copy {esc(self.name)} <span class="pt-dim">to another user</span></h2>'
+            '<p class="pt-dim">They get their own copy: portrait, sprites, voice and VRM included. '
+            'Your chats, memories and relationship with this character are not copied.</p>'
+            + (f'<div class="pt-copyto-list">{rows}</div>' if rows
+               else '<p class="pt-dim">There are no other accounts yet — add one in Settings → Users.</p>')
+            + '<div class="pt-form-actions"><button class="pt-btn ghost" data-close="1">Cancel</button></div></div>')
+
+    def _on_click(self, ev) -> None:
+        btn = closest(ev, "[data-uid]")
+        if btn:
+            spawn(self._copy(attr(btn, "data-uid"), attr(btn, "data-name")), "copy to user")
+
+    async def _copy(self, uid: str, username: str) -> None:
+        for b in self.modal.panel.querySelectorAll("[data-uid]"):
+            b.disabled = True
+        r = await Account().copy_to_user(uid, [{"kind": "character", "id": self.card_id}])
+        if failed(r, f"copy to {username}"):
+            for b in self.modal.panel.querySelectorAll("[data-uid]"):
+                b.disabled = False
+            return
+        self.modal.close()
+        note = next((c["note"] for c in r.get("copied") or [] if c.get("note")), "")
+        toast(f"{self.name} copied to {username}." + (f" {note}." if note else ""),
+              "warning" if note else "success")
 
 
 class ScenarioDialog:
