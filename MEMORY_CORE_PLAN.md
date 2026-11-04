@@ -313,6 +313,12 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   nearest label (`muninn.emotion.normalize`). In the eval, ally and villain now move in
   opposite directions in most scenes, where they never could before; a one-line reaction
   behind someone else's long speech can still read neutral.
+- NPC memory (`muninn.episodic`, `muninn.names`): moments recorded when a turn moves an NPC's
+  relationship sharply or a milestone fires (no model call), and notes extracted per NPC at
+  fold time, each from only the turns that NPC witnessed. That restriction is enforced in code:
+  the prompt rule alone let NPCs remember scenes they weren't in. In the eval, NPCs bring up a
+  remembered event when asked almost every time with their memory in the prompt, and never
+  without it.
 
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
