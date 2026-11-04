@@ -1,0 +1,68 @@
+{
+  "name": "nothing-durable",
+  "kind": "fold",
+  "why": "NONE has to be a reachable answer. Pure small talk: no auto-facts may be stored at all, and the summary should be at most a bullet or two — the prompt says no small talk, so rain and tea are forbidden too. A pipeline that always finds something fills the store with noise that is injected into every later prompt.",
+  "char": "Mira",
+  "user": "Jonah",
+  "max_bullets": 2,
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "hey"
+        ],
+        [
+          "char",
+          "*Mira waves from the window seat.* \"Hey yourself.\""
+        ],
+        [
+          "user",
+          "what are you up to"
+        ],
+        [
+          "char",
+          "\"Watching the rain. Riveting stuff.\""
+        ],
+        [
+          "user",
+          "ha. it's really coming down"
+        ],
+        [
+          "char",
+          "\"Biblical. Tea?\""
+        ],
+        [
+          "user",
+          "go on then"
+        ],
+        [
+          "char",
+          "*She fetches two mugs.* \"There you go.\""
+        ],
+        [
+          "user",
+          "cheers"
+        ],
+        [
+          "char",
+          "\"Anytime.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "forbid": [
+      {
+        "label": "any auto-fact at all",
+        "in": "facts",
+        "pattern": ".+"
+      },
+      {
+        "label": "small talk recorded",
+        "in": "summary",
+        "pattern": "rain|tea|mug|weather|window|wave"
+      }
+    ]
+  }
+}

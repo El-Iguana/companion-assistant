@@ -1,0 +1,98 @@
+{
+  "name": "own-replies",
+  "kind": "fold",
+  "why": "The model recorded its own replies as memories ('MemTest confirms retention of all noted personal facts'). Here the character acknowledges everything ('Noted', 'Stored away', 'I remember everything'), offers to cook, and declares it agreed. None of that is a memory; the two things the USER said are. Forbidden anywhere: a line where Rook notes, stores, remembers, agrees, offers, or the risotto offer itself.",
+  "char": "Rook",
+  "user": "Jonah",
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "I'm allergic to shellfish, by the way. Properly allergic — EpiPen and everything."
+        ],
+        [
+          "char",
+          "*Rook inclines his head.* \"Noted. I shall remember that, and no prawn shall cross this threshold.\""
+        ],
+        [
+          "user",
+          "And my sister Hana is the only one allowed to call me Jo. Just so you know."
+        ],
+        [
+          "char",
+          "\"Stored away. Hana, the sister, sole keeper of 'Jo'. I'll remember.\""
+        ],
+        [
+          "user",
+          "You're very thorough."
+        ],
+        [
+          "char",
+          "\"It is my vocation. Would you like me to cook something tonight? I could make a risotto.\""
+        ],
+        [
+          "user",
+          "Sure, risotto's good."
+        ],
+        [
+          "char",
+          "\"Then it's agreed. Mushroom, and not a shellfish in sight.\""
+        ],
+        [
+          "user",
+          "You really don't forget anything, do you?"
+        ],
+        [
+          "char",
+          "*A faint smile.* \"I remember everything you tell me, Jonah. Every word.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "shellfish allergy",
+        "in": "any",
+        "all": [
+          [
+            "shellfish"
+          ],
+          [
+            "allerg"
+          ]
+        ]
+      },
+      {
+        "label": "sister Hana",
+        "in": "any",
+        "all": [
+          [
+            "hana"
+          ],
+          [
+            "sister"
+          ]
+        ]
+      }
+    ],
+    "forbid": [
+      {
+        "label": "character's own acknowledgement/offer recorded",
+        "in": "any",
+        "pattern": "\\b{char}\\b[^\\n]*\\b(not(ed|es)|stor(ed|es)|remember\\w*|recall\\w*|agree\\w*|offer\\w*|acknowledg\\w*|confirm\\w*|promis\\w*|will (make|cook))\\b"
+      },
+      {
+        "label": "the dinner offer recorded",
+        "in": "any",
+        "pattern": "risotto|mushroom|cook"
+      },
+      {
+        "label": "'Jonah is thorough' style small talk",
+        "in": "any",
+        "pattern": "thorough|vocation"
+      }
+    ]
+  }
+}

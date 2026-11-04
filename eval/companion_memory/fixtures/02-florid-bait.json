@@ -1,0 +1,89 @@
+{
+  "name": "florid-bait",
+  "kind": "fold",
+  "why": "The original florid failure: 'a few paragraphs at most' produced 1800 characters of essay about a dog and a bass ('immutable pillars', 'a symbol of stability'). This chat invites exactly that — the user is sentimental about both — so interpretation ('a way to feel close to his late father', 'symbol', 'anchor') is forbidden; the facts themselves are expected.",
+  "char": "Mira",
+  "user": "Eli",
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "You know what keeps me sane? Biscuit. That dog has been with me through three apartments and one terrible breakup."
+        ],
+        [
+          "char",
+          "*Mira scratches the old beagle behind the ears.* \"He's a good boy. A very loyal, very round good boy.\""
+        ],
+        [
+          "user",
+          "And the bass. My dad's old Fender. He gave it to me the year before he died. I play it every night, even if it's just ten minutes. It's like he's still in the room."
+        ],
+        [
+          "char",
+          "*Her voice softens.* \"That's beautiful, Eli. Will you play something for me?\""
+        ],
+        [
+          "user",
+          "Maybe later. I'm rusty on the fast stuff. I play in a pub band on Thursdays, The Low Tides, and I always fluff the bridge on our second song."
+        ],
+        [
+          "char",
+          "*She grins.* \"Then I'll be in the front row on Thursday to heckle you.\""
+        ],
+        [
+          "user",
+          "Please don't. Okay, maybe a little."
+        ],
+        [
+          "char",
+          "\"A little. Loudly.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "dog named Biscuit",
+        "in": "any",
+        "all": [
+          [
+            "biscuit"
+          ]
+        ]
+      },
+      {
+        "label": "father's bass",
+        "in": "any",
+        "all": [
+          [
+            "bass",
+            "fender"
+          ],
+          [
+            "father",
+            "dad"
+          ]
+        ]
+      },
+      {
+        "label": "plays in The Low Tides",
+        "in": "any",
+        "all": [
+          [
+            "low tides",
+            "band"
+          ]
+        ]
+      }
+    ],
+    "forbid": [
+      {
+        "label": "interpretation / significance",
+        "in": "any",
+        "pattern": "\\b(symbol\\w*|immutabl\\w*|pillar\\w*|testament|represent\\w*|embod\\w*|signific\\w*|cherish\\w*|anchor\\w*|legacy|soul|profound\\w*|unwavering|steadfast|beacon|comfort\\w*|connection to|feel (close|connected)|keeps? (his|the) .{0,20}(alive|present)|still in the room|sanity|keeps? him sane)\\b"
+      }
+    ]
+  }
+}

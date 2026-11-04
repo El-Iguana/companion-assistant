@@ -1,0 +1,165 @@
+{
+  "name": "recall-gate",
+  "kind": "recall",
+  "why": "The margin gate (RECALL_MIN_MARGIN 0.10 over the median, RECALL_MIN_SCORE 0.45, 3-word minimum) was calibrated on 8 documents and 13 queries. This is a larger probe: 20 durable user turns, plus 3 small-talk user turns (>= RECALL_MIN_TEXT, so a live index does hold them) in a second variant, and 25 queries — 14 relevant, 11 irrelevant. Relevant queries should retrieve the right turn; greetings and chit-chat should retrieve nothing. Deterministic given the embedder — no LLM, one pass per variant. Some relevant queries are deliberately inferential (cake -> diabetic, Wednesday -> chess) and are expected to be harder.",
+  "user": "Jonah",
+  "docs": [
+    "I'm allergic to shellfish, properly allergic, I carry an EpiPen everywhere.",
+    "My sister Nadia is a paramedic in Leeds.",
+    "I've had the Kestrel eight years, she's a twenty-six foot sloop.",
+    "My dog Moss is a border collie, she herds the neighbour's kids.",
+    "I work as a structural engineer, mostly footbridges.",
+    "My dad Alan was a fisherman out of Whitby for forty years.",
+    "I can't stand coriander, it tastes like soap to me.",
+    "Chess club is every Wednesday night at the library.",
+    "I'm type 1 diabetic so I have to watch the sugar.",
+    "I never learned to drive, I cycle everywhere.",
+    "My mum broke her hip last winter and she's still on a walking frame.",
+    "I play bass in a pub band called The Low Tides.",
+    "I got the scar on my chin falling off a sea wall when I was eight.",
+    "My favourite film is Withnail and I, I can quote the whole thing.",
+    "I grew up in a terraced house right by the harbour.",
+    "My best mate Tom welds boat hulls for a living.",
+    "I'm terrified of hospitals since Dad's last months.",
+    "I hate the cold but I love swimming in the sea in August.",
+    "I keep bees on the allotment, three hives.",
+    "I'm saving up to replace the Kestrel's old sails."
+  ],
+  "queries": [
+    {
+      "q": "Can we get some prawns for dinner tonight?",
+      "expect": [
+        "shellfish"
+      ]
+    },
+    {
+      "q": "What does my sister do for work again?",
+      "expect": [
+        "Nadia"
+      ]
+    },
+    {
+      "q": "Do you think the boat needs new sails?",
+      "expect": [
+        "sails",
+        "Kestrel"
+      ]
+    },
+    {
+      "q": "Moss ran off after the neighbours again",
+      "expect": [
+        "Moss"
+      ]
+    },
+    {
+      "q": "Should we put coriander in the curry?",
+      "expect": [
+        "coriander"
+      ]
+    },
+    {
+      "q": "Could you drive me to the station later?",
+      "expect": [
+        "drive"
+      ]
+    },
+    {
+      "q": "How is my mum getting on with her recovery?",
+      "expect": [
+        "hip"
+      ]
+    },
+    {
+      "q": "What did my father do for a living?",
+      "expect": [
+        "fisherman"
+      ]
+    },
+    {
+      "q": "Want to watch a film tonight, any ideas?",
+      "expect": [
+        "Withnail"
+      ]
+    },
+    {
+      "q": "Where did that scar on my face come from?",
+      "expect": [
+        "scar"
+      ]
+    },
+    {
+      "q": "The honey from the hives should be ready soon",
+      "expect": [
+        "bees"
+      ]
+    },
+    {
+      "q": "I've got to go and visit someone in hospital tomorrow",
+      "expect": [
+        "hospitals",
+        "hip"
+      ]
+    },
+    {
+      "q": "Is it Wednesday already? I need to head out tonight",
+      "expect": [
+        "Chess"
+      ]
+    },
+    {
+      "q": "Can I have a slice of that chocolate cake?",
+      "expect": [
+        "diabetic"
+      ]
+    },
+    {
+      "q": "hello",
+      "expect": null
+    },
+    {
+      "q": "tell me a joke",
+      "expect": null
+    },
+    {
+      "q": "how are you doing today?",
+      "expect": null
+    },
+    {
+      "q": "what time is it right now?",
+      "expect": null
+    },
+    {
+      "q": "I'm going to bed, goodnight then",
+      "expect": null
+    },
+    {
+      "q": "can you describe the room we're in",
+      "expect": null
+    },
+    {
+      "q": "that's hilarious, you're ridiculous",
+      "expect": null
+    },
+    {
+      "q": "what do you want to talk about?",
+      "expect": null
+    },
+    {
+      "q": "let me think about it for a second",
+      "expect": null
+    },
+    {
+      "q": "okay sure, sounds good to me",
+      "expect": null
+    },
+    {
+      "q": "what's your favourite colour?",
+      "expect": null
+    }
+  ],
+  "noise_docs": [
+    "Haha, okay, that's fair enough I suppose.",
+    "Good morning, did you sleep well last night?",
+    "Mm, that sounds nice, let's do that then."
+  ]
+}

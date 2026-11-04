@@ -1,0 +1,152 @@
+{
+  "name": "longterm-erosion",
+  "kind": "fold",
+  "why": "Finding 4 in MEMORY_CORE_PLAN: the long-term summary is rewritten from scratch every fold, so early material survives only if the model keeps choosing it. Three separate sessions, two durable facts each; after the third fold all six must still be somewhere in long-term memory (summary or facts). This is the baseline the planned consolidation/episodes work is meant to beat.",
+  "char": "Mira",
+  "user": "Priya",
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "Sorry I'm late — the tide samples ran over. Occupational hazard of being a marine biologist."
+        ],
+        [
+          "char",
+          "*Mira hands her a towel.* \"You smell like a rock pool.\""
+        ],
+        [
+          "user",
+          "Charming. Gus needs feeding when we get in, too."
+        ],
+        [
+          "char",
+          "\"Gus being…?\""
+        ],
+        [
+          "user",
+          "My tortoise. He's forty-one. He was my grandmother's."
+        ],
+        [
+          "char",
+          "\"Older than both of us. Respect.\""
+        ]
+      ]
+    },
+    {
+      "messages": [
+        [
+          "user",
+          "*drops a cello case by the door* Quartet rehearsal ran long. Brahms, again."
+        ],
+        [
+          "char",
+          "\"You play cello? How did I not know this?\""
+        ],
+        [
+          "user",
+          "Since I was seven. I'm second chair in the Harbour Street Quartet."
+        ],
+        [
+          "char",
+          "\"Second chair. Very distinguished.\" *She opens the fridge.* \"Ham sandwich?\""
+        ],
+        [
+          "user",
+          "I'm vegetarian — have been for ten years. Cheese is fine."
+        ],
+        [
+          "char",
+          "\"Cheese it is.\""
+        ]
+      ]
+    },
+    {
+      "messages": [
+        [
+          "user",
+          "Don't make me go up the lighthouse stairs. I'm terrified of heights, I mean it."
+        ],
+        [
+          "char",
+          "*Mira stops on the first step.* \"Okay. Ground floor it is.\""
+        ],
+        [
+          "user",
+          "Thank you. Mum would laugh at me. Anjali's not scared of anything."
+        ],
+        [
+          "char",
+          "\"Your mum's called Anjali? That's lovely.\""
+        ],
+        [
+          "user",
+          "She is. Terrifying, but lovely."
+        ],
+        [
+          "char",
+          "\"Sounds like someone I know.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "S1: marine biologist",
+        "in": "any",
+        "all": [
+          [
+            "marine biolog",
+            "biologist"
+          ]
+        ]
+      },
+      {
+        "label": "S1: tortoise Gus",
+        "in": "any",
+        "all": [
+          [
+            "gus"
+          ]
+        ]
+      },
+      {
+        "label": "S2: plays cello",
+        "in": "any",
+        "all": [
+          [
+            "cello"
+          ]
+        ]
+      },
+      {
+        "label": "S2: vegetarian",
+        "in": "any",
+        "all": [
+          [
+            "vegetarian"
+          ]
+        ]
+      },
+      {
+        "label": "S3: afraid of heights",
+        "in": "any",
+        "all": [
+          [
+            "height"
+          ]
+        ]
+      },
+      {
+        "label": "S3: mother Anjali",
+        "in": "any",
+        "all": [
+          [
+            "anjali"
+          ]
+        ]
+      }
+    ]
+  }
+}

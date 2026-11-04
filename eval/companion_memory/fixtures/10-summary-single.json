@@ -1,0 +1,127 @@
+{
+  "name": "summary-single",
+  "kind": "summarize",
+  "why": "The per-session rolling summary. 'A few paragraphs, third person, present tense' produced a retelling that sat in every prompt as a worked example of recapping, so it is now past-tense notes ending in exactly one 'Where things stand:' line. Checks: one such line, last; no present-tense narration ('she smiles', 'he leans'); no paragraph-length lines; the key events (lantern, fortune-teller's warning, lighthouse promise) retained; the line names where they are now (the noodle stall). Added after the first baseline run: one summary invented a whole ending (groceries at the door, a walk home, a kiss outside his building) and set the Where line there — confabulated events would be injected into every later prompt as 'Story so far'.",
+  "char": "Mira",
+  "user": "Jonah",
+  "stages": [
+    {
+      "messages": [
+        [
+          "char",
+          "*The night market hums around them, strings of paper lanterns bobbing overhead.* \"Stay close, it gets mad near the river end.\""
+        ],
+        [
+          "user",
+          "*takes her hand* Lead the way."
+        ],
+        [
+          "char",
+          "*She tugs him toward a stall heaped with glass lanterns.* \"Look at these. The blue one. It's like a bit of sea in a jar.\""
+        ],
+        [
+          "user",
+          "*pays the stallholder* Then it's yours. Happy unbirthday."
+        ],
+        [
+          "char",
+          "*She holds it up, delighted, the light catching her face.* \"Jonah! You can't just — thank you.\""
+        ],
+        [
+          "user",
+          "Who's that waving at us from the tent?"
+        ],
+        [
+          "char",
+          "\"Old Bess. Fortune-teller. She's been reading palms here since before I was born. Come on, it's tradition.\""
+        ],
+        [
+          "user",
+          "*sits down across from Bess and offers a palm*"
+        ],
+        [
+          "char",
+          "*Bess traces his palm, frowning.* \"Stay off the old rail bridge this month, love. It doesn't like you.\" *Mira's grip tightens on his arm.*"
+        ],
+        [
+          "user",
+          "That's… oddly specific. Okay. No bridge."
+        ],
+        [
+          "char",
+          "*Outside the tent, Mira exhales.* \"She's usually right, you know. Promise me.\""
+        ],
+        [
+          "user",
+          "I promise. No bridge."
+        ],
+        [
+          "char",
+          "\"Good. And tomorrow I'm taking you up the lighthouse at Saltcombe — I've been meaning to show you the view for ages.\""
+        ],
+        [
+          "user",
+          "It's a date. Now feed me before I faint."
+        ],
+        [
+          "char",
+          "*She steers him to a steaming noodle stall and orders two bowls.* \"Extra chilli for you, coward's portion for me.\""
+        ],
+        [
+          "user",
+          "*perches on a stool at the counter and blows on the noodles* This is perfect."
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "bought the blue lantern",
+        "in": "notes",
+        "all": [
+          [
+            "lantern"
+          ]
+        ]
+      },
+      {
+        "label": "Bess warned about the rail bridge",
+        "in": "notes",
+        "all": [
+          [
+            "bridge"
+          ]
+        ]
+      },
+      {
+        "label": "lighthouse promise for tomorrow",
+        "in": "notes",
+        "all": [
+          [
+            "lighthouse"
+          ]
+        ]
+      },
+      {
+        "label": "Where line: at the noodle stall",
+        "in": "where",
+        "all": [
+          [
+            "noodle",
+            "stall",
+            "counter",
+            "market"
+          ]
+        ]
+      }
+    ],
+    "forbid": [
+      {
+        "label": "invented events past the end of the transcript",
+        "in": "summary",
+        "pattern": "\\bkiss|walked .{0,30}(home|back)|heading home|went home|outside (his|her) (building|door|flat|house)|groceries|goodbye|good night|said goodnight"
+      }
+    ]
+  }
+}

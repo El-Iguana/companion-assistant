@@ -1,0 +1,70 @@
+{
+  "name": "padding-short",
+  "kind": "fold",
+  "why": "Two durable things in a six-turn chat. Guards the padding failure: a bare bullet cap got padded to exactly the cap with invented traits ('Testy prefers to conclude interactions with a casual talk later'), and the prompt now says a four-bullet memory is a good memory. Cap here is 4 — a short chat that produces more than that is padding. Moods ('exhausted') and inferred traits ('dedicated', 'caring') are forbidden: they are not true after the conversation ends, or were never said.",
+  "char": "Mira",
+  "user": "Jonah",
+  "max_bullets": 4,
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "*drops onto the couch* Finally home. Twelve-hour shift on the night ward again."
+        ],
+        [
+          "char",
+          "*Mira looks up from her book and smiles.* \"You look wrecked. The night ward — that's cardiac, right?\""
+        ],
+        [
+          "user",
+          "Yeah. I've been a nurse there six years now. My cat Pepper is the only one who doesn't judge my sleep schedule."
+        ],
+        [
+          "char",
+          "*She laughs and pats the cushion beside her.* \"Pepper has excellent judgement. Come here, I'll put the kettle on.\""
+        ],
+        [
+          "user",
+          "Tea sounds perfect. Just let me sit for a minute."
+        ],
+        [
+          "char",
+          "*She tucks a blanket over his knees.* \"Sit as long as you want.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "Jonah is a nurse",
+        "in": "any",
+        "all": [
+          [
+            "nurse"
+          ]
+        ]
+      },
+      {
+        "label": "cat named Pepper",
+        "in": "any",
+        "all": [
+          [
+            "pepper"
+          ],
+          [
+            "cat"
+          ]
+        ]
+      }
+    ],
+    "forbid": [
+      {
+        "label": "inferred trait or passing mood",
+        "in": "any",
+        "pattern": "\\b(caring|compassionate|dedicated|hard-?working|tired|exhausted|wrecked|enjoys|prefers|tends to|seems|appears|likely|cat lover|independent|loves tea)\\b"
+      }
+    ]
+  }
+}

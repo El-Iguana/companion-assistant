@@ -1,0 +1,68 @@
+{
+  "name": "inferred-traits",
+  "kind": "fold",
+  "why": "Nothing here is stated except one fact (Sam is a carpenter). Everything else — apologising, 'talk later', brevity — invites the inferred-trait failure ('Sam is shy', 'Sam tends to apologise', 'prefers to end with talk later'). Both prompts forbid inference; a wrong auto-fact persists into every later prompt.",
+  "char": "Mira",
+  "user": "Sam",
+  "max_bullets": 4,
+  "stages": [
+    {
+      "messages": [
+        [
+          "user",
+          "um. hi. sorry, I didn't mean to interrupt your reading."
+        ],
+        [
+          "char",
+          "*Mira closes the book.* \"You're not interrupting. Sit.\""
+        ],
+        [
+          "user",
+          "sorry. thanks. long day at the workshop. I build furniture, mostly chairs. I'm a carpenter."
+        ],
+        [
+          "char",
+          "\"A carpenter! That explains the sawdust in your hair.\""
+        ],
+        [
+          "user",
+          "oh no. sorry. *brushes at hair*"
+        ],
+        [
+          "char",
+          "*She laughs.* \"Leave it, it suits you.\""
+        ],
+        [
+          "user",
+          "ok. anyway. I should go. talk later?"
+        ],
+        [
+          "char",
+          "\"Talk later, Sam.\""
+        ]
+      ]
+    }
+  ],
+  "checks": {
+    "expect": [
+      {
+        "label": "Sam is a carpenter",
+        "in": "any",
+        "all": [
+          [
+            "carpent",
+            "furniture",
+            "chairs"
+          ]
+        ]
+      }
+    ],
+    "forbid": [
+      {
+        "label": "inferred trait / habit",
+        "in": "any",
+        "pattern": "\\b(shy\\w*|nervous\\w*|anxious|insecur\\w*|introvert\\w*|apologi[sz]\\w*|self-conscious|awkward\\w*|timid\\w*|reserved|prefers?|tends? to|habit\\w*|often|usually|always|likes? to|seems?|appears?|polite\\w*|quiet\\w*|talk later|sawdust|hair)\\b"
+      }
+    ]
+  }
+}
