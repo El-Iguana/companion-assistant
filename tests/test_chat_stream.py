@@ -108,6 +108,9 @@ async def _turn(cur, session, text="hi") -> list[dict]:
 async def _jobs():
     while main._memory_tasks:
         await asyncio.gather(*list(main._memory_tasks))
+        # Yield once: awaiting already-finished tasks doesn't, so their done-callbacks
+        # (which remove them from the set) never ran and this spun forever.
+        await asyncio.sleep(0)
 
 
 def _reload(cur, s) -> ChatSession:
@@ -196,3 +199,38 @@ def test_client_leaving_mid_stream_does_not_save(cur, session, model):
 
     asyncio.run(go())
     assert _reload(cur, session).messages[-1].content == "m2"
+
+
+def test_a_memory_edit_saved_while_a_reply_streams_is_kept(cur, session, model, monkeypatch):
+    """A turn never changes memory; the Memory modal and the memory job do. The turn
+    used to write back the memory it loaded before the reply, losing an edit saved
+    while the reply streamed (it only adopted the stored memory when the summary
+    index had moved)."""
+    hold = asyncio.Event()
+    streaming = asyncio.Event()
+
+    async def slow_tokens(messages, params):
+        streaming.set()
+        await hold.wait()
+        yield "Hello."
+
+    async def no_summary(*a, **k):      # the job folds into the stored summary; not under test
+        return None
+
+    monkeypatch.setattr(main.kobold, "chat_generate_stream", slow_tokens)
+    monkeypatch.setattr(main.memory, "summarize", no_summary)
+
+    async def go():
+        turn = asyncio.create_task(_turn(cur, session))
+        await streaming.wait()
+        await main.set_memory(session.id, {"pinned": ["Afraid of deep water"],
+                                           "summary": "Edited by hand."}, cur=cur)
+        hold.set()
+        await turn
+        await _jobs()
+
+    asyncio.run(go())
+    saved = _reload(cur, session)
+    assert saved.memory.pinned == ["Afraid of deep water"]
+    assert saved.memory.summary == "Edited by hand."
+    assert saved.messages[-1].content == "Hello."

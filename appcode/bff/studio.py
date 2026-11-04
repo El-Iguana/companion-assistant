@@ -85,8 +85,8 @@ class Studio:
             return []
 
     async def save(self, card_id: str, fields: dict, portrait: str = "",
-                   remove_portrait: bool = False, starters: list = None,
-                   lorebook: list = None, vrm_still: str = "") -> dict:
+                   remove_portrait: bool = False, starters: list | None = None,
+                   lorebook: list | None = None, vrm_still: str = "") -> dict:
         """Apply the edited fields onto the stored card (or a new one) and save it.
 
         ``vrm_still`` is a PNG data URL of the 3D model, rendered in the browser; it is

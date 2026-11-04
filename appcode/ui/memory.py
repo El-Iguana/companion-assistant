@@ -23,6 +23,17 @@ def _row(kind: str, item: dict, placeholder: str) -> str:
             + '<button class="pt-mbtn" data-rm="1" title="Remove"><i class="mdi mdi-close"></i></button></div>')
 
 
+def _moment_row(m: dict) -> str:
+    """A moment is reviewed, not edited: shown read-only, with a remove button."""
+    said = f'"{m.get("said")}" → ' if m.get("said") else ""
+    feel = f' ({m.get("milestone") or m.get("emotion")})' if (m.get("milestone") or m.get("emotion")) else ""
+    text = f'{said}{m.get("shown") or ""}{feel}'
+    return (f'<div class="pt-memrow" data-row="moment" data-id="{esc(m.get("id") or "")}">'
+            f'<input type="text" value="{esc(text)}" readonly title="{esc(text)}">'
+            '<span class="pt-tag" title="Recorded automatically when a reply moved the relationship">auto</span>'
+            '<button class="pt-mbtn" data-rm="1" title="Remove"><i class="mdi mdi-close"></i></button></div>')
+
+
 PH = {"pinned": "Lives on the starship Meridian; afraid of deep water",
       "fact": "Her sister's name is Nadia",
       "directive": "Address me as Sir"}
@@ -78,6 +89,8 @@ class MemoryModal:
                   f'<h3>Remembered facts <small>carried into every chat with {esc(d.get("character"))}</small></h3>'
                   f'<div class="pt-memlist" data-list="fact">{"".join(_row("fact", x, PH["fact"]) for x in long.get("facts") or [])}</div>'
                   '<button class="pt-btn small" data-add="fact"><i class="mdi mdi-plus"></i>Add a fact</button>'
+                  '<h3>Moments that shaped the relationship <small>why she feels the way she does — remove any that are wrong</small></h3>'
+                  f'<div class="pt-memlist" data-list="moment">{"".join(_moment_row(m) for m in long.get("moments") or []) or "<p class=pt-dim>None yet — kept when a reply moves the relationship sharply.</p>"}</div>'
                   '<h3>History across chats <small>written when a chat is folded in — edit to correct it</small></h3>'
                   f'<textarea id="mem-long-text" rows="7" placeholder="Nothing remembered yet — it builds up as you finish conversations.">{esc(long.get("summary") or "")}</textarea>'
                   '</div>')
@@ -128,7 +141,8 @@ class MemoryModal:
             long = {"directives": self._rows("directive"), "facts": self._rows("fact"),
                     "notes": str(text.value) if text else ""}
         elif kind == "companion":
-            long = {"facts": self._rows("fact"), "summary": str(text.value).strip() if text else ""}
+            long = {"facts": self._rows("fact"), "summary": str(text.value).strip() if text else "",
+                    "moments": [attr(r, "data-id") for r in panel.querySelectorAll('[data-row="moment"]')]}
         r = await Memory().save(self.sid, self._rows("pinned", with_ids=False),
                                 str(panel.querySelector("#mem-summary").value).strip(), long)
         if failed(r, "save the memory"):

@@ -494,6 +494,23 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   then vanished on the reload with no error (2026-10-29: 5 of 24 replies in a long chat, while the
   memory step still ran before `done`). Every client ignores unknown events. Stop / a closed tab
   still cancels the turn unsaved.
+- **A BFF argument that may be `None` must be annotated `X | None`.** pytincture checks every
+  BFF argument against its annotation, as written, before the method runs; `long: dict = None`
+  answered 400 to the `None` the page sends, so the Memory modal's Save wrote nothing for
+  scenario and character-less chats (2026-11-04). `tests/test_bff_signatures.py` scans every
+  BFF method for it.
+- **Nothing that waits on the model may save a stale copy.** `_save_turn` always keeps the
+  stored `memory` (a turn never changes it; the job and the Memory modal do), and a long-term
+  fold, threshold or idle sweep, goes through `_store_fold`: only what the fold changed (entries
+  added or evicted by id, the summary or notes if nobody edited them, swept marks) is applied
+  to a fresh read. The assistant sweep moves only the session's index, on a fresh read.
+  Tests: `tests/test_chat_stream.py`, `tests/test_fold_merge.py`.
+- **Repetition guards** (`eval/repetition`): the DRY sampler is on by default
+  (`GenerationConfig.dry_*`, sent by `kobold_params`, so the auto-continue gets it too). It
+  penalises reusing any word sequence already in the context, which `rep_pen` (single tokens)
+  doesn't. "Another take" quotes the take being replaced (`prompt_builder.retake_note`, before
+  the boundary note): the old take used to be dropped from the prompt, so the model had nothing
+  to differ from and often opened the same way. Tests: `tests/test_repetition_guards.py`.
 - **Memory maintenance runs after `done`** (`_memory_job`, 2026-10-29). A turn classifies, updates
   the relationship, saves (`_save_turn`) and sends `done`; the summary + long-term fold then run in
   a background task, one per session at a time (`_memory_locks`), starting from a fresh read. It can

@@ -59,9 +59,15 @@ class Memory:
                 out["long_kind"] = "companion"
         return out
 
-    async def save(self, session_id: str, pinned: list, summary: str, long: dict = None) -> dict:
+    async def save(self, session_id: str, pinned: list, summary: str,
+                   long: dict | None = None) -> dict:
         """Write this chat's memory, and long-term only when ``long`` is given (it is only
-        sent when the page loaded it)."""
+        sent when the page loaded it).
+
+        ``long`` must be annotated as optional: pytincture checks every argument against
+        its annotation before the call, and ``None`` is not a ``dict``. Declared as
+        ``long: dict = None``, every save of a chat without long-term memory (scenario
+        and character-less chats) was answered 400 and nothing was written."""
         import main
         from fastapi import HTTPException
 
@@ -79,6 +85,8 @@ class Memory:
                     await main.put_assistant_memory(body, cur=cur)
                 else:
                     body.update(facts=long.get("facts") or [], summary=long.get("summary") or "")
+                    if "moments" in long:         # ids still listed; only removal is possible
+                        body["moments"] = list(long.get("moments") or [])
                     await main.put_character_memory(body, cur=cur)
         except HTTPException as exc:
             return {"ok": False, "error": str(exc.detail)}

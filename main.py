@@ -31,7 +31,7 @@ from models.schema import (
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from muninn import relationship
+from muninn import episodic, relationship
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -303,6 +303,34 @@ def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str) -> Assi
 def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
     (cur.assistant / f"{mem.character_id}__{mem.persona_id}.json").write_text(
         mem.model_dump_json(indent=2))
+
+
+def _store_fold(cur: Ctx, before, after) -> None:
+    """Save a long-term fold without losing an edit made while it ran.
+
+    A fold loads the pairing's memory, spends up to a minute on model calls, then
+    used to save it whole, so anything edited in the Memory modal meanwhile was
+    overwritten. Now only what the fold changed is applied to what is stored now:
+    the entries it added or evicted (by id), the summary or task notes only if nobody
+    edited them, and its swept-session marks. `before` is a copy taken just before
+    the fold, `after` the folded memory; both CharacterMemory or both AssistantMemory.
+    """
+    assistant = isinstance(after, AssistantMemory)
+    load = _load_assistant_memory if assistant else _load_character_memory
+    save = _save_assistant_memory if assistant else _save_character_memory
+    fresh = load(cur, after.character_id, after.persona_id)
+    for field in (("notes",) if assistant else ("summary",)):
+        if getattr(fresh, field) == getattr(before, field):
+            setattr(fresh, field, getattr(after, field))
+    for field in (("directives", "facts") if assistant else ("facts",)):
+        had = {x.id for x in getattr(before, field)}
+        has = {x.id for x in getattr(after, field)}
+        added = [x for x in getattr(after, field) if x.id not in had]
+        setattr(fresh, field, [x for x in getattr(fresh, field) if x.id not in had - has] + added)
+    for sid, idx in after.swept_sessions.items():
+        fresh.swept_sessions[sid] = max(fresh.swept_sessions.get(sid, 0), idx)
+    fresh.updated_at = after.updated_at
+    save(cur, fresh)
 
 
 def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
@@ -1179,6 +1207,10 @@ async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
         mem.facts = facts[-memory.LONGTERM_MAX_FACTS:]
     if "summary" in body:
         mem.summary = str(body.get("summary") or "").strip()
+    if "moments" in body:
+        # Review only: the modal can remove a moment, not write one.
+        keep = {str(m.get("id") if isinstance(m, dict) else m) for m in body.get("moments") or []}
+        mem.moments = [m for m in mem.moments if m.id in keep]
     mem.updated_at = datetime.now().isoformat()
     _save_character_memory(cur, mem)
     # Re-index facts wholesale rather than diffing: they are editable and
@@ -1265,25 +1297,31 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     window = await _context_tokens(st)
     if getattr(card, "chat_mode", "roleplay") == "assistant":
         am = _load_assistant_memory(cur, session.character_id, persona.id)
+        am0 = am.model_copy(deep=True)
         changed = await assistant_memory.fold(
             kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
             extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new,
             context_tokens=window)
         if changed:
-            _save_assistant_memory(cur, am)
-            session.memory.last_summarized_index = am.swept_sessions.get(
-                session.id, session.memory.last_summarized_index)
-            _save(session, cur.sessions)
+            _store_fold(cur, am0, am)
+            # Onto a fresh read: the session loaded before the fold would roll back a
+            # message sent while it ran. Only the index moves, and only forward.
+            live = _load(cur.sessions, session.id, ChatSession)
+            mark = am.swept_sessions.get(session.id, 0)
+            if live and mark > live.memory.last_summarized_index:
+                live.memory.last_summarized_index = mark
+                _save(live, cur.sessions)
         return {"ok": True, "swept": changed, "pipeline": "assistant"}
 
     mem = _load_character_memory(cur, session.character_id, persona.id)
+    mem0 = mem.model_copy(deep=True)
     changed = await memory.fold_into_longterm(
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
         index_path=_memory_index_path(cur, session.character_id, persona.id),
         extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
         context_tokens=window)
     if changed:
-        _save_character_memory(cur, mem)
+        _store_fold(cur, mem0, mem)
     return {"ok": True, "swept": changed}
 
 
@@ -1420,9 +1458,14 @@ _memory_tasks: set[asyncio.Task] = set()      # strong refs: the loop keeps only
 
 
 def _save_turn(cur: Ctx, session: ChatSession) -> None:
-    """Save a finished turn without rolling back a summary a memory job wrote meanwhile."""
+    """Save a finished turn without rolling back memory written while it ran.
+
+    A turn never changes `memory`: the memory job writes the summary, and the Memory
+    modal writes pinned facts and the summary. So the stored memory always wins. This
+    used to adopt it only when the summary index had moved, so an edit saved in the
+    Memory modal while a reply streamed was overwritten by the copy the turn loaded."""
     fresh = _load(cur.sessions, session.id, ChatSession)
-    if fresh and fresh.memory.last_summarized_index > session.memory.last_summarized_index:
+    if fresh:
         session.memory = fresh.memory
     _save(session, cur.sessions)
 
@@ -1491,12 +1534,13 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
         if (memory.needs_summary(session, st.summarize_after)
                 and fold_end > session.memory.last_summarized_index and not scenario):
             am = _load_assistant_memory(cur, session.character_id, persona.id)
+            am0 = am.model_copy(deep=True)
             if await assistant_memory.fold(
                     kobold, am, session, card, persona, upto=fold_end,
                     max_tokens=st.summary_max_tokens,
                     extract_items=st.auto_facts_enabled,
                     max_new=st.auto_facts_max_new, context_tokens=window):
-                _save_assistant_memory(cur, am)
+                _store_fold(cur, am0, am)
                 session.memory.last_summarized_index = fold_end
     else:
         await memory.summarize(kobold, session, card, persona,
@@ -1510,6 +1554,7 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
         # have advanced it, and writing back a stale copy would lose that.
         if not scenario:
             cm = _load_character_memory(cur, session.character_id, persona.id)
+            cm0 = cm.model_copy(deep=True)
             if await memory.fold_into_longterm(
                     kobold, cm, session, card, persona,
                     upto=session.memory.last_summarized_index,
@@ -1517,7 +1562,7 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
                     index_path=_memory_index_path(cur, session.character_id, persona.id),
                     extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
                     context_tokens=window):
-                _save_character_memory(cur, cm)
+                _store_fold(cur, cm0, cm)
     _apply_memory(cur, session, basis)
 
 
@@ -1623,6 +1668,13 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # rather than shrinking her memory for a block that isn't there.
         lt_note = memory.longterm_block(char_mem, card.name, persona.name)
 
+    # Why she feels this way: the latest moment that moved the relationship.
+    if char_mem is not None and char_mem.moments and rel_note:
+        moment = episodic.render(episodic.PersonMemory(moments=char_mem.moments[-1:]),
+                                 card.name, persona.name)
+        if moment:
+            rel_note += " " + moment
+
     window = await _context_tokens(settings)
     trimmed: list = []
     messages = prompt_builder.build_messages(
@@ -1633,7 +1685,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
         # Only ask for beats we can actually render a sprite for.
         expr_labels=sorted(card.expressions.keys()) if card.expressions else [],
-        context_tokens=window, trimmed=trimmed)
+        context_tokens=window, trimmed=trimmed,
+        # Another take: quote what is being replaced, so the new one differs from it.
+        retake_of=_pending_swipes if req.regenerate else None)
     if trimmed and trimmed[0]:
         # Not an error: the summary absorbs these turns on its next fold. Logged
         # because a session that trims every turn wants a lower "Summarize after".
@@ -1731,6 +1785,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # reset — inert while the card is an assistant, intact if it is ever switched back.
         milestone_toasts = []
         if not req.regenerate and not assistant:
+            before = episodic.axes(rel)
             relationship.update(rel, feel, power, social)
             # Escalation: once physical intimacy has begun and she's positively engaged, actually
             # doing acts nudges willingness toward the next rung (social acceptance modulates the pace).
@@ -1740,11 +1795,32 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                 except Exception:
                     act = 0
                 relationship.escalate(rel, act, social)
+            fired = []
             for m in relationship.newly_reached(rel):
                 rel.milestones.append(m["id"])
+                fired.append(m["id"])
                 milestone_toasts.append(m["toast"].replace("{char}", card.name).replace("{user}", persona.name))
                 beat = m["beat"].replace("{char}", card.name).replace("{user}", persona.name)
                 session.pending_milestone = (session.pending_milestone + " " + beat).strip()
+            if not scenario:
+                # A reply that moved the relationship sharply, or crossed a milestone, is
+                # kept as a moment: the "why" behind the numbers (muninn.episodic). Onto
+                # a fresh read of the pairing's memory, so it can't roll back a fold or
+                # an edit made meanwhile.
+                said = next((m.content for m in reversed(session.messages)
+                             if m.role == "user" and m.content), "") if not req.continue_turn else ""
+                held = episodic.PersonMemory(moments=list(char_mem.moments) if char_mem else [])
+                if episodic.record_moment(held, before, rel, emotion=feel or "", said=said,
+                                          reply=reply, name=card.name, at=len(session.messages),
+                                          milestone=",".join(fired)):
+                    had = {x.id for x in (char_mem.moments if char_mem else [])}
+                    kept = {x.id for x in held.moments}
+                    cm = _load_character_memory(cur, card.id, persona.id)
+                    # Apply only this turn's change: the new moment, and any it evicted
+                    # at the cap. One removed in the Memory modal meanwhile stays gone.
+                    cm.moments = [x for x in cm.moments if x.id not in had - kept] \
+                        + [x for x in held.moments if x.id not in had]
+                    _save_character_memory(cur, cm)
             if scenario:
                 session.relationship = rel      # persisted with the session
             else:

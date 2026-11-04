@@ -119,6 +119,18 @@ tier label and the re-injection looks like duplicated prompt text; both are load
 `…-Uncensored-…-Aggressive` fine-tune the model still complies sometimes. Anything built on top of
 this should assume that rather than assume the ladder is enforced.
 
+## Grounding: moments
+
+The axes say how she feels, not why. When one reply moves the relationship sharply (affection,
+trust and tension together by `muninn.episodic.MOMENT_MIN`), or a milestone fires, `chat()`
+keeps a **moment** in the pairing's `CharacterMemory.moments`: what {{user}} said and her line
+from the reply (the strongest 6 are kept, milestones first). The latest one is appended to the
+relationship note ("A moment Iris remembers: …"), so "trust: high" comes with a reason she can
+refer to. Not for scenario or assistant chats. Moments are reviewed in Memory → Long-term (read
+only, removable); they are written onto a fresh read of the pairing's memory, applying only the
+turn's own change, so a removal made while a reply streams stays removed. Tests:
+`tests/test_relationship_grounding.py`.
+
 ## Milestones
 
 `MILESTONES` + `newly_reached()`: the first time a stage or physical rung is crossed, the chat SSE

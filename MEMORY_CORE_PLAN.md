@@ -329,6 +329,15 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   first-NPC fallback. It was checked against held-out cases written before it ran, as well as
   the original ones.
 
+### Pantheon: relationship grounding (finding 1)
+
+- Moments (`muninn.episodic`) are recorded in `CharacterMemory.moments` when a reply moves the
+  relationship sharply or a milestone fires, the latest is appended to the relationship note,
+  and the Memory modal lists them for removal. Not for scenario or assistant chats.
+- Found along the way and fixed: the Memory modal's Save was rejected (400) for chats
+  without long-term memory, a memory edit saved while a reply streamed was overwritten by the
+  turn, and a long-term edit made during a fold was overwritten by the fold.
+
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
 Both baselines are on `Cydonia-24B-v4.3-absolute-heresy.Q8_0` (16K context). The backend was

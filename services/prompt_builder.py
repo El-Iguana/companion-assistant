@@ -293,6 +293,25 @@ _ASKS_TIME = re.compile(
 _FOCUS_QUOTE_CHARS = 200
 
 
+RETAKE_MAX = 2            # earlier takes quoted
+RETAKE_CHARS = 280        # of each
+
+
+def retake_note(takes: List[str], char: str, user: str) -> str:
+    """Ask for a reply that differs from the earlier take(s) the user set aside."""
+    quoted = []
+    for t in [x for x in takes if x and x.strip()][-RETAKE_MAX:]:
+        t = " ".join(t.split())
+        quoted.append('"' + (t if len(t) <= RETAKE_CHARS
+                             else t[:RETAKE_CHARS].rsplit(" ", 1)[0] + " …") + '"')
+    if not quoted:
+        return ""
+    return (f"This is another take on {char}'s reply; {user} set aside "
+            + ("this one: " if len(quoted) == 1 else "these: ") + " / ".join(quoted)
+            + f" Write a clearly different reply: a different opening, different actions and "
+            f"different words, not a rephrasing of it.")
+
+
 def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
     """The closing line of every prompt: answer THIS, from where things stand now.
 
@@ -535,7 +554,8 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    relationship_note: str = "", stage_rank: int = 99,
                    boundary_note: str = "", longterm_note: str = "",
                    expr_labels: List[str] | None = None,
-                   context_tokens: int = 0, trimmed: list | None = None) -> List[Dict]:
+                   context_tokens: int = 0, trimmed: list | None = None,
+                   retake_of: List[str] | None = None) -> List[Dict]:
     """The chat prompt. With `context_tokens`, the oldest history turns are dropped
     until the whole prompt plus the reply fits that window (services/context.py);
     the count dropped is appended to `trimmed` when one is passed."""
@@ -658,6 +678,12 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     voice_hint = voice_tag_note(card, assistant)
     if voice_hint:
         tail.append(voice_hint)
+    if retake_of:
+        # "Another take": the take being replaced is no longer in the history, so the
+        # model had nothing to differ from and wrote much the same reply again. Quoting
+        # it also lets the DRY sampler penalise reusing its wording. Before the boundary
+        # note, which stays as late as possible.
+        tail.append(retake_note(retake_of, char_name, user_name))
     if boundary_note:
         tail.append(sub(boundary_note))
     latest = next((m for m in reversed(session.messages) if m.role != "system"), None)
@@ -692,5 +718,9 @@ def kobold_params(session: ChatSession) -> dict:
         "top_k": g.top_k,
         "rep_pen": g.rep_pen,
         "min_p": g.min_p,
+        "dry_multiplier": g.dry_multiplier,
+        "dry_base": g.dry_base,
+        "dry_allowed_length": g.dry_allowed_length,
+        "dry_penalty_last_n": g.dry_penalty_last_n,
         "stop": g.stop_sequences or None,
     }

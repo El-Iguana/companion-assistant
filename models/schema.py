@@ -14,6 +14,7 @@ from datetime import datetime
 # The relationship models belong to Muninn's engine (muninn.models); re-exported
 # so every `from models.schema import Relationship` keeps working.
 from muninn.models import Relationship, RelationshipPreset  # noqa: F401
+from muninn.episodic import Moment  # noqa: E402
 
 
 def _uid() -> str:
@@ -269,6 +270,10 @@ class CharacterMemory(BaseModel):
     facts: List[MemoryFact] = []
     summary: str = ""                    # cumulative history across every chat in this pairing
     swept_sessions: Dict[str, int] = {}  # session_id -> message index folded into `summary`
+    # Moments that moved the relationship (muninn.episodic): what {{user}} said and her
+    # line, recorded when one reply moves it sharply or a milestone fires. The "why"
+    # behind the relationship numbers; reviewable and removable in the Memory modal.
+    moments: List[Moment] = []
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 
@@ -318,6 +323,15 @@ class GenerationConfig(BaseModel):
     top_k: int = 40
     rep_pen: float = 1.1
     min_p: float = 0.05
+    # DRY sampler (KoboldCPP): penalises extending any word sequence already in the
+    # context, which is what a character reusing her earlier lines is; rep_pen works on
+    # single tokens only. Measured (eval/repetition): less wording reused across a chat,
+    # and with the retake note an "Another take" no longer opens like the one it
+    # replaces. 0 multiplier turns it off.
+    dry_multiplier: float = 0.8
+    dry_base: float = 1.75
+    dry_allowed_length: int = 2
+    dry_penalty_last_n: int = 0          # 0 = the whole context
     stop_sequences: List[str] = []
 
 
