@@ -294,6 +294,19 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   identical, and the LLM rates are within noise (clean 6/33 in both runs). Details in
   `eval/companion_memory/RESULTS.md`.
 
+### Phase 2: Rhapsode on Muninn, first part done
+
+- History fitted to the window (`muninn.context`, with 0 = Auto for the context setting and a
+  reserve that counts the client's three continuation rounds), and the summary folded in
+  context-sized passes (`muninn.fold`). In the eval's prompt-size check, every configuration
+  now fits the window, runaway replies included, and fits at 8K too.
+- The relationship engine, models and emotion vocabulary are Muninn's, and the copied
+  `services/relationship.py` is gone. The math was compared with the old copy over random
+  sequences and is identical; only the descriptor's wording changes (concrete acts, pronouns).
+  NPCs got a `pronouns` field (blank = they/them, filled by the Pantheon import).
+- Still to do in this phase: the trailing boundary note and milestones, which change the
+  narration and need measuring first.
+
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
 Both baselines are on `Cydonia-24B-v4.3-absolute-heresy.Q8_0` (16K context). The backend was
