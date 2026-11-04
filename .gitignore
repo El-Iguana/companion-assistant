@@ -41,3 +41,7 @@ voices/*
 
 # pytincture page: the browser wapyt wheel (dev_wheel.sh locally, the Containerfile in the image)
 appcode/wapyt-*.whl
+
+# Eval results and raw model outputs stay on the machine that ran them
+eval/companion_memory/RESULTS.md
+eval/companion_memory/baseline/

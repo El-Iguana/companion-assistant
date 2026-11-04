@@ -4,7 +4,8 @@ What the app actually remembers, where it lives, and why each piece is shaped th
 This describes the **shipped** system; `MEMORY_PLAN.md` is the design/decision log (phases 1-6),
 and `PROMPT_BUDGET.md` covers the one gap this system does not close.
 
-Code: `services/memory.py`, `services/assistant_memory.py`, `services/embeddings.py`, assembled in
+Code: `services/memory.py`, `services/assistant_memory.py`, and the shared parts in Muninn
+(`../muninn`: `muninn.fold`, `muninn.recall`, `muninn.facts`, `muninn.embeddings`), assembled in
 `services/prompt_builder.build_messages()`, wired in `main.py` (`chat()` + `/api/memories` +
 `/api/assistant-memory` + `/api/sessions/{id}/sweep`).
 
@@ -76,7 +77,7 @@ Two write triggers, both through `fold_into_longterm()`:
   a *finished* conversation gets captured instead of being cut at an arbitrary turn boundary.
 
 A fold is **one pass per context-sized slice** of the range, not one pass overall (`_fold_chunks`,
-`fold_budget(context_tokens)` — sized from the effective context window, `services/context.py`;
+`fold_budget(context_tokens)` — sized from the effective context window, `muninn.context` via `services/context.py`;
 `FOLD_TRANSCRIPT_CHARS` is the 8192 default). A backlog — the first idle sweep of a long finished chat — renders a
 transcript that can exceed the whole context window, and KoboldCPP truncates from the front with no
 error, so the casualty would be `LONGTERM_PROMPT` itself: the fold running with none of its rules.
@@ -101,7 +102,7 @@ contradict the state the preset just seeded.
 
 ## Semantic recall
 
-`services/embeddings.py`: int8 BGE-small-en-v1.5, ONNX, CPU, baked at `/app/models/embed` (33 MB),
+`muninn.embeddings` (index and gate: `muninn.recall`): int8 BGE-small-en-v1.5, ONNX, CPU, baked at `/app/models/embed` (33 MB),
 running on the onnxruntime already present for rembg/Kokoro/whisper — **zero VRAM**, so the 4070
 stays entirely for KoboldCPP and ComfyUI. CLS pooling (not mean — BGE pools CLS), L2-normalized so a
 dot product *is* cosine, and BGE's query prefix applied to queries only. int8 was picked over fp32

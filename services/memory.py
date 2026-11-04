@@ -6,16 +6,26 @@ preserving continuity. Uses the same KoboldCPP backend for the summarization pas
 """
 from __future__ import annotations
 
-import json
-import os
 import re
 from datetime import datetime
 
-import numpy as np
+from muninn import facts as _facts
+from muninn import fold as _fold
+from muninn import summary as _summary
+from muninn.checks import clean_memory, keep_facts
+# The fold budget and the recall index moved to Muninn (../muninn, MEMORY_CORE_PLAN.md);
+# re-exported here under their old names, which main.py, assistant_memory and the
+# evals use.
+from muninn.fold import (FOLD_CHARS_PER_TOKEN, FOLD_CONTEXT_TOKENS,  # noqa: F401
+                         FOLD_RESERVE_TOKENS, FOLD_TRANSCRIPT_CHARS, fold_budget)
+from muninn.recall import (RECALL_MAX_CHARS, RECALL_MAX_VECTORS,  # noqa: F401
+                           RECALL_MIN_INDEX, RECALL_MIN_MARGIN, RECALL_MIN_QUERY_WORDS,
+                           RECALL_MIN_SCORE, RECALL_MIN_TEXT, RECALL_RESERVE_CHARS,
+                           RECALL_TOP_K, _index_load, _index_save, index_add,
+                           index_search, recall_block)
 
 from models.schema import (ChatSession, CharacterCard, CharacterMemory,
                            MemoryFact, Persona)
-from services import context, embeddings
 from services.kobold import KoboldClient
 from services.prompt_builder import substitute_macros, speaker
 
@@ -33,30 +43,20 @@ LONGTERM_FACT_MAX_CHARS = 200 # one fact must not be able to dominate the block
 LONGTERM_BUDGET_CHARS = 2400  # ceiling on the injected block, at 8192 context
 LONGTERM_SUMMARY_SHARE = 0.6  # of that budget, the share the cumulative history may take
 
-# How much transcript one fold pass may carry. Sized from the effective context
-# window (services/context.py: the backend's real limit, or the smaller one chosen
-# in Settings), passed in as `context_tokens`; FOLD_CONTEXT_TOKENS is only the
-# default when no caller says. A range larger than this is folded in successive
-# passes rather than truncated — see _fold_chunks() for why truncation is not an
-# option here.
-#
-# Budgeted at 4.0 chars/token even though PROMPT_BUDGET.md measured ~5.0: that
-# figure is an average over one corpus, not a floor, and the whole point of this
-# cap is the case where it is wrong. The reserve covers the instructions, the
-# existing memory (LONGTERM_BUDGET_CHARS) or the Known-facts list quoted back to
-# extract_auto_facts (up to 40 x 200 chars — the binding case), and the reply
-# being generated (summary_max_tokens, up to 1200). At 4.0 the worst prompt of
-# either kind lands ~6% under the window; at the measured 5.0 it is ~25% under.
-# The cost of being wrong the other way is one extra pass, so err low.
-FOLD_CONTEXT_TOKENS = context.DEFAULT_CONTEXT
-FOLD_CHARS_PER_TOKEN = 4.0
-FOLD_RESERVE_TOKENS = 3000
-FOLD_TRANSCRIPT_CHARS = int((FOLD_CONTEXT_TOKENS - FOLD_RESERVE_TOKENS) * FOLD_CHARS_PER_TOKEN)
+
+async def _answer_full(kobold, prompt: str, params: dict) -> tuple[str, bool]:
+    """(answer, hit the token cap). A client without generate_answer_full can't say,
+    so it reports not-cut; the missing-stand-line repair still covers that case."""
+    full = getattr(kobold, "generate_answer_full", None)
+    if full is not None:
+        return await full(prompt, params)
+    return await kobold.generate_answer(prompt, params), False
 
 
-def fold_budget(context_tokens: int) -> int:
-    """Transcript characters one fold pass may carry in a `context_tokens` window."""
-    return context.fold_transcript_chars(context_tokens, FOLD_RESERVE_TOKENS)
+def _log_dropped(where: str, lines: list[str]) -> None:
+    if lines:
+        print(f"[memory] {where}: dropped {len(lines)} non-memory line(s), e.g. "
+              f"{lines[0][:80]!r}", flush=True)
 
 
 def needs_summary(session: ChatSession, summarize_after: int = SUMMARIZE_AFTER) -> bool:
@@ -140,7 +140,8 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
         f"one, describing the newest moment."
     )
 
-    for end, transcript in chunks:
+    roleplay = getattr(card, "chat_mode", "roleplay") != "assistant"
+    for n, (end, transcript) in enumerate(chunks, start=1):
         prev = session.memory.summary
         prompt = (
             instruction + "\n\n"
@@ -149,12 +150,26 @@ async def summarize(kobold: KoboldClient, session: ChatSession,
         )
 
         try:
-            summary = await kobold.generate_answer(prompt, {
+            text, truncated = await _answer_full(kobold, prompt, {
                 "max_length": max_tokens, "temperature": 0.5, "top_p": 0.9, "rep_pen": 1.05})
         except Exception:
             return  # summarization is best-effort; never block the chat. Passes that
                     # already landed stand — last_summarized_index records exactly
                     # them, and the turns after it simply stay verbatim for now.
+
+        # The closing "Where things stand:" line is the first thing the token cap cuts
+        # (muninn.summary): drop a cut-off last line, keep one stand line, last, and
+        # ask for it on its own when the pass didn't produce one. Only on the final
+        # pass — an earlier pass's line is replaced by the next one anyway.
+        notes, stand = _summary.finish(text, truncated)
+        # Untagged reasoning, echoed rules and pasted transcript (muninn.checks).
+        notes, junk = clean_memory(notes, transcript=transcript, prompt=instruction,
+                                   speakers=[char_name, user_name])
+        _log_dropped("summary", junk)
+        if roleplay and stand is None and n == len(chunks):
+            stand = await _summary.repair_stand(kobold.generate_answer, transcript,
+                                                f"{char_name} and {user_name}")
+        summary = _summary.join(notes, stand if roleplay else None)
         if not summary.strip():
             return
 
@@ -251,40 +266,8 @@ AUTO_FACT_PROMPT = (
 
 
 def _dedupe_facts(candidates: list[str], existing: list[str]) -> list[str]:
-    """Drop candidates that restate something already stored.
-
-    The prompt is TOLD to skip known facts and does not reliably comply — given
-    two known facts and a conversation restating them, it re-emitted both
-    verbatim. Semantic comparison catches that, and also catches the rewordings
-    a string match would miss ("Eli owns a dog named Biscuit" vs "Eli has a dog
-    called Biscuit"). Falls back to normalized string equality when the embedder
-    isn't available.
-    """
-    out: list[str] = []
-    if not candidates:
-        return out
-    norm = lambda t: " ".join(t.lower().replace(".", "").split())
-    seen = {norm(e) for e in existing}
-
-    vectors = None
-    if existing and embeddings.available():
-        try:
-            vectors = embeddings.encode(existing)
-        except Exception:
-            vectors = None
-
-    for c in candidates:
-        if norm(c) in seen:
-            continue
-        if vectors is not None:
-            try:
-                if float((vectors @ embeddings.encode([c])[0]).max()) >= AUTO_FACT_DEDUPE_SIM:
-                    continue
-            except Exception:
-                pass
-        out.append(c)
-        seen.add(norm(c))
-    return out
+    """Drop candidates that restate something already stored (muninn.facts)."""
+    return _facts.dedupe_facts(candidates, existing, AUTO_FACT_DEDUPE_SIM)
 
 
 async def extract_auto_facts(kobold: KoboldClient, mem: CharacterMemory,
@@ -313,40 +296,22 @@ async def extract_auto_facts(kobold: KoboldClient, mem: CharacterMemory,
         if not line or line.upper().startswith("NONE") or len(line) < 8:
             continue
         candidates.append(line[:LONGTERM_FACT_MAX_CHARS])
-    return _dedupe_facts(candidates[:max_new], known)
+    # "No new durable facts.", "I'll list them as requested:", the prompt's own rules:
+    # dropped before the per-fold cap, so they can't take a real fact's slot.
+    kept = keep_facts(candidates, prompt=AUTO_FACT_PROMPT.format(
+        char=char_name, user=user_name, max_new=max_new))
+    _log_dropped("auto-facts", [c for c in candidates if c not in kept])
+    return _dedupe_facts(kept[:max_new], known)
 
 
 def _fold_chunks(messages, start: int, upto: int, char_name: str, user_name: str,
                  budget: int = FOLD_TRANSCRIPT_CHARS) -> list[tuple[int, str]]:
     """Split [start, upto) into (end_index, transcript) passes that each fit `budget`.
 
-    A long backlog — the first idle sweep of a finished chat, or a session that
-    ran well past the threshold — renders a transcript that can exceed the whole
-    context window. KoboldCPP truncates from the FRONT with no error, so the
-    casualty is LONGTERM_PROMPT itself: the fold runs with none of the rules
-    above it, which is precisely the tuning MEMORY.md records as hard-won.
-
-    Truncating the transcript instead would be worse than useless — it drops
-    events without saying so, and the fold is the ONLY thing standing between
-    those turns and being forgotten. Successive passes keep every rule in every
-    pass and lose nothing; it is what repeated threshold folds already do.
-    """
-    chunks: list[tuple[int, str]] = []
-    lo = start
-    while lo < upto:
-        hi, size = lo, 0
-        while hi < upto:
-            line = len(_transcript(messages[hi:hi + 1], char_name, user_name)) + 1
-            if size and size + line > budget:
-                break
-            size += line
-            hi += 1
-        hi = max(hi, lo + 1)          # one turn longer than the whole budget: take it alone
-        text = _transcript(messages[lo:hi], char_name, user_name)[:budget]
-        if text.strip():              # skip system-only stretches
-            chunks.append((hi, text))
-        lo = hi
-    return chunks
+    muninn.fold.fold_chunks, with this app's speaker-labelled transcript. Why the
+    range is split into passes rather than truncated is documented there."""
+    return _fold.fold_chunks(messages, start, upto,
+                             lambda ms: _transcript(ms, char_name, user_name), budget)
 
 
 async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
@@ -404,6 +369,14 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             break     # best-effort; never block or fail the chat turn. Keep the
                       # passes that did land — `done` records exactly those, so
                       # the next sweep resumes from there instead of redoing them.
+        # Untagged reasoning, echoed rules and pasted transcript (muninn.checks). A pass
+        # that was nothing else comes back empty and counts as a failed pass.
+        summary, junk = clean_memory(
+            summary, transcript=transcript,
+            prompt=LONGTERM_PROMPT.format(char=char_name, user=user_name,
+                                          max_bullets=LONGTERM_MAX_BULLETS),
+            speakers=[char_name, user_name])
+        _log_dropped("long-term", junk)
         if not summary.strip():
             break
 
@@ -513,178 +486,6 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
 
 
 # ---------------------------------------------------------------------------
-# Semantic recall (MEMORY_PLAN Phase 4)
+# Semantic recall (MEMORY_PLAN Phase 4) lives in muninn.recall: index_add,
+# index_search, recall_block and the RECALL_* gate constants, imported above.
 # ---------------------------------------------------------------------------
-# The long-term summary above is lossy by design — it keeps what matters in
-# general and drops specifics. This recovers the specifics: past turns and facts
-# are embedded once, and the turn the user just typed retrieves the few that
-# actually relate to it.
-#
-# Layered ON TOP of Phase 3 rather than replacing it, and sharing its character
-# budget rather than adding to it, so enabling recall can't silently double the
-# memory footprint of every prompt.
-#
-# Everything here is best-effort: no embedding model baked in, an onnxruntime
-# failure, a corrupt index — all degrade to "no recall block" and leave the chat
-# turn untouched. Never raise into the hot path.
-
-RECALL_TOP_K = 4
-RECALL_MAX_VECTORS = 2000      # per pairing; ~3 MB at 384 dims, oldest turns evicted first
-RECALL_MAX_CHARS = 240         # per stored entry, so one long turn can't dominate
-
-# Recall shares LONGTERM_BUDGET_CHARS rather than adding to it, but long-term goes
-# on filling that budget as facts accumulate — which left recall exactly nothing
-# in precisely the mature pairings it exists to serve, the opposite of the point.
-# So long-term yields this slice, and ONLY on a turn where recall actually
-# retrieved something: ~2 full-length snippets, or 3-4 typical ones, against a
-# long-term block that still has 1800 of its 2400 characters. The margin gate is
-# conservative, so most turns retrieve nothing and long-term keeps all 2400.
-RECALL_RESERVE_CHARS = 600
-
-# Relevance gate. BGE's absolute cosine scores are NOT calibrated — measured on a
-# companion-shaped corpus, "hello" scored 0.541 while the genuinely relevant
-# "what can't I eat?" scored 0.523, so any fixed floor either lets greetings
-# through or drops real hits. What DOES separate them is the margin between the
-# best hit and the median hit: relevant queries scored >= 0.114 above median,
-# irrelevant ones <= 0.094. Hence a margin gate, with the raw floor kept only as
-# a loose sanity check.
-#
-# Calibrated on 8 documents and 13 queries — a heuristic, not a validated
-# threshold. Retune here if recall starts surfacing noise.
-RECALL_MIN_MARGIN = 0.10
-RECALL_MIN_SCORE = 0.45
-RECALL_MIN_INDEX = 3           # below this the median is too noisy to gate on
-RECALL_MIN_QUERY_WORDS = 3     # "hello" / "ok" / "thanks" retrieve nothing
-RECALL_MIN_TEXT = 20           # skip trivially short turns ("ok", "sure", "Hey.")
-
-
-def _index_load(path) -> tuple:
-    """Return (vectors (N,D) float32 | None, meta list). Any problem -> empty."""
-    try:
-        if not path.exists():
-            return None, []
-        with np.load(path, allow_pickle=False) as z:
-            vectors = z["vectors"]
-            meta = json.loads(str(z["meta"]))
-        if len(meta) != len(vectors):
-            return None, []          # torn write -> rebuild from scratch
-        return vectors, meta
-    except Exception:
-        return None, []
-
-
-def _index_save(path, vectors, meta) -> None:
-    tmp = path.with_suffix(".tmp.npz")
-    np.savez(tmp, vectors=vectors.astype(np.float32), meta=np.array(json.dumps(meta)))
-    os.replace(tmp, path)
-
-
-def index_add(path, entries: list[dict], replace_kind: str = None) -> bool:
-    """Embed `entries` ([{text, kind}]) and append them to the index at `path`.
-
-    replace_kind: drop every existing entry of that kind first. Facts are
-    editable and deletable, so re-indexing them wholesale on save is both
-    simpler and more correct than trying to diff them.
-
-    Returns True if the index was written. Never raises.
-    """
-    try:
-        if not embeddings.available():
-            return False
-        entries = [e for e in entries if (e.get("text") or "").strip()]
-        vectors, meta = _index_load(path)
-
-        if replace_kind and meta:
-            keep = [i for i, m in enumerate(meta) if m.get("kind") != replace_kind]
-            meta = [meta[i] for i in keep]
-            vectors = vectors[keep] if vectors is not None and keep else None
-        if not entries and replace_kind is None:
-            return False
-
-        new_meta, new_text = [], []
-        for e in entries:
-            text = " ".join((e["text"] or "").split())[:RECALL_MAX_CHARS]
-            new_meta.append({"text": text, "kind": e.get("kind", "turn"),
-                             "created_at": datetime.now().isoformat()})
-            new_text.append(text)
-
-        if new_text:
-            fresh = embeddings.encode(new_text)
-            vectors = fresh if vectors is None or len(vectors) == 0 else np.vstack([vectors, fresh])
-            meta = meta + new_meta
-
-        if vectors is None or len(vectors) == 0:
-            path.unlink(missing_ok=True)
-            return True
-
-        # Evict oldest TURNS first; curated facts are small and user-owned, so
-        # they should never be pushed out by conversation volume.
-        if len(meta) > RECALL_MAX_VECTORS:
-            over = len(meta) - RECALL_MAX_VECTORS
-            drop = [i for i, m in enumerate(meta) if m.get("kind") == "turn"][:over]
-            if drop:
-                keep = [i for i in range(len(meta)) if i not in set(drop)]
-                meta = [meta[i] for i in keep]
-                vectors = vectors[keep]
-
-        _index_save(path, vectors, meta)
-        return True
-    except Exception as e:
-        print(f"[recall] index_add skipped: {e}", flush=True)
-        return False
-
-
-def index_search(path, query: str, top_k: int = RECALL_TOP_K) -> list[dict]:
-    """Top-k entries related to `query`, or [] if recall isn't applicable.
-
-    Applicability is deliberately conservative — see RECALL_MIN_MARGIN. A block
-    of loosely-related memories injected into every turn would degrade her
-    replies, so the default when unsure is to inject nothing.
-    """
-    try:
-        if not embeddings.available():
-            return []
-        if len((query or "").split()) < RECALL_MIN_QUERY_WORDS:
-            return []
-        vectors, meta = _index_load(path)
-        if vectors is None or len(meta) < RECALL_MIN_INDEX:
-            return []
-
-        qv = embeddings.encode([query], is_query=True)[0]
-        sims = vectors @ qv
-        best = float(sims.max())
-        if best < RECALL_MIN_SCORE or best - float(np.median(sims)) < RECALL_MIN_MARGIN:
-            return []
-
-        order = np.argsort(-sims)[:top_k]
-        return [{"text": meta[i]["text"], "kind": meta[i].get("kind", "turn"),
-                 "score": float(sims[i])} for i in order
-                if float(sims[i]) >= RECALL_MIN_SCORE]
-    except Exception as e:
-        print(f"[recall] index_search skipped: {e}", flush=True)
-        return []
-
-
-def recall_block(hits: list[dict], budget_chars: int, already_shown: str = "") -> str:
-    """Render retrieved memories as a system-prompt block, or "" if nothing fits.
-
-    `already_shown` is the long-term block that will also be injected this turn;
-    anything whose text is already in it is dropped rather than repeated — the
-    curated facts are always present, so without this the same sentence would
-    appear twice in one prompt.
-    """
-    if not hits or budget_chars <= 0:
-        return ""
-    header = "Things from earlier that may be relevant:"
-    budget = budget_chars - len(header)
-    lines = []
-    for h in hits:
-        text = h["text"].strip()
-        if not text or (already_shown and text in already_shown):
-            continue
-        line = f"- {text}"
-        if len(line) + 1 > budget:
-            break
-        lines.append(line)
-        budget -= len(line) + 1
-    return header + "\n" + "\n".join(lines) if lines else ""

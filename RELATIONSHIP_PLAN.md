@@ -10,7 +10,8 @@ the questions that were open, what was decided, and what has and hasn't shipped.
 most likely to be re-litigated or accidentally undone, and the only parts the code doesn't already
 state.
 
-Code: `services/relationship.py`, `models/schema.py` (`Relationship`, `RelationshipPreset`),
+Code: `muninn.relationship` and `muninn.models` (`Relationship`, `RelationshipPreset`, re-exported by
+`models/schema.py`) in the shared Muninn package (`../muninn`),
 `prompt_builder.build_messages`, and the chat flow in `main.py`.
 
 Phases 1–3 have shipped, with one open item in Phase 3.

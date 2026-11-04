@@ -11,6 +11,10 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime
 
+# The relationship models belong to Muninn's engine (muninn.models); re-exported
+# so every `from models.schema import Relationship` keeps working.
+from muninn.models import Relationship, RelationshipPreset  # noqa: F401
+
 
 def _uid() -> str:
     return str(uuid.uuid4())
@@ -74,7 +78,7 @@ class AppSettings(BaseModel):
     summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
     keep_recent: int = Field(12, ge=2, le=100)              # most recent turns always kept verbatim
     summary_max_tokens: int = Field(400, ge=100, le=1200)   # token budget for the "Story so far" summary
-    # Semantic recall (services/embeddings.py + memory.index_search).
+    # Semantic recall (muninn.embeddings + muninn.recall).
     recall_enabled: bool = True                             # retrieve related past turns/facts per turn
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
     auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
@@ -300,23 +304,6 @@ class AssistantMemory(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
 
-class Relationship(BaseModel):
-    """Persistent per (character, persona) relationship state. Multi-axis, 0-100 each."""
-    character_id: str = ""
-    persona_id: str = ""
-    affection: float = 0.0
-    trust: float = 0.0
-    attraction: float = 0.0
-    tension: float = 0.0
-    emotional_intimacy: float = 0.0     # openness/vulnerability (gated by trust)
-    physical_willingness: float = 0.0   # autonomous openness to physical intimacy -> ladder tier
-    power_dynamic: Optional[float] = None       # per-relationship override of the card default
-    social_acceptance: Optional[float] = None   # per-relationship override of the card default
-    milestones: List[str] = []          # tier ids already reached (Phase 2, one-time events)
-    created_at: str = Field(default_factory=_now)
-    updated_at: str = Field(default_factory=_now)
-
-
 class MoodState(BaseModel):
     """Running emotional state with inertia. Foundation for a relationship system."""
     valence: float = 0.0     # running positive/negative position, [-1, 1]
@@ -352,28 +339,6 @@ class ChatSession(BaseModel):
 # ---------------------------------------------------------------------------
 # Backend connection settings
 # ---------------------------------------------------------------------------
-class RelationshipPreset(BaseModel):
-    """A reusable scenario seed: context + starting relationship metrics for a new chat."""
-    id: str = Field(default_factory=_uid)
-    name: str = "New preset"
-    description: str = ""
-    character_id: str = ""               # optional pairing (suggested character)
-    persona_id: str = ""                 # optional pairing (suggested persona)
-    # context
-    power_dynamic: float = 0.0           # -100 ({{user}} holds power) .. +100 (character does)
-    social_acceptance: float = 50.0      # 0 taboo/stigmatized .. 100 accepted
-    # starting relationship metrics (the character's genuine starting feelings)
-    affection: float = 0.0
-    trust: float = 0.0
-    attraction: float = 0.0
-    tension: float = 0.0
-    emotional_intimacy: float = 0.0
-    physical_willingness: float = 0.0
-    scenario_note: str = ""              # optional opening/context line
-    created_at: str = Field(default_factory=_now)
-    updated_at: str = Field(default_factory=_now)
-
-
 class SceneRequest(BaseModel):
     """A narrator event or a draft of {{user}}'s reply (roleplay chats only)."""
     session_id: str

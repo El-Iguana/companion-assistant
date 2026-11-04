@@ -1,4 +1,5 @@
 import httpx
+from muninn.text import strip_reasoning
 import json
 import re
 import time
@@ -190,24 +191,45 @@ class KoboldClient:
         return value
 
     async def generate(self, prompt: str, params: dict) -> str:
+        return (await self.generate_full(prompt, params))[0]
+
+    async def generate_full(self, prompt: str, params: dict) -> tuple[str, bool]:
+        """(text, truncated). `truncated` = the reply used its whole `max_length`, i.e. it
+        was cut off rather than finished. Read from `completion_tokens`, not
+        `finish_reason`: KoboldCPP reports "length" even for a reply a stop sequence
+        ended after 3 of 40 tokens."""
         payload = {"prompt": prompt, **params}
         resp = await self.client.post(
             f"{self.base_url}/api/v1/generate",
             json=payload,
         )
         resp.raise_for_status()
-        text = resp.json()["results"][0]["text"]
+        result = resp.json()["results"][0]
+        text = result["text"]
+        cap, used = params.get("max_length"), result.get("completion_tokens")
+        truncated = bool(cap and isinstance(used, int) and used >= cap)
         # Strip any think blocks from non-streaming output
-        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip(), truncated
 
     async def generate_answer(self, prompt: str, params: dict) -> str:
         """Answer `prompt` directly, bypassing this model's runaway <think>: wrap it in a
         ChatML turn with a PREFILLED empty <think></think> so generation continues at the
         answer (the reliable way to disable thinking for small classifier/summary calls).
-        Raw /api/v1/generate → use max_length in params. Returns the answer (think stripped)."""
+        Raw /api/v1/generate → use max_length in params.
+
+        Returns the answer only. A model that doesn't follow the prefilled-think convention
+        writes its reasoning anyway and ends it with a stray `</think>`/`</thought>`, or ends
+        the answer with another template's tag (`</assistant>`); all of that used to be stored
+        as memory. `muninn.text.strip_reasoning` keeps only the answer."""
+        return (await self.generate_answer_full(prompt, params))[0]
+
+    async def generate_answer_full(self, prompt: str, params: dict) -> tuple[str, bool]:
+        """generate_answer, plus whether the answer hit its `max_length` (see generate_full)."""
         chatml = (f"<|im_start|>user\n{prompt}<|im_end|>\n"
                   f"<|im_start|>assistant\n<think>\n\n</think>\n\n")
-        return await self.generate(chatml, {"stop_sequence": ["<|im_end|>"], **params})
+        text, truncated = await self.generate_full(
+            chatml, {"stop_sequence": ["<|im_end|>"], **params})
+        return strip_reasoning(text), truncated
 
     async def chat_generate_stream(
         self, messages: list[dict], params: dict

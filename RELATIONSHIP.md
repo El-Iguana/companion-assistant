@@ -4,7 +4,8 @@ What the character feels, how those feelings move, and how they reach her replie
 the **shipped** system; `RELATIONSHIP_PLAN.md` is the design/decision log (phases 1-3, with one open
 item), and `MEMORY.md` covers the parallel system that shares the same per-pairing shape.
 
-Code: `services/relationship.py`, `models/schema.py` (`Relationship`, `RelationshipPreset`),
+Code: `muninn.relationship` and `muninn.models` (`Relationship`, `RelationshipPreset`, re-exported by
+`models/schema.py`) in the shared Muninn package (`../muninn`),
 assembled in `services/prompt_builder.build_messages()`, driven from the chat flow in `main.py`.
 
 ## State

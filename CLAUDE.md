@@ -44,7 +44,8 @@ route table is **no longer served**; it stays as the handlers' contract and for 
 ```bash
 # host-side dev against a THROWAWAY library — never the real data/:
 uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt pip pytest \
-    ~/Development/Pytinc/wa_pytincture_widgetset
+    ~/Development/Pytinc/wa_pytincture_widgetset   # or git+https://github.com/WAwesome-AI/wa_pytincture_widgetset.git@<WAPYT_REF>
+uv pip install --python .venv/bin/python -e ../muninn                                 # the shared memory package
 PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
 PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871 (PANTHEON_DEV_PORT), pidfile;
                                                                 # stop|restart|log; refuses the real data/
@@ -131,17 +132,21 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note + date/time
-  context.py            # the context window: effective size (Settings vs backend), history fit, fold budget
+  context.py            # the context window: muninn.context + this app's CONTEXT_SIZES
   memory.py             # COMPANION memory: session summary + cross-session store + recall + auto-facts
   assistant_memory.py   # ASSISTANT memory: directives + facts + task notes. Separate module, not a branch
-  embeddings.py         # BGE-small ONNX/CPU sentence embeddings (baked, 33MB, zero VRAM)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
-  relationship.py       # multi-axis relationship + stage + intimacy ladder + descriptor
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`) + Orpheus (`orpheus:<name>`), text -> WAV, strips *action* narration
   orpheus.py            # Orpheus TTS client: load/release on the orpheus-tts service, prompt, SNAC ONNX decode (CPU)
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
+../muninn/              # SEPARATE REPO, shared with Rhapsode: context fit, fold passes, recall index + gate,
+                        #   fact dedupe, embeddings, emotion valence, the relationship engine + models
+                        #   (`from muninn import relationship`). PRIVATE repo (JotunheimPress/muninn), so
+                        #   builds take the sibling checkout: run-podman.sh and compose.yaml both pass
+                        #   ../muninn; MUNINN_REF in the Containerfile records the tested commit. Golden test
+                        #   pins behaviour — see ../muninn/README.md and MEMORY_CORE_PLAN.md
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
 pantheon_web/           # server-side plain modules (never shipped to the browser): auth (login hook) ·
@@ -403,7 +408,7 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   message keeps no expression). Before 2026-10-29 the classifier only ran to pick a sprite, so
   sprite-less cards never left Stranger (`tests/test_relationship_feel.py`).
   Header mood meter shows it.
-- **Relationship (`relationship.py`):** per (character, persona), stored `data/relationships/{cid}__{pid}.json`.
+- **Relationship (`muninn.relationship`):** per (character, persona), stored `data/relationships/{cid}__{pid}.json`.
   Emotions move axes each reply (`RATE`); grows/drops, **no idle decay**. Stage derived (Stranger→Intimate,
   romance gated on attraction; "(Strained)" at high tension). **Intimacy/consent:** `emotional_intimacy`
   (capped by trust) + `physical_willingness` (gated by trust×attraction, `WRATE`, suppressed by tension) →

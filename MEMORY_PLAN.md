@@ -10,7 +10,7 @@ the bottom so that doesn't get re-litigated later.
 extraction, the budgets and every constant live in `MEMORY.md`, which is the file to edit when
 behavior changes. This one records the *reasons* — what was open, what was decided, and what shipped.
 
-Code: `services/memory.py`, `services/assistant_memory.py`, `services/embeddings.py`,
+Code: `services/memory.py`, `services/assistant_memory.py`, Muninn (`../muninn`: fold, recall, facts, embeddings),
 `models/schema.py` (`MemoryState`, `CharacterMemory`, `AssistantMemory`),
 `prompt_builder.build_messages`, and the chat flow in `main.py`.
 

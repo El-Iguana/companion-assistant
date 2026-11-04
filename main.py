@@ -31,7 +31,8 @@ from models.schema import (
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, relationship, tts, stt, auth, vrm
+from muninn import relationship
+from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
 BASE = Path(__file__).parent

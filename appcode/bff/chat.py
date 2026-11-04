@@ -55,7 +55,7 @@ class Chat:
         memories = 0
         if not assistant:
             if scenario:
-                from services import relationship
+                from muninn import relationship
 
                 rel = relationship.summary(s.relationship)
             else:

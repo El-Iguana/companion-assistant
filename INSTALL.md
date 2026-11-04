@@ -202,8 +202,13 @@ The repository is **private** (`JotunheimPress/companion`), so you need a
 GitHub account that has been given access. Clone it with the GitHub CLI,
 which asks you to sign in once:
 
+Pantheon is built together with **Muninn**, its memory package, which is a
+separate private repository (`JotunheimPress/muninn`). Clone both into the same
+folder: the build looks for Muninn at `../muninn`, next to Pantheon.
+
 ```sh
 gh auth login
+gh repo clone JotunheimPress/muninn muninn
 gh repo clone JotunheimPress/companion pantheon
 cd pantheon
 ```
@@ -211,11 +216,13 @@ cd pantheon
 or with an SSH key registered on your GitHub account:
 
 ```sh
+git clone git@github.com:JotunheimPress/muninn.git muninn
 git clone git@github.com:JotunheimPress/companion.git pantheon
 cd pantheon
 ```
 
-(The folder is called `pantheon` here; the repository keeps its old name.)
+(The folder is called `pantheon` here; the repository keeps its old name. The
+Muninn folder must be called `muninn`.)
 
 > **Windows:** the repository forces Unix line endings (`.gitattributes`), so
 > Git's usual CRLF conversion does not touch it. Keep it that way. The
@@ -518,6 +525,7 @@ enable it: `systemctl --user enable podman-restart.service` and
 
 ```sh
 git pull
+git -C ../muninn pull
 docker compose up -d --build
 ```
 

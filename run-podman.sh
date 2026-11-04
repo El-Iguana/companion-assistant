@@ -30,7 +30,15 @@ if [[ "$REBUILD" -eq 1 ]] || ! podman image exists "$IMAGE"; then
   # on other machines — Apple Silicon included — must keep building for their own arch. The
   # pin is what keeps a wrongly-cached base from slipping in: a python:3.12-slim pulled as
   # arm64 once had Iguana's container running under emulation (2026-10-27).
-  podman build --format docker --platform linux/amd64 -t "$IMAGE" -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
+  # Muninn (the shared memory package) from the sibling checkout when there is one, so a
+  # change there is in the next rebuild; otherwise the Containerfile's pinned commit.
+  MUNINN_CTX=()
+  if [[ -f "$SCRIPT_DIR/../muninn/pyproject.toml" ]]; then
+    echo "==> Muninn from the local checkout $(cd "$SCRIPT_DIR/../muninn" && pwd)"
+    MUNINN_CTX=(--build-context "muninn-src=$SCRIPT_DIR/../muninn")
+  fi
+  podman build --format docker --platform linux/amd64 "${MUNINN_CTX[@]}" \
+    -t "$IMAGE" -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 fi
 
 if podman container exists "$CONTAINER"; then

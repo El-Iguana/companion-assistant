@@ -25,6 +25,11 @@ services:
     build:
       context: .
       dockerfile: Containerfile
+      # Muninn, the shared memory package, from a checkout next to this one
+      # (git clone … JotunheimPress/muninn ../muninn). Its repository is private, so the
+      # Containerfile's own pinned clone can't run without credentials.
+      additional_contexts:
+        muninn-src: ../muninn
     container_name: pantheon
     restart: unless-stopped
     ports:

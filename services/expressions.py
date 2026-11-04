@@ -20,22 +20,8 @@ from models.schema import CharacterCard
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient, get_checkpoint_defaults
 
-# Core emotion set (kept small to bound generation time). "neutral" is the default.
-# Core set: small, fast, reliable (default).
-CORE_EMOTIONS = [
-    "neutral", "happy", "sad", "angry",
-    "surprised", "embarrassed", "thoughtful", "love",
-]
-
-# Full set: the 28 SillyTavern / GoEmotions labels — compatible with existing
-# SillyTavern sprite packs (same file names).
-FULL_EMOTIONS = [
-    "admiration", "amusement", "anger", "annoyance", "approval", "caring",
-    "confusion", "curiosity", "desire", "disappointment", "disapproval", "disgust",
-    "embarrassment", "excitement", "fear", "gratitude", "grief", "joy", "love",
-    "nervousness", "neutral", "optimism", "pride", "realization", "relief",
-    "remorse", "sadness", "surprise",
-]
+# The label sets and their valence live in Muninn (shared with Rhapsode).
+from muninn.emotion import CORE_EMOTIONS, EMOTION_VALENCE, FULL_EMOTIONS, valence_of  # noqa: E402,F401
 
 # Default label vocabulary used when a caller doesn't specify one.
 EMOTIONS = CORE_EMOTIONS
@@ -107,26 +93,6 @@ EMOTION_PROMPTS = {
 
 _NEG = ("lowres, worst quality, low quality, bad anatomy, bad hands, extra limbs, "
         "extra fingers, watermark, signature, text, deformed, jpeg artifacts")
-
-# Emotional valence per label, [-1, 1]. Drives the running mood/relationship state.
-EMOTION_VALENCE = {
-    # core
-    "neutral": 0.0, "happy": 0.8, "sad": -0.7, "angry": -0.85,
-    "surprised": 0.1, "embarrassed": -0.05, "thoughtful": 0.05, "love": 0.95,
-    # full (28)
-    "admiration": 0.7, "amusement": 0.6, "anger": -0.85, "annoyance": -0.4,
-    "approval": 0.5, "caring": 0.65, "confusion": -0.15, "curiosity": 0.25,
-    "desire": 0.6, "disappointment": -0.5, "disapproval": -0.5, "disgust": -0.7,
-    "embarrassment": -0.05, "excitement": 0.75, "fear": -0.7, "gratitude": 0.7,
-    "grief": -0.9, "joy": 0.85, "nervousness": -0.3, "optimism": 0.6,
-    "pride": 0.5, "realization": 0.1, "relief": 0.4, "remorse": -0.55,
-    "sadness": -0.7, "surprise": 0.1,
-}
-
-
-def valence_of(emotion: str) -> float:
-    return EMOTION_VALENCE.get(emotion, 0.0)
-
 
 def _seed_for(card: CharacterCard, emotion: str = "") -> int:
     # Per-emotion seed so each expression is a genuinely different image (not the
