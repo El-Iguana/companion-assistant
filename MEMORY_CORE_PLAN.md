@@ -269,7 +269,7 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
 
 ### Phase 1: the move (Pantheon), done 2026-11-04
 
-- `../muninn` is its own repo (`def133a`, not yet pushed to GitHub). It contains `context`,
+- `../muninn` is its own repo (private on GitHub as `JotunheimPress/muninn`). It contains `context`,
   `fold`, `recall`, `facts`, `embeddings`, `emotion`, `models` (`Relationship`,
   `RelationshipPreset`) and `relationship`.
 - Pantheon imports them. `services/context.py`, `memory.py`, `expressions.py` and
@@ -283,7 +283,7 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   so does Pantheon's own call surface. The test was mutation-checked: changes to `RATE`,
   `_TIER_ACTS` and the recall gate are all caught. Second, all 55 Pantheon tests pass unchanged.
 - Rhapsode depends on Muninn too, as of the reasoning fix: the same Containerfile stage and
-  `run-podman.sh` build context, pinned at `7d9f40f` like Pantheon. Its 133 tests pass, and
+  `run-podman.sh` build context, pinned at `1d8986b` like Pantheon. Its 133 tests pass, and
   `localhost/ai-story-maker:muninn-test` builds.
 - Image: a `muninn-git`/`muninn-src` stage pinned by `MUNINN_REF`, the same pattern as wapyt.
   `run-podman.sh` builds from `../muninn` when that directory exists. The install sits after the
@@ -304,8 +304,15 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   `services/relationship.py` is gone. The math was compared with the old copy over random
   sequences and is identical; only the descriptor's wording changes (concrete acts, pronouns).
   NPCs got a `pronouns` field (blank = they/them, filled by the Pantheon import).
-- Still to do in this phase: the trailing boundary note and milestones, which change the
-  narration and need measuring first.
+- The trailing boundary note (gated to NPCs where intimacy has begun, attraction is notable,
+  or the player reaches for it) and milestones are in. In the eval the note primed no romance
+  in ordinary scenes. NPCs at rung 0 refused with or without it in short scenes, so its benefit
+  in long stories is still to be shown.
+- Per-NPC emotion reads (finding 10): each NPC the reply is about is read for how they feel
+  toward the player, and NPCs absent from the reply no longer move. Off-list answers map to the
+  nearest label (`muninn.emotion.normalize`). In the eval, ally and villain now move in
+  opposite directions in most scenes, where they never could before; a one-line reaction
+  behind someone else's long speech can still read neutral.
 
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
@@ -325,13 +332,13 @@ baseline only holds for one model, so later comparisons must use the same one.
 
 New bugs the evals found (reported, not fixed; candidates for the next phases):
 
-1. ✅ **Fixed 2026-11-04 (Muninn `7d9f40f`, `muninn.text.strip_reasoning` in both apps'
+1. ✅ **Fixed 2026-11-04 (Muninn `1d8986b`, `muninn.text.strip_reasoning` in both apps'
    `generate_answer`).** Replayed over every stored baseline output, 33/33 tagged outputs come out
    clean and 0/90 clean outputs change. Reasoning written with no tag at all, such as italic
    `*I'll update the memory…*` asides, echoed prompt rules and pasted transcript (9 of the 33),
    needs per-profile output checks; that's the next item. **Measured on the live image:** stored tags
    9 → 0, reasoning flags 22 → 9, forbidden 22/33 → 18/33.
-   ✅ **Untagged reasoning: output checks added 2026-11-04 (Muninn `ceca94e`, `muninn.checks`)** in
+   ✅ **Untagged reasoning: output checks added 2026-11-04 (Muninn `e1f75a8`, `muninn.checks`)** in
    Pantheon's rolling summary, long-term fold and auto-facts, and in Rhapsode's summary. They drop
    task talk, whole-line italic asides, echoed prompt rules and pasted transcript. Replayed over
    every stored baseline summary (159 summaries, 1595 lines): 116 lines dropped, all reviewed as
@@ -339,7 +346,7 @@ New bugs the evals found (reported, not fixed; candidates for the next phases):
    own filters (prefixed lines only). **Reasoning stored as memory (both apps).** `generate_answer` pre-fills a Qwen-style empty
    `<think></think>`. Neither model loaded today follows that, so reasoning text plus a stray
    closing tag get saved into summaries and facts. Cydonia did this in 15 of 39 runs.
-2. ✅ **Fixed 2026-11-04 (Muninn `e66f254`, `muninn.summary`, in both apps' `summarize`).** The
+2. ✅ **Fixed 2026-11-04 (Muninn `e95d7b1`, `muninn.summary`, in both apps' `summarize`).** The
    clients now report a reply that used its whole `max_length` (from `completion_tokens`, since
    KoboldCPP's `finish_reason` is unreliable). A cut-off last line is dropped, exactly one stand
    line is kept and put last, and a missing line is asked for alone in one short call (final pass
