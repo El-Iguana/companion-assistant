@@ -323,6 +323,11 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   quest outcome. Rhapsode copies it into a session quest log, shown to the narrator in every
   mode, and into the questgiver's memory as a note that extracted notes can't push out. The
   engine still imports nothing from the app.
+- Scene presence (finding 14): a stateless tracker over the last few messages. Whole-word
+  names, role titles ("the captain"), exits respected until the NPC is named again, and nobody
+  present when the player is alone among several NPCs. This replaces substring matching and the
+  first-NPC fallback. It was checked against held-out cases written before it ran, as well as
+  the original ones.
 
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
