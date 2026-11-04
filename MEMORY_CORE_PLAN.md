@@ -319,6 +319,10 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   the prompt rule alone let NPCs remember scenes they weren't in. In the eval, NPCs bring up a
   remembered event when asked almost every time with their memory in the prompt, and never
   without it.
+- Ledger bridge (finding 13): the engine calls an optional `on_outcome` hook once per recorded
+  quest outcome. Rhapsode copies it into a session quest log, shown to the narrator in every
+  mode, and into the questgiver's memory as a note that extracted notes can't push out. The
+  engine still imports nothing from the app.
 
 ### Phase 0: fixtures and baselines, done 2026-11-04
 

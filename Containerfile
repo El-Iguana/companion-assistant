@@ -40,7 +40,7 @@ RUN set -eu; \
 #   podman build --build-context muninn-src=../muninn .
 FROM ${PYTHON_IMAGE} AS muninn-git
 ARG MUNINN_REPO=https://github.com/JotunheimPress/muninn.git
-ARG MUNINN_REF=28d1d07b16bf64d8dbbc16c4187776cb90da502d
+ARG MUNINN_REF=2b850fe75d1bff9d0c43dd019b03089e753f5850
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --filter=blob:none "$MUNINN_REPO" /src \
