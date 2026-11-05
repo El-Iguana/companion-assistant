@@ -338,6 +338,18 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
   without long-term memory, a memory edit saved while a reply streamed was overwritten by the
   turn, and a long-term edit made during a fold was overwritten by the fold.
 
+### Phase 6: long-term consolidation, built 2026-11-05, off by default
+
+- `muninn.consolidate`: append-only folds (new bullets only, deduped in code) and a review that
+  only deletes, by number, at most half the list per pass. Pantheon wires it behind
+  `AppSettings.longterm_consolidate`; the review runs on the idle sweep once per memory state.
+- Measured (eval `--consolidate`, 33 runs): fewer forbidden and format failures than the
+  rewrite, but more missed details, and the erosion fixture isn't fixed. Off until the
+  new-bullets pass stops answering NONE on plain facts and its junk lines are filtered.
+  Details in `MEMORY.md`, Consolidation.
+- Also: a reply now cancels a running memory job (the summary pass was delaying the next
+  reply's first token by up to a minute).
+
 ### Phase 0: fixtures and baselines, done 2026-11-04
 
 Both baselines are on `Cydonia-24B-v4.3-absolute-heresy.Q8_0` (16K context). The backend was

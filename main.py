@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -322,6 +323,8 @@ def _store_fold(cur: Ctx, before, after) -> None:
     for field in (("notes",) if assistant else ("summary",)):
         if getattr(fresh, field) == getattr(before, field):
             setattr(fresh, field, getattr(after, field))
+    if not assistant and after.reviewed_summary != before.reviewed_summary:
+        fresh.reviewed_summary = after.reviewed_summary
     for field in (("directives", "facts") if assistant else ("facts",)):
         had = {x.id for x in getattr(before, field)}
         has = {x.id for x in getattr(after, field)}
@@ -1319,10 +1322,16 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
         index_path=_memory_index_path(cur, session.character_id, persona.id),
         extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-        context_tokens=window)
-    if changed:
+        context_tokens=window, consolidate=st.longterm_consolidate)
+    # Consolidation review: once per state of the memory, so a chat that goes idle
+    # again with nothing new costs no model call.
+    reviewed = False
+    if st.longterm_consolidate and mem.summary and mem.summary != mem.reviewed_summary:
+        reviewed = await memory.review_longterm(kobold, mem, card, persona)
+        mem.reviewed_summary = mem.summary
+    if changed or mem.reviewed_summary != mem0.reviewed_summary:
         _store_fold(cur, mem0, mem)
-    return {"ok": True, "swept": changed}
+    return {"ok": True, "swept": changed, "reviewed": reviewed}
 
 
 @app.delete("/api/sessions/{session_id}/messages")
@@ -1477,13 +1486,86 @@ def _spawn_memory_job(cur: Ctx, session_id: str) -> asyncio.Task:
     return task
 
 
+class _YieldingKobold:
+    """The memory job's view of the backend: every call carries this job's genkey, so a
+    reply can cancel it (_yield_memory_jobs), and a cancelled call never returns its
+    partial text — it raises, and the job stores nothing."""
+
+    def __init__(self, base, key: str):
+        self.base, self.key, self.cancelled = base, key, False
+
+    def _check(self, result):
+        if self.cancelled:
+            raise _MemoryYielded()
+        return result
+
+    async def generate_answer(self, prompt, params):
+        self._check(None)                    # cancelled before this call: don't start it
+        return self._check(await self.base.generate_answer(prompt, {**params, "genkey": self.key}))
+
+    async def generate_answer_full(self, prompt, params):
+        self._check(None)
+        return self._check(await self.base.generate_answer_full(prompt, {**params, "genkey": self.key}))
+
+    def __getattr__(self, name):
+        return getattr(self.base, name)
+
+
+class _MemoryYielded(BaseException):
+    """A memory job stopped to let a reply through; it runs again after a later turn.
+
+    A BaseException, like asyncio.CancelledError: the memory steps are best-effort and
+    catch `Exception` around every model call, which swallowed this and let the job
+    carry on (a measured run spent 71 s on a summary the reply was waiting behind)."""
+
+
+# KoboldCPP does one generation at a time, and the memory job (a summary pass of up to
+# 400 tokens, the long-term fold, fact extraction) runs right after `done`, so a message
+# sent soon after waited behind it: measured 2026-11-04, the next reply's first token at
+# 52 s instead of 2-3 s. A reply now cancels the running job (it is idempotent and runs
+# again after a later turn). A job that has already yielded MEMORY_MAX_YIELDS times in a
+# row is left to finish, or a quick typist would keep the summary from ever landing while
+# the oldest turns are trimmed out of the prompt unsummarised.
+MEMORY_MAX_YIELDS = 2
+_memory_running: dict[str, _YieldingKobold] = {}
+_memory_yields: dict[str, int] = {}
+
+
+async def _yield_memory_jobs() -> None:
+    """A reply is about to generate: stop background memory work that would delay it."""
+    for sid, k in list(_memory_running.items()):
+        if k.cancelled or _memory_yields.get(sid, 0) >= MEMORY_MAX_YIELDS:
+            continue
+        k.cancelled = True
+        _memory_yields[sid] = _memory_yields.get(sid, 0) + 1
+        await kobold.abort(k.key)
+        # A call sent just before the abort may not have reached the backend yet, and an
+        # abort for a key it doesn't know does nothing: send it again shortly.
+        _memory_tasks.add(t := asyncio.create_task(_abort_later(k.key)))
+        t.add_done_callback(_memory_tasks.discard)
+
+
+async def _abort_later(key: str, delays=(0.5, 2.0)) -> None:
+    for d in delays:
+        await asyncio.sleep(d)
+        await kobold.abort(key)
+
+
 async def _memory_job(cur: Ctx, session_id: str) -> None:
     lock = _memory_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
+        k = _YieldingKobold(kobold, f"pantheon-mem-{uuid.uuid4().hex[:12]}")
+        _memory_running[session_id] = k
         try:
-            await _maintain_memory(cur, session_id)
+            await _maintain_memory(cur, session_id, k)
+            _memory_yields.pop(session_id, None)
+        except _MemoryYielded:
+            print(f"[memory] job for session {session_id[:8]} yielded to a reply", flush=True)
         except Exception as e:  # noqa: BLE001 — best-effort, as it always was
             print(f"memory maintenance failed for session {session_id}: {e!r}", flush=True)
+        finally:
+            if _memory_running.get(session_id) is k:
+                del _memory_running[session_id]
 
 
 def _memory_basis(session: ChatSession) -> tuple:
@@ -1509,7 +1591,7 @@ def _apply_memory(cur: Ctx, worked: ChatSession, basis: tuple) -> bool:
     return True
 
 
-async def _maintain_memory(cur: Ctx, session_id: str) -> None:
+async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
     """The memory maintenance a turn used to run before `done` (thresholds user-tunable)."""
     session = _load(cur.sessions, session_id, ChatSession)
     if not session:
@@ -1561,7 +1643,7 @@ async def _maintain_memory(cur: Ctx, session_id: str) -> None:
                     max_tokens=st.summary_max_tokens,
                     index_path=_memory_index_path(cur, session.character_id, persona.id),
                     extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-                    context_tokens=window):
+                    context_tokens=window, consolidate=st.longterm_consolidate):
                 _store_fold(cur, cm0, cm)
     _apply_memory(cur, session, basis)
 
@@ -1586,6 +1668,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         raise HTTPException(400, "session has no character")
     if req.continue_turn and card.chat_mode == "assistant":
         raise HTTPException(400, "Continue is for roleplay chats")
+
+    await _yield_memory_jobs()            # nothing in the background delays a reply
 
     if req.regenerate:
         # Re-roll: pop the last char turn (keep it + its cached emotions as swipes).

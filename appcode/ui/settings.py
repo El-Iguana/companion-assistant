@@ -47,6 +47,10 @@ GROUPS = [
          "long-term memory. They show as AUTO in a chat's Memory, where you can edit or remove them."),
         ("auto_facts_max_new", "Facts per conversation", "range", (1, 10, 1, "{} at most"),
          "Ceiling on how many may be added from one swept conversation."),
+        ("longterm_consolidate", "Consolidate long-term memory", "check", None,
+         "Each chat adds new notes without rewriting the old ones, and a finished chat gets one "
+         "tidy-up that removes notes that stopped being true. Off: the whole memory is rewritten "
+         "every time, which can slowly lose older details."),
     ]),
     ("voice", "Voice &amp; hands-free", [
         ("wake_word", "Wake word / phrase", "text", "e.g. hey luna (blank = always listen)",

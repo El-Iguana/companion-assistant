@@ -519,6 +519,14 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   unchanged (`_apply_memory`); `_save_turn` never writes back an older summary than the one on
   disk. A dropped or lost job (restart) is harmless — the next turn re-checks the threshold.
   Tests: `tests/test_chat_stream.py`, each guard mutation-checked.
+  **A reply cancels a running job** (`_yield_memory_jobs`): KoboldCPP does one generation at a
+  time, so a message sent while the summary ran waited behind it (first token at 52 s). The job's
+  calls carry a genkey; the reply aborts it (`kobold.abort`), the job stores nothing and runs again
+  after a later turn. `_MemoryYielded` is a `BaseException` so the memory steps' best-effort
+  `except Exception` can't swallow it; after `MEMORY_MAX_YIELDS` (2) in a row a job is left to
+  finish. Tests: `tests/test_memory_yields.py`.
+- **Tests never touch a real library or backend** (`tests/conftest.py`): the throwaway
+  `PANTHEON_DATA_DIR` is set before any import, and a model call a test didn't stub raises.
 - **TTS backends** (`services/tts.py`): voice ids prefixed **`piper:`** route to Piper (one ONNX per voice,
   loaded from `PIPER_DIR`, cached; its espeak-ng data ships in the `piper-tts` wheel), everything else to
   Kokoro. Piper voices are **mounted, not baked** (`../jarvis` → `/app/models/piper:ro,z`) — dropping a new

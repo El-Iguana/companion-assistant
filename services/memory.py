@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from muninn import consolidate as _consolidate
 from muninn import facts as _facts
 from muninn import fold as _fold
 from muninn import summary as _summary
@@ -227,6 +228,45 @@ LONGTERM_PROMPT = (
 )
 
 
+# Consolidation (MEMORY_CORE_PLAN step 6, muninn.consolidate). The rewrite above
+# erodes: every fold re-copies the whole memory, and what the model doesn't copy is
+# gone. With `consolidate` on, a fold asks only for NEW bullets and appends them;
+# the review below runs once a chat is finished (the idle sweep) and may only
+# delete bullets, by number. Existing text is never regenerated.
+LONGTERM_KEEP_BULLETS = 16    # stored; oldest evicted (into the recall index) past this
+
+LONGTERM_NEW_PROMPT = (
+    "You keep {char}'s durable memory of {user} across all their conversations.\n\n"
+    "Read the new events and write ONLY the new bullets they add to the memory below. "
+    "Do not repeat or reword bullets that are already there.\n\n"
+    "Write a bullet for everything {user} said about themselves or their life that stays "
+    "true after the conversation: their work, the people and animals in their life, what "
+    "they do, like, avoid or fear, and decisions or promises still standing. Answer NONE "
+    "only if nothing like that was said.\n\n"
+    "- Terse bullets, one line each. No preamble, no closing sentence, no headings.\n"
+    "- Record only what was explicitly said, decided, or promised, and only if it stays "
+    "true after the conversation ends. Do not infer traits, preferences, or patterns.\n"
+    "- Do NOT record {char}'s own replies, acknowledgements, or offers — that {char} "
+    "noted, stored, remembered, agreed, or offered something is not a memory.\n"
+    "- If the new events change, cancel, or resolve something in the memory, write the "
+    "new state as a bullet (\"The Orkney trip is off\").\n"
+    "- No interpretation, no significance, no scene description, no small talk.\n"
+    "- Third person, present tense."
+)
+
+LONGTERM_REVIEW_PROMPT = (
+    "Below is {char}'s numbered memory of {user}, oldest first.\n\n"
+    "Which bullets should be deleted? Delete a bullet only if:\n"
+    "- a LATER bullet shows it is no longer true (a plan that was cancelled, a situation "
+    "that changed) — delete the earlier one, keep the later one. A cancelled plan's "
+    "details go with it: its date, its preparations, who was bringing what; or\n"
+    "- it says the same thing as another bullet — delete the less complete one.\n"
+    "Everything else stays, however old or minor. Most of the time nothing should be "
+    "deleted.\n\n"
+    "Answer with the numbers only, separated by commas, or NONE."
+)
+
+
 # Auto-fact extraction (MEMORY_PLAN Phase 5).
 # A wrong auto-fact is worse than a missing one: the summary gets rewritten every
 # fold, but a fact persists into every future conversation until someone notices
@@ -321,7 +361,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              index_path=None,
                              extract_facts: bool = False,
                              max_new_facts: int = AUTO_FACT_MAX_NEW,
-                             context_tokens: int = FOLD_CONTEXT_TOKENS) -> bool:
+                             context_tokens: int = FOLD_CONTEXT_TOKENS,
+                             consolidate: bool = False) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -332,6 +373,9 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     `session.memory.last_summarized_index` so long-term memory absorbs exactly
     what the per-session summary just absorbed, and recent verbatim turns aren't
     recorded twice while they're still in the live prompt.
+
+    `consolidate`: append only the new bullets instead of rewriting the summary
+    (LONGTERM_NEW_PROMPT); `review_longterm` then prunes it once the chat is done.
     """
     start = mem.swept_sessions.get(session.id, 0)
     upto = len(session.messages) if upto is None else upto
@@ -354,13 +398,20 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
 
     done = start                  # how far the folding actually got
     facts_left = max_new_facts    # the per-fold cap is for the WHOLE range, not per pass
+    evicted: list[str] = []       # consolidate: bullets pushed out by the cap
     for end, transcript in chunks:
-        prompt = (
-            LONGTERM_PROMPT.format(char=char_name, user=user_name,
-                                   max_bullets=LONGTERM_MAX_BULLETS) + "\n\n"
-            + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
-            + f"New events:\n{transcript}\n\nUpdated memory:"
-        )
+        instruction = (LONGTERM_NEW_PROMPT.format(char=char_name, user=user_name)
+                       if consolidate else
+                       LONGTERM_PROMPT.format(char=char_name, user=user_name,
+                                              max_bullets=LONGTERM_MAX_BULLETS))
+        if consolidate:
+            prompt = (instruction + "\n\n"
+                      + f"Memory so far:\n{mem.summary or '(empty)'}\n\n"
+                      + f"New events:\n{transcript}\n\nNew bullets:")
+        else:
+            prompt = (instruction + "\n\n"
+                      + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
+                      + f"New events:\n{transcript}\n\nUpdated memory:")
 
         try:
             summary = await kobold.generate_answer(prompt, {
@@ -369,18 +420,25 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             break     # best-effort; never block or fail the chat turn. Keep the
                       # passes that did land — `done` records exactly those, so
                       # the next sweep resumes from there instead of redoing them.
+        nothing_new = consolidate and _consolidate.says_none(summary)
         # Untagged reasoning, echoed rules and pasted transcript (muninn.checks). A pass
         # that was nothing else comes back empty and counts as a failed pass.
         summary, junk = clean_memory(
-            summary, transcript=transcript,
-            prompt=LONGTERM_PROMPT.format(char=char_name, user=user_name,
-                                          max_bullets=LONGTERM_MAX_BULLETS),
+            summary, transcript=transcript, prompt=instruction,
             speakers=[char_name, user_name])
         _log_dropped("long-term", junk)
-        if not summary.strip():
-            break
-
-        mem.summary = summary.strip()
+        if consolidate:
+            new = [] if nothing_new else _consolidate.bullets(summary)
+            if not new and not nothing_new:
+                break
+            kept, _, out = _consolidate.append(_consolidate.bullets(mem.summary), new,
+                                               LONGTERM_KEEP_BULLETS)
+            mem.summary = _consolidate.render(kept)
+            evicted += out
+        else:
+            if not summary.strip():
+                break
+            mem.summary = summary.strip()
         done = end
 
         # Auto-facts (Phase 5) — promote the stable, atomic things out of the
@@ -430,6 +488,10 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     # deliberately irrelevant queries ("tell me a joke" -> "RagTest: Hey.") slipped
     # through the gate; with user turns only, 0 of 6 did, and all 5 relevant
     # queries still retrieved the right turn.
+    if index_path is not None and evicted:
+        # Past the cap the oldest bullets leave the block; kept in the index they are
+        # still recalled when a later conversation touches them.
+        index_add(index_path, [{"text": b, "kind": "memory"} for b in evicted])
     if index_path is not None:
         index_add(index_path, [
             {"text": f"{user_name}: {m.content}", "kind": "turn"}
@@ -437,6 +499,33 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             if m.role == "user" and m.content
             and len(m.content.strip()) >= RECALL_MIN_TEXT
         ])
+    return True
+
+
+async def review_longterm(kobold: KoboldClient, mem: CharacterMemory,
+                          card: CharacterCard, persona: Persona,
+                          max_tokens: int = 60) -> bool:
+    """The consolidation review (muninn.consolidate): delete bullets a later one
+    made untrue, or that repeat another. Run once a chat is finished (the idle
+    sweep), never per fold. Only deletes, by number; returns True if `mem` changed.
+    Best-effort: any failure leaves the memory as it was."""
+    items = _consolidate.bullets(mem.summary)
+    if len(items) < 2:
+        return False
+    char_name, user_name = card.name or "Companion", persona.name or "User"
+    prompt = (LONGTERM_REVIEW_PROMPT.format(char=char_name, user=user_name) + "\n\n"
+              + _consolidate.review_prompt(items) + "\n\nDelete:")
+    try:
+        answer = await kobold.generate_answer(prompt, {
+            "max_length": max_tokens, "temperature": 0.2, "top_p": 0.9})
+    except Exception:
+        return False
+    kept, gone = _consolidate.drop(items, _consolidate.parse_drops(answer, len(items)))
+    if not gone:
+        return False
+    print(f"[memory] review dropped {len(gone)} bullet(s), e.g. {gone[0][:80]!r}", flush=True)
+    mem.summary = _consolidate.render(kept)
+    mem.updated_at = datetime.now().isoformat()
     return True
 
 
@@ -464,6 +553,12 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
 
     if summary:
         cap = int(budget * LONGTERM_SUMMARY_SHARE)
+        # Whole lines go first, OLDEST first: consolidated memory is appended to, so
+        # the end of it is the newest. Cutting the tail dropped exactly that.
+        lines = summary.splitlines()
+        while len(lines) > 1 and len("\n".join(lines)) > cap:
+            lines.pop(0)
+        summary = "\n".join(lines)
         if len(summary) > cap:
             summary = summary[:cap].rsplit(" ", 1)[0].rstrip(",.;:") + " …"
 

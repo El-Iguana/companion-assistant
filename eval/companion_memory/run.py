@@ -183,6 +183,9 @@ def _session(card, persona, messages) -> ChatSession:
     return s
 
 
+CONSOLIDATE = False
+
+
 async def run_llm(kob, fx: dict) -> list[dict]:
     """Run every stage; return one snapshot per stage."""
     card = CharacterCard(name=fx.get("char", "Mira"))          # chat_mode default: roleplay
@@ -195,7 +198,9 @@ async def run_llm(kob, fx: dict) -> list[dict]:
             with contextlib.redirect_stdout(io.StringIO()):  # "[auto-facts] +2 for …"
                 ok = await memory.fold_into_longterm(
                     kob, mem, s, card, persona, extract_facts=True,
-                    max_new_facts=memory.AUTO_FACT_MAX_NEW)
+                    max_new_facts=memory.AUTO_FACT_MAX_NEW, consolidate=CONSOLIDATE)
+                if CONSOLIDATE and ok:
+                    await memory.review_longterm(kob, mem, card, persona)
             snaps.append({"summary": mem.summary, "facts": [f.text for f in mem.facts],
                           "error": not ok})
     else:
@@ -268,6 +273,10 @@ def check(snap: dict, spec: dict, char: str, user: str, kind: str,
 def score(fx: dict, snaps: list[dict]) -> dict:
     char, user = fx.get("char", "Mira"), fx.get("user", "Jonah")
     cap = min(fx.get("max_bullets", memory.LONGTERM_MAX_BULLETS), memory.LONGTERM_MAX_BULLETS)
+    if CONSOLIDATE and fx["kind"] == "fold":
+        # The list grows across chats by design; a fixture's own cap still holds
+        # (padding), the rewrite's 10-bullet ceiling doesn't.
+        cap = fx.get("max_bullets", memory.LONGTERM_KEEP_BULLETS)
     counted = not fx.get("informational")
     total = {"forbidden": [], "format": [], "missed": [], "error": []}
     for i, (st, snap) in enumerate(zip(fx["stages"], snaps)):
@@ -341,10 +350,15 @@ async def main() -> int:
     ap.add_argument("--runs", type=int, default=3, help="runs per LLM fixture (variance is the point)")
     ap.add_argument("--fixture", default="", help="substring filter on fixture file names")
     ap.add_argument("--show", action="store_true", help="print what each run stored")
+    ap.add_argument("--consolidate", action="store_true",
+                    help="fold fixtures use consolidation: append-only folds, then the review "
+                         "after each stage (each stage is a finished chat, i.e. an idle sweep)")
     ap.add_argument("--dump", default="", help="write every run's raw output to this JSON file")
     ap.add_argument("--rescore", default="", help="score a previous --dump instead of calling the model "
                     "(for label fixes: the outputs stay fixed, only the checks change)")
     args = ap.parse_args()
+    global CONSOLIDATE
+    CONSOLIDATE = args.consolidate
 
     files = sorted(HERE.glob("fixtures/*.json"))
     if args.fixture:
@@ -363,7 +377,8 @@ async def main() -> int:
     else:
         model = wait_for_kobold() if any(fx["kind"] != "recall" for _, fx in fxs) else "-"
     kob = KoboldClient(KOBOLD_URL)
-    print(f"companion-memory eval — {len(fxs)} fixtures x {args.runs} runs, model={model}\n")
+    print(f"companion-memory eval — {len(fxs)} fixtures x {args.runs} runs, model={model}"
+          f"{', CONSOLIDATE' if CONSOLIDATE else ''}\n")
 
     totals = collections.Counter()
     per_fixture, info, recall, dump = [], [], None, []

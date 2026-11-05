@@ -415,6 +415,16 @@ class KoboldClient:
         except Exception as e:
             raise RuntimeError(f"Image generation failed: {e}") from e
 
+    async def abort(self, genkey: str) -> None:
+        """Stop the generation started with this `genkey` (KoboldCPP /api/extra/abort).
+        The cancelled call returns at once with partial text that still reports
+        finish_reason "length", so the caller must discard it. Never raises."""
+        try:
+            await self.client.post(f"{self.base_url}/api/extra/abort", json={"genkey": genkey},
+                                   timeout=5.0)
+        except Exception:
+            pass
+
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()

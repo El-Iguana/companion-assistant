@@ -84,6 +84,11 @@ class AppSettings(BaseModel):
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
     auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
     auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
+    # Long-term consolidation (muninn.consolidate): folds append new bullets and an idle
+    # review deletes stale ones, instead of rewriting the whole memory every fold.
+    # Off by default: on the eval it missed more durable details than the rewrite
+    # (10/33 vs 6/33) and kept junk lines for good (MEMORY.md, Consolidation).
+    longterm_consolidate: bool = False
     # The pytincture page's colourway (Ember's palette): bone|ember|moss|dusk|harbor.
     # Per account rather than per browser, so it follows you; the old page ignores it.
     ui_theme: str = "bone"
@@ -270,6 +275,7 @@ class CharacterMemory(BaseModel):
     facts: List[MemoryFact] = []
     summary: str = ""                    # cumulative history across every chat in this pairing
     swept_sessions: Dict[str, int] = {}  # session_id -> message index folded into `summary`
+    reviewed_summary: str = ""         # `summary` as the last consolidation review left it
     # Moments that moved the relationship (muninn.episodic): what {{user}} said and her
     # line, recorded when one reply moves it sharply or a milestone fires. The "why"
     # behind the relationship numbers; reviewable and removable in the Memory modal.

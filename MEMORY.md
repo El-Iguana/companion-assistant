@@ -91,8 +91,30 @@ REPLACE rule because folding a cancellation kept both "plans to sail next month"
 Retune the prompt rather than lowering the budget — truncating mid-sentence is worse than generating
 short.
 
+### Consolidation (setting, off by default)
+
+`AppSettings.longterm_consolidate` (Settings → Memory → "Consolidate long-term memory") swaps
+the rewrite for `muninn.consolidate`: a fold asks only for **new** bullets
+(`LONGTERM_NEW_PROMPT`) and appends them, deduped in code; existing text is never regenerated.
+The idle sweep then runs `review_longterm()` once per state of the memory
+(`CharacterMemory.reviewed_summary`): the model names, by number, bullets a later one made untrue
+or that repeat another, and code deletes exactly those (never more than half the list in one
+pass). Past `LONGTERM_KEEP_BULLETS` (16) the oldest bullets go into the recall index as
+`kind="memory"`.
+
+**Measured on the eval, it is not better yet** (Cydonia-24B, 33 runs, against the rewrite's last
+run): clean 10 vs 9, forbidden 14 vs 20, format 4 vs 13, but **missed 10 vs 6**, and the
+erosion fixture it was built for is 0/3 clean either way. Two reasons, read from the outputs:
+asked for "only new bullets", the model often answers NONE for chats with plain durable facts
+(the first prompt said "often none" and missed 17/33); and append-only makes whatever junk gets
+through permanent, where the rewrite tends to drop it next fold — reasoning written as bullets
+("Here are Priya's statements…"), a stray `</assinking>`, once a whole invented dialogue. The
+review also keeps a cancelled plan's details (its date, who packs what) about half the time.
+Before turning it on: a stronger line filter on the new-bullets pass, and a reason for the NONE.
+
 Injection (`longterm_block()`) is capped at `LONGTERM_BUDGET_CHARS` (2400, header counted): the
-cumulative history is truncated to its share (`LONGTERM_SUMMARY_SHARE`, 0.6) and facts drop
+cumulative history is cut to its share (`LONGTERM_SUMMARY_SHARE`, 0.6) by dropping whole lines
+**oldest first** (only a single over-long line is truncated), and facts drop
 **oldest-first**, so an oversized entry costs only itself instead of silently dropping everything
 after it. Facts are hard-capped at `LONGTERM_MAX_FACTS` (40) on write.
 
