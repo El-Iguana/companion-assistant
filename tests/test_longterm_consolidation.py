@@ -44,11 +44,13 @@ def _fold(kob, mem, s, **k):
 
 def test_a_fold_appends_and_never_rewrites_what_is_there():
     mem = CharacterMemory(summary="- Priya is a marine biologist.\n- Gus is Priya's tortoise.")
-    kob = Kob("- Priya plays cello in a quartet.")
+    # The pass lists everything it reads, repeats included; code drops the repeat.
+    kob = Kob("- Gus is Priya's tortoise.\n- Priya plays cello in a quartet.\n- </assthink>")
     assert _fold(kob, mem, _chat("I play cello, second chair.", "Distinguished."))
     assert mem.summary == ("- Priya is a marine biologist.\n- Gus is Priya's tortoise.\n"
                            "- Priya plays cello in a quartet.")
-    assert "ONLY the new bullets" in kob.prompts[0] and "Gus is Priya's tortoise" in kob.prompts[0]
+    # Not shown the stored memory: comparing against it is what made it answer NONE.
+    assert "marine biologist" not in kob.prompts[0]
 
 
 def test_none_is_a_successful_pass():
@@ -79,7 +81,7 @@ def test_the_cap_evicts_oldest_into_the_recall_index(tmp_path, monkeypatch):
 def test_the_review_only_deletes_what_it_names():
     mem = CharacterMemory(summary="- Jonah owns the Kestrel.\n- Jonah plans to sail to Orkney.\n"
                                   "- The Orkney trip is off.")
-    kob = Kob("2")
+    kob = Kob("2 is the plan and 3 cancels it.\nDELETE: 2")
     assert asyncio.run(memory.review_longterm(kob, mem, CARD, PERSONA))
     assert mem.summary == "- Jonah owns the Kestrel.\n- The Orkney trip is off."
     assert "3. The Orkney trip is off." in kob.prompts[0]
@@ -127,8 +129,9 @@ def test_the_sweep_reviews_once_per_memory_state(cur, session, monkeypatch):
 
 
 def test_consolidation_off_rewrites_as_before(cur, session, monkeypatch):
+    assert main._load_settings(cur).longterm_consolidate is True   # the default
     st = main._load_settings(cur)
-    assert st.longterm_consolidate is False                    # the default
+    st.longterm_consolidate = False
     seen = {}
 
     async def fold(kobold, m, s, card, persona, **k):

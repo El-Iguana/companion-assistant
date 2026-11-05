@@ -235,23 +235,22 @@ LONGTERM_PROMPT = (
 # delete bullets, by number. Existing text is never regenerated.
 LONGTERM_KEEP_BULLETS = 16    # stored; oldest evicted (into the recall index) past this
 
+# The pass is NOT shown the memory so far. Asked for "only the new bullets", the model
+# compared, decided nothing was new and answered NONE on chats with plain facts in them
+# (eval, 2026-11-05: missed 10/33 and 17/33 with two wordings, vs 6/33 for the rewrite).
+# It now lists everything lasting in the turns it reads; repeats of what is already
+# stored are dropped in code (muninn.consolidate.append), and lines that are not notes
+# (reasoning written as bullets, tags, invented dialogue) by muninn.consolidate.notes.
 LONGTERM_NEW_PROMPT = (
-    "You keep {char}'s durable memory of {user} across all their conversations.\n\n"
-    "Read the new events and write ONLY the new bullets they add to the memory below. "
-    "Do not repeat or reword bullets that are already there.\n\n"
-    "Write a bullet for everything {user} said about themselves or their life that stays "
-    "true after the conversation: their work, the people and animals in their life, what "
-    "they do, like, avoid or fear, and decisions or promises still standing. Answer NONE "
-    "only if nothing like that was said.\n\n"
-    "- Terse bullets, one line each. No preamble, no closing sentence, no headings.\n"
-    "- Record only what was explicitly said, decided, or promised, and only if it stays "
-    "true after the conversation ends. Do not infer traits, preferences, or patterns.\n"
-    "- Do NOT record {char}'s own replies, acknowledgements, or offers — that {char} "
-    "noted, stored, remembered, agreed, or offered something is not a memory.\n"
-    "- If the new events change, cancel, or resolve something in the memory, write the "
-    "new state as a bullet (\"The Orkney trip is off\").\n"
-    "- No interpretation, no significance, no scene description, no small talk.\n"
-    "- Third person, present tense."
+    "List what this conversation tells {char} about {user} that will still be true "
+    "after it ends: who {user} is, their work, the people and animals in their life, "
+    "what they do, like, avoid or fear, and plans or promises still standing (or that "
+    "something planned is now off).\n\n"
+    "- One terse bullet per thing, third person, present tense. Start with \"- \".\n"
+    "- Only what was said outright. Do not infer traits, moods, or patterns.\n"
+    "- Nothing {char} said, offered, noted, or agreed to.\n"
+    "- No small talk, no scene description, no commentary about the list.\n"
+    "- If the conversation contains nothing like that, answer NONE."
 )
 
 LONGTERM_REVIEW_PROMPT = (
@@ -263,7 +262,10 @@ LONGTERM_REVIEW_PROMPT = (
     "- it says the same thing as another bullet — delete the less complete one.\n"
     "Everything else stays, however old or minor. Most of the time nothing should be "
     "deleted.\n\n"
-    "Answer with the numbers only, separated by commas, or NONE."
+    "You may think it through first. Then end with exactly one line in this form:\n"
+    "DELETE: 3, 5\n"
+    "or, if nothing should go:\n"
+    "DELETE: NONE"
 )
 
 
@@ -406,8 +408,7 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                                               max_bullets=LONGTERM_MAX_BULLETS))
         if consolidate:
             prompt = (instruction + "\n\n"
-                      + f"Memory so far:\n{mem.summary or '(empty)'}\n\n"
-                      + f"New events:\n{transcript}\n\nNew bullets:")
+                      + f"Conversation:\n{transcript}\n\nWhat stays true about {user_name}:")
         else:
             prompt = (instruction + "\n\n"
                       + (f"Existing memory:\n{mem.summary}\n\n" if mem.summary else "")
@@ -428,7 +429,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             speakers=[char_name, user_name])
         _log_dropped("long-term", junk)
         if consolidate:
-            new = [] if nothing_new else _consolidate.bullets(summary)
+            new, junk = ([], []) if nothing_new else _consolidate.notes(summary)
+            _log_dropped("long-term", junk)
             if not new and not nothing_new:
                 break
             kept, _, out = _consolidate.append(_consolidate.bullets(mem.summary), new,
@@ -504,7 +506,7 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
 
 async def review_longterm(kobold: KoboldClient, mem: CharacterMemory,
                           card: CharacterCard, persona: Persona,
-                          max_tokens: int = 60) -> bool:
+                          max_tokens: int = 300) -> bool:
     """The consolidation review (muninn.consolidate): delete bullets a later one
     made untrue, or that repeat another. Run once a chat is finished (the idle
     sweep), never per fold. Only deletes, by number; returns True if `mem` changed.
@@ -514,7 +516,7 @@ async def review_longterm(kobold: KoboldClient, mem: CharacterMemory,
         return False
     char_name, user_name = card.name or "Companion", persona.name or "User"
     prompt = (LONGTERM_REVIEW_PROMPT.format(char=char_name, user=user_name) + "\n\n"
-              + _consolidate.review_prompt(items) + "\n\nDelete:")
+              + _consolidate.review_prompt(items))
     try:
         answer = await kobold.generate_answer(prompt, {
             "max_length": max_tokens, "temperature": 0.2, "top_p": 0.9})

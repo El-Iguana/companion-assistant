@@ -86,9 +86,9 @@ class AppSettings(BaseModel):
     auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
     # Long-term consolidation (muninn.consolidate): folds append new bullets and an idle
     # review deletes stale ones, instead of rewriting the whole memory every fold.
-    # Off by default: on the eval it missed more durable details than the rewrite
-    # (10/33 vs 6/33) and kept junk lines for good (MEMORY.md, Consolidation).
-    longterm_consolidate: bool = False
+    # On by default since its fold stopped seeing stored memory and its lines are filtered:
+    # clean 16/33 vs the rewrite's 9, missed 5 vs 6 (MEMORY.md, Consolidation).
+    longterm_consolidate: bool = True
     # The pytincture page's colourway (Ember's palette): bone|ember|moss|dusk|harbor.
     # Per account rather than per browser, so it follows you; the old page ignores it.
     ui_theme: str = "bone"
