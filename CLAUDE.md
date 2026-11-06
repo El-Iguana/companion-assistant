@@ -467,7 +467,10 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   once ~24 turns accumulate, tunable in ⚙ Settings), cross-session `CharacterMemory` per (character,
   persona) written by two triggers (the chat flow folds forward what the summary just absorbed;
   `POST /sessions/{id}/sweep` on a 5-min idle timer folds a finished chat), plus margin-gated semantic
-  recall over an int8 BGE index. *Assistant* — `AssistantMemory`: directives, facts, task notes; no
+  recall over an int8 BGE index, plus **story memory** (episodes + world details in a second
+  index with its own gate; scenario chats get their own pair, `memories/scene-*`). Deleting a
+  character or persona deletes its pairings' memories, indexes, assistant memory and
+  relationships (`_forget_pairings`). *Assistant* — `AssistantMemory`: directives, facts, task notes; no
   summary, no recall. Both are budget-capped and drop oldest rather than truncating, both evict
   auto-written entries before curated ones, and both are editable in the 📌 Memory modal, which
   renders the assistant's different shape rather than a relabelled one.

@@ -161,6 +161,47 @@ Retrieval **shares** `LONGTERM_BUDGET_CHARS` with the long-term block rather tha
 drops any snippet whose text already appears in that block. Tunable via `recall_enabled` /
 `recall_top_k`.
 
+## Story memory (setting, on by default)
+
+The recall index holds {{user}}'s own turns only, on purpose (above). In a roleplay the
+story itself — places, side characters, objects, what happened — is in her replies and
+the narrator's beats, so recall never saw it. `AppSettings.story_memory` (Settings →
+Memory → "Remember the story") adds a **second index per scope**, `.story.vec.npz`, with
+its own relevance gate, so story text can't loosen the gate the turn index was
+calibrated on. Code: `services/memory.py`, "Story memory".
+
+- **Episodes**: one short past-tense note per fold pass ("what happened in this
+  stretch"), from one extra model call (`EPISODE_PROMPT`, ≤160 tokens), stored with a
+  date header (`Earlier (Nov 6): …`). Enforced in code because the prompt alone did not
+  hold on Rocinante: the instruction is restated after the transcript (before that it
+  carried on the scene as her), there is **no NONE escape** (offered one, it answered
+  NONE for 3 of 4 real passes), lines that are story rather than a note (speaker
+  label, quotes, `*action*`) are dropped, a summary wrapped whole in italics is unwrapped
+  when it opens with a name, headings and unfinished sentences are dropped.
+- **World lines**: no model call. Every narrator beat, and each sentence of her replies
+  that names someone or something other than the two of them (`world_lines`; a
+  capitalised word that isn't the sentence's first word, a pronoun — contractions
+  included — or one of their names). At most 12 per pass.
+- **Where**: pairing scope inside `fold_into_longterm` (`story_path`), so the threshold
+  and idle triggers and their swept marks cover it exactly as they cover the turns;
+  entries are collected per pass and written once the passes land, so a fold a reply
+  interrupts can't index the same pass twice. **Scenario chats** — no pairing memory, by
+  design — get the same two indexes scoped to the chat
+  (`memories/scene-{session}.vec.npz` + `.story.vec.npz`), written by
+  `record_scene` from the turns the rolling summary just folded, only once that fold is
+  stored. Deleting, clearing, or truncating a scenario chat below its summary deletes them.
+- **Recall**: up to `STORY_TOP_K` (2) story hits per turn, after the turn hits, in the
+  same block and budget (scenario chats: `SCENE_RECALL_CHARS`, 900). A story index is
+  not searched below `STORY_MIN_ENTRIES` (8) — the median gate is noise that small — and
+  hits must clear `STORY_MIN_SCORE` (0.55) as well as muninn's gate.
+- **Capped** at `STORY_MAX_ENTRIES` (800) per scope, oldest world lines first, then
+  oldest episodes (muninn's index only evicts `turn`, which a story index has none of).
+- **Measured** (2026-11-06, Rocinante-12B + BGE, three Mira/Jonah fixtures replayed as one
+  chat, 3 runs): episodes 14/15 passes clean; irrelevant questions (greeting, joke,
+  favourite colour) recalled nothing 9/9; relevant ones found the right memory 8/12
+  (Corso 3/3, Gull Rock 3/3, the Kestrel 2/3, "remember the fortune teller?" 0/3). One
+  probe, not an eval: the 0.55 floor is a starting value.
+
 ## Auto-fact extraction
 
 After each fold, durable facts are pulled out of the same transcript and stored with `origin="auto"`,

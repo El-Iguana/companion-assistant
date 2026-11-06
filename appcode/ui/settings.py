@@ -42,6 +42,11 @@ GROUPS = [
          "Runs on the CPU; uses no VRAM."),
         ("recall_top_k", "Recall depth", "range", (1, 10, 1, "{} snippets"),
          "How many remembered snippets may be injected per turn. Shares the long-term budget."),
+        ("story_memory", "Remember the story", "check", None,
+         "Keep a running record of what happened (a short note per stretch of the chat) and of "
+         "the people, places and things the story mentions, and recall them when they come up "
+         "again. Scenario chats get their own. Adds one short model call each time memory is "
+         "folded."),
         ("auto_facts_enabled", "Remember facts automatically", "check", None,
          "Pull durable facts (names, allergies, preferences) out of finished conversations into "
          "long-term memory. They show as AUTO in a chat's Memory, where you can edit or remove them."),

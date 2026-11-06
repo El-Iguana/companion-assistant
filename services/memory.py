@@ -364,7 +364,8 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
                              extract_facts: bool = False,
                              max_new_facts: int = AUTO_FACT_MAX_NEW,
                              context_tokens: int = FOLD_CONTEXT_TOKENS,
-                             consolidate: bool = False) -> bool:
+                             consolidate: bool = False,
+                             story_path=None, episodes: bool = True) -> bool:
     """Fold this session's turns up to `upto` into `mem` (mutates it).
 
     Returns True if `mem` changed and the caller should persist it. Idempotent:
@@ -378,6 +379,9 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
 
     `consolidate`: append only the new bullets instead of rewriting the summary
     (LONGTERM_NEW_PROMPT); `review_longterm` then prunes it once the chat is done.
+
+    `story_path`: also index each pass's story (episodes and world lines, see
+    "Story memory" below) into that index; `episodes` adds the episode note's call.
     """
     start = mem.swept_sessions.get(session.id, 0)
     upto = len(session.messages) if upto is None else upto
@@ -401,6 +405,7 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
     done = start                  # how far the folding actually got
     facts_left = max_new_facts    # the per-fold cap is for the WHOLE range, not per pass
     evicted: list[str] = []       # consolidate: bullets pushed out by the cap
+    story: list[dict] = []        # story memory, written with the turns once the passes land
     for end, transcript in chunks:
         instruction = (LONGTERM_NEW_PROMPT.format(char=char_name, user=user_name)
                        if consolidate else
@@ -441,6 +446,9 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
             if not summary.strip():
                 break
             mem.summary = summary.strip()
+        if story_path is not None:
+            story += await story_entries(kobold, session.messages[done:end], char_name,
+                                         user_name, transcript, episodes)
         done = end
 
         # Auto-facts (Phase 5) — promote the stable, atomic things out of the
@@ -495,12 +503,9 @@ async def fold_into_longterm(kobold: KoboldClient, mem: CharacterMemory,
         # still recalled when a later conversation touches them.
         index_add(index_path, [{"text": b, "kind": "memory"} for b in evicted])
     if index_path is not None:
-        index_add(index_path, [
-            {"text": f"{user_name}: {m.content}", "kind": "turn"}
-            for m in session.messages[start:done]
-            if m.role == "user" and m.content
-            and len(m.content.strip()) >= RECALL_MIN_TEXT
-        ])
+        index_add(index_path, turn_entries(session.messages[start:done], user_name))
+    if story_path is not None and story:
+        story_add(story_path, story)
     return True
 
 
@@ -586,3 +591,235 @@ def longterm_block(mem: CharacterMemory | None, char_name: str, user_name: str,
 # Semantic recall (MEMORY_PLAN Phase 4) lives in muninn.recall: index_add,
 # index_search, recall_block and the RECALL_* gate constants, imported above.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Story memory: episodes and world details, in an index of their own.
+#
+# The recall index above holds {{user}}'s own turns, by design (her replies restate
+# them and dragged the relevance gate). In a roleplay the story's own substance —
+# places, side characters, objects, what happened — is in HER replies and the
+# narrator's beats, so it never reached recall. This adds it beside, not into, the
+# turn index: a separate `.story.vec.npz` per scope, so it gets its own margin gate
+# (the median it is measured against is story text, not small talk) and can't
+# loosen the gate the turn index was calibrated on.
+#
+#   episode  one short past-tense note per fold pass: "what happened in this stretch",
+#            from one small extra model call over the transcript the pass already
+#            has. Written with a date header (contextual retrieval: a chunk embedded
+#            with where/when it sits retrieves better than the bare sentence).
+#   world    no model call: every narrator beat, and each sentence of her replies that
+#            names someone or something other than the two of them.
+#
+# Pairing scope: written inside fold_into_longterm, so the threshold and idle triggers
+# and their swept-session marks cover it exactly as they cover the turns. Scenario
+# chats (no pairing memory, by design) get the same two indexes scoped to the chat.
+# Best-effort like everything here: a failure costs the entry, never the turn.
+# ---------------------------------------------------------------------------
+STORY_TOP_K = 2              # story hits per turn, on top of the turn hits
+STORY_MAX_ENTRIES = 800      # per scope; oldest world lines go first, then oldest episodes
+WORLD_MAX_PER_PASS = 12      # world lines indexed from one fold pass
+EPISODE_MAX_TOKENS = 160
+SCENE_RECALL_CHARS = 900     # a scenario chat's recall block (it has no long-term block to share)
+
+EPISODE_PROMPT = (
+    "Below is part of an ongoing roleplay between {char} and {user}. You are not in the story; "
+    "you are noting what happened in it.\n\nStory:\n{transcript}\n\n"
+    # Restated after the transcript: with the instruction only above it, the model (Rocinante,
+    # 2026-11-06) carried on the scene as {char} instead of summarising it.
+    "[Do not continue the story. In one or two plain sentences, in the past tense and the third "
+    "person, write what happened in the part above: who did what, where, and what changed. Name "
+    "people, places and things exactly as the story does. No dialogue, no quotation marks, no "
+    "*actions*, no commentary.]\nWhat happened:"
+)
+# No "answer NONE if nothing happened": offered that way out, Rocinante took it for 3 of 4
+# real adventure passes (the consolidation fold showed the same, MEMORY.md). A stretch of
+# story always holds something; an empty or junk answer is handled in code.
+# An answer that is story, not a note about it: a speaker label, an *action*, quoted speech.
+_NOT_EPISODE = re.compile(r"^\s*[\w .'’-]{1,40}:\s|\*|[\"“”]")
+
+_SENT = re.compile(r"(?<=[.!?…])[\"”’*]*\s+")
+_CAP = re.compile(r"[A-Z][\w'’-]+")
+# Capitalised words that are not names: openers, pronouns, titles of address.
+_NOT_NAME = {
+    "i", "a", "an", "the", "he", "she", "they", "it", "we", "you", "his", "her", "their", "its",
+    "our", "your", "my", "this", "that", "these", "those", "there", "here", "then", "when",
+    "after", "before", "but", "and", "or", "so", "if", "yes", "no", "oh", "ah", "well", "not",
+    "what", "why", "how", "who", "where", "mr", "mrs", "ms", "sir", "madam", "miss", "lord", "lady",
+}
+
+
+def _shown(m) -> str:
+    return m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else (m.content or "")
+
+
+def _names_other_than(sentence: str, own: set[str]) -> bool:
+    """Does the sentence name someone or something besides {char} and {user}? A
+    capitalised word counts when it isn't the sentence's first word or a common opener."""
+    words = _CAP.findall(sentence)
+    first = (re.match(r"[^A-Za-z]*([A-Za-z][\w'’-]*)", sentence) or [None, ""])[1]
+    for w in words:
+        lw = re.sub(r"['’]s?$", "", w.lower())
+        # "I'm", "I'll", "We've": a pronoun with a contraction, not a name.
+        if w == first or lw in _NOT_NAME or re.split(r"['’]", lw)[0] in _NOT_NAME or lw in own:
+            continue
+        return True
+    return False
+
+
+def world_lines(messages, char_name: str, user_name: str) -> list[str]:
+    """Story details worth recalling, no model call: narrator beats whole, and the
+    sentences of her replies that name someone or something other than the two of them."""
+    own = {w.lower() for n in (char_name, user_name) for w in (n or "").split()}
+    out: list[str] = []
+    for m in messages:
+        text = substitute_macros(_shown(m), char_name, user_name).strip()
+        if m.role == "narrator" and len(text) >= RECALL_MIN_TEXT:
+            out.append(f"Narrator: {text}")
+        elif m.role == "char":
+            for s in _SENT.split(text.replace("*", "")):
+                s = " ".join(s.split()).strip('"“”')
+                if len(s) >= RECALL_MIN_TEXT and _names_other_than(s, own):
+                    out.append(f"{char_name}: {s}")
+    return out[-WORLD_MAX_PER_PASS:]
+
+
+def _unwrap_summary(line: str) -> str:
+    """`*Mira and Jonah hired Pell…*` -> the sentence; `*She glances at the map.*` stays as
+    it is (and is dropped as story): a summary names who acted, an action opens with a
+    pronoun."""
+    t = line.strip()
+    if len(t) > 2 and t[0] == t[-1] == "*" and t.count("*") == 2:
+        inner = t[1:-1].strip()
+        first = (re.match(r"[A-Za-z][\w'’-]*", inner) or [""])[0]
+        if first[:1].isupper() and first.lower() not in _NOT_NAME:
+            return inner
+    return line
+
+
+async def episode_note(kobold: KoboldClient, transcript: str, char_name: str,
+                       user_name: str, when: str = "") -> str:
+    """One short "what happened in this stretch" note, or "" (nothing happened, or junk)."""
+    prompt = EPISODE_PROMPT.format(char=char_name, user=user_name, transcript=transcript)
+    try:
+        text = await kobold.generate_answer(prompt, {
+            "max_length": EPISODE_MAX_TOKENS, "temperature": 0.4, "top_p": 0.9, "rep_pen": 1.05})
+    except Exception:
+        return ""
+    if _consolidate.says_none(text):
+        return ""
+    # A summary wrapped whole in *italics* is still a summary (seen 2 of 6 passes). Unwrapped
+    # before clean_memory, which drops whole-line italics as asides; an *action* inside a
+    # line is the story itself, and is dropped below.
+    text = "\n".join(_unwrap_summary(ln) for ln in text.splitlines())
+    text, junk = clean_memory(text, transcript=transcript, prompt=prompt,
+                              speakers=[char_name, user_name])
+    _log_dropped("episode", junk)
+    lines = [ln.strip(" -•") for ln in text.splitlines() if ln.strip(" -•")]
+    lines = [ln for ln in lines if not ln.lower().startswith("where things stand")
+             and not ln.rstrip().endswith(":")]           # a heading ("The key events:")
+    story = [ln for ln in lines if _NOT_EPISODE.search(ln)]
+    if story:
+        # The prompt says "do not continue the story"; this holds when the model does anyway.
+        _log_dropped("episode", story)
+        lines = [ln for ln in lines if ln not in story]
+    note = _whole_sentences(" ".join(lines), RECALL_MAX_CHARS - 24)
+    if note and note[-1] not in ".!?…":
+        # A fragment ("…handed over the map to"): keep the finished sentences before it.
+        done = re.split(r"(?<=[.!?…])\s+", note)[:-1]
+        note = " ".join(done)
+    if len(note) < RECALL_MIN_TEXT:
+        return ""
+    return (f"Earlier ({when}): " if when else "Earlier: ") + note
+
+
+def _whole_sentences(text: str, limit: int) -> str:
+    """At most `limit` characters, ending at a sentence end; a first sentence that is
+    already too long ends at a word, with an ellipsis. The index would cut mid-word."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    out = ""
+    for sent in re.split(r"(?<=[.!?])\s+", text):
+        if len(out) + len(sent) + 1 > limit:
+            break
+        out = f"{out} {sent}".strip()
+    return out or text[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def story_add(path, entries: list[dict]) -> bool:
+    """index_add for a story index, capped: muninn's index only evicts kind="turn",
+    which a story index has none of, so it would otherwise grow without bound."""
+    if not entries or not index_add(path, entries):
+        return False
+    try:
+        vectors, meta = _index_load(path)
+        over = len(meta) - STORY_MAX_ENTRIES
+        if vectors is not None and over > 0:
+            order = ([i for i, m in enumerate(meta) if m.get("kind") == "world"]
+                     + [i for i, m in enumerate(meta) if m.get("kind") != "world"])
+            drop = set(order[:over])
+            keep = [i for i in range(len(meta)) if i not in drop]
+            _index_save(path, vectors[keep], [meta[i] for i in keep])
+    except Exception as e:  # noqa: BLE001
+        print(f"[story] cap skipped: {e}", flush=True)
+    return True
+
+
+async def story_entries(kobold: KoboldClient, messages, char_name: str, user_name: str,
+                        transcript: str, episodes: bool = True) -> list[dict]:
+    """One fold pass's story: its world lines, and (with `episodes`) one episode note
+    from `transcript`. Returned, not written: a fold that a reply interrupts stores
+    nothing and runs again, so writing as it goes would index the same pass twice."""
+    entries = [{"text": t, "kind": "world"} for t in world_lines(messages, char_name, user_name)]
+    if episodes:
+        note = await episode_note(kobold, transcript, char_name, user_name,
+                                  when=datetime.now().strftime("%b %-d"))
+        if note:
+            entries.append({"text": note, "kind": "episode"})
+    return entries
+
+
+def turn_entries(messages, user_name: str) -> list[dict]:
+    """{{user}}'s own turns, as the turn index stores them."""
+    return [{"text": f"{user_name}: {m.content}", "kind": "turn"} for m in messages
+            if m.role == "user" and m.content and len(m.content.strip()) >= RECALL_MIN_TEXT]
+
+
+async def record_scene(kobold: KoboldClient, session: ChatSession, card: CharacterCard,
+                       persona: Persona, start: int, end: int, turn_path, story_path,
+                       episodes: bool = True, context_tokens: int = FOLD_CONTEXT_TOKENS) -> int:
+    """A scenario chat's own memory: index turns [start, end) — the ones the rolling
+    summary just folded out of the live prompt — into the chat's turn and story indexes."""
+    char_name, user_name = card.name or "Companion", persona.name or "User"
+    if end <= start:
+        return 0
+    story, prev = [], start
+    for stop, transcript in _fold_chunks(session.messages, start, end, char_name, user_name,
+                                         fold_budget(context_tokens)):
+        story += await story_entries(kobold, session.messages[prev:stop], char_name, user_name,
+                                     transcript, episodes)
+        prev = stop
+    index_add(turn_path, turn_entries(session.messages[start:end], user_name))
+    story_add(story_path, story)
+    return len(story)
+
+
+STORY_MIN_ENTRIES = 8        # a smaller index makes the margin gate unreliable (probe: a
+                             # greeting matched a 6-entry index at 0.49); early in a chat the
+                             # recent turns are still in the prompt verbatim anyway
+
+
+# Story hits must clear this too, above muninn's RECALL_MIN_SCORE (0.45). On a real-model
+# probe (Rocinante + BGE, 3 adventures, 13 entries, 2 runs) relevant questions scored
+# 0.55-0.75 and greetings / chit-chat up to 0.52. One small probe: a starting value.
+STORY_MIN_SCORE = 0.55
+
+
+def search_story(path, query: str) -> list[dict]:
+    try:
+        if len(_index_load(path)[1]) < STORY_MIN_ENTRIES:
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    return [h for h in index_search(path, query, STORY_TOP_K) if h["score"] >= STORY_MIN_SCORE]

@@ -82,6 +82,9 @@ class AppSettings(BaseModel):
     # Semantic recall (muninn.embeddings + muninn.recall).
     recall_enabled: bool = True                             # retrieve related past turns/facts per turn
     recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
+    # Story memory (services/memory.py): episodes + world details in their own index, and a
+    # scenario chat's own recall. Episodes cost one short model call per memory fold.
+    story_memory: bool = True
     auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
     auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
     # Long-term consolidation (muninn.consolidate): folds append new bullets and an idle

@@ -236,8 +236,8 @@ class ProfileModal:
     async def _delete(self) -> None:
         name = self.data["card"]["name"]
         if not await message.confirm(
-                f"Delete {name}? Their card is removed; chats, relationship and memories stay "
-                "on disk but no longer appear.", title="Delete character", ok_text="Delete",
+                f"Delete {name}? Their card, relationships and memories are deleted. Chats with "
+                "them stay on disk but no longer appear.", title="Delete character", ok_text="Delete",
                 danger=True):
             return
         r = await Library().delete_card(self.card_id)

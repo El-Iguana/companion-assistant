@@ -176,8 +176,9 @@ class PersonaEditor:
 
     async def _delete(self) -> None:
         name = self.p.get("name") or "this persona"
-        if not await message.confirm(f"Delete {name}? Chats made as {name} keep working; relationships and "
-                                     "memories with them stay on disk.", title="Delete persona",
+        if not await message.confirm(f"Delete {name}? Chats made as {name} keep working, but every "
+                                     f"character's relationship with and memories of {name} are deleted.",
+                                     title="Delete persona",
                                      ok_text="Delete", danger=True):
             return
         r = await People().delete_persona(self.p["id"])

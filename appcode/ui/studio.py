@@ -1115,8 +1115,9 @@ class StudioView:
 
     async def _delete(self) -> None:
         name = self.data["card"].get("name") or "this character"
-        if not await message.confirm(f"Delete {name}? Their chats, relationship and memories stay on disk but no "
-                                     "longer appear.", title="Delete character", ok_text="Delete", danger=True):
+        if not await message.confirm(f"Delete {name}? Their relationships and memories are deleted too. Chats "
+                                     "with them stay on disk but no longer appear.", title="Delete character",
+                                     ok_text="Delete", danger=True):
             return
         r = await Library().delete_card(self.card_id)
         if failed(r, f"delete {name}"):

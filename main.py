@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import secrets
 import shutil
 import uuid
@@ -281,6 +282,43 @@ def _memory_index_path(cur: Ctx, character_id: str, persona_id: str):
     JSON with a non-.json suffix on purpose, so any future `glob("*.json")` over
     this directory can't mistake it for a model file."""
     return cur.memories / f"{character_id}__{persona_id}.vec.npz"
+
+
+def _story_index_path(cur: Ctx, character_id: str, persona_id: str):
+    """The pairing's story index: episodes and world details (services/memory.py,
+    "Story memory"). Its own file so its relevance gate is its own."""
+    return cur.memories / f"{character_id}__{persona_id}.story.vec.npz"
+
+
+def _scene_index_paths(cur: Ctx, session_id: str):
+    """A scenario chat's own (turn index, story index): it keeps no pairing memory,
+    since its premise is an alternate one, so it remembers only itself."""
+    return (cur.memories / f"scene-{session_id}.vec.npz",
+            cur.memories / f"scene-{session_id}.story.vec.npz")
+
+
+def _forget_files(paths) -> None:
+    for f in paths:
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _forget_pairings(cur: Ctx, character_id: str = "", persona_id: str = "") -> int:
+    """Delete everything kept per (character, persona) pairing for a deleted character
+    or persona: long-term memory, its recall and story indexes, assistant memory and the
+    relationship. Deleting a character used to leave all of it on disk."""
+    if not (character_id or persona_id):
+        return 0
+    # The id becomes a glob: never let one carry a wildcard ("*" would match everyone).
+    if not all(re.fullmatch(r"[A-Za-z0-9_-]+", x) for x in (character_id, persona_id) if x):
+        return 0
+    pattern = f"{character_id}__*" if character_id else f"*__{persona_id}.*"
+    gone = [f for d in (cur.memories, cur.assistant, cur.relationships) for f in d.glob(pattern)
+            if f.is_file() and "__" in f.name]
+    _forget_files(gone)
+    return len(gone)
 
 
 def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
@@ -668,7 +706,8 @@ async def delete_card(card_id: str, cur: Ctx = Depends(get_ctx)):
     p = cur.cards / f"{card_id}.json"
     if p.exists():
         p.unlink()
-    return {"ok": True}
+    # Its memories, indexes and relationships go with it: nothing else can reach them.
+    return {"ok": True, "forgot": _forget_pairings(cur, character_id=card_id)}
 
 
 @app.get("/api/cards/{card_id}/export")
@@ -982,7 +1021,7 @@ async def delete_persona(persona_id: str, cur: Ctx = Depends(get_ctx)):
     p = cur.personas / f"{persona_id}.json"
     if p.exists():
         p.unlink()
-    return {"ok": True}
+    return {"ok": True, "forgot": _forget_pairings(cur, persona_id=persona_id)}
 
 
 # --------------------------------------------------------------------------
@@ -1119,6 +1158,7 @@ async def delete_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     s = _load(cur.sessions, session_id, ChatSession)
     if s:
         _forget_swept_session(cur, s)
+    _forget_files(_scene_index_paths(cur, session_id))
     p = cur.sessions / f"{session_id}.json"
     if p.exists():
         p.unlink()
@@ -1340,7 +1380,8 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
         kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
         index_path=_memory_index_path(cur, session.character_id, persona.id),
         extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-        context_tokens=window, consolidate=st.longterm_consolidate)
+        context_tokens=window, consolidate=st.longterm_consolidate,
+        story_path=_story_index_path(cur, session.character_id, persona.id) if st.story_memory else None)
     # Consolidation review: once per state of the memory, so a chat that goes idle
     # again with nothing new costs no model call.
     reviewed = False
@@ -1362,6 +1403,7 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     s.memory.summary = ""
     s.memory.last_summarized_index = 0
     _save(s, cur.sessions)
+    _forget_files(_scene_index_paths(cur, session_id))     # a scenario's own memory starts over too
     # The pairing's long-term store tracks this chat by position too; resetting
     # the session's own indices without that one leaves folding stuck.
     _forget_swept_session(cur, s)
@@ -1459,6 +1501,7 @@ async def truncate_after(session_id: str, message_id: str, cur: Ctx = Depends(ge
     if keep < s.memory.last_summarized_index:
         s.memory.summary = ""
         s.memory.last_summarized_index = 0
+        _forget_files(_scene_index_paths(cur, session_id))     # it described turns now gone
     s.updated_at = datetime.now().isoformat()
     _save(s, cur.sessions)
     _shift_swept(cur, s, keep, removed)
@@ -1645,6 +1688,7 @@ async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
                 _store_fold(cur, am0, am)
                 session.memory.last_summarized_index = fold_end
     else:
+        folded_from = session.memory.last_summarized_index
         await memory.summarize(kobold, session, card, persona,
                                summarize_after=st.summarize_after,
                                keep_recent=st.keep_recent,
@@ -1663,9 +1707,19 @@ async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
                     max_tokens=st.summary_max_tokens,
                     index_path=_memory_index_path(cur, session.character_id, persona.id),
                     extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-                    context_tokens=window, consolidate=st.longterm_consolidate):
+                    context_tokens=window, consolidate=st.longterm_consolidate,
+                    story_path=(_story_index_path(cur, session.character_id, persona.id)
+                                if st.story_memory else None)):
                 _store_fold(cur, cm0, cm)
-    _apply_memory(cur, session, basis)
+    applied = _apply_memory(cur, session, basis)
+    if applied and scenario and not assistant and st.story_memory:
+        # A scenario chat's own memory, of exactly what the summary just folded out of
+        # the live prompt. Only once that fold is stored: one that a concurrent edit
+        # rejected runs again, and indexing now would index those turns twice.
+        turns, story = _scene_index_paths(cur, session.id)
+        await memory.record_scene(kobold, session, card, persona, folded_from,
+                                  session.memory.last_summarized_index, turns, story,
+                                  context_tokens=window)
 
 
 def _sse(obj: dict) -> str:
@@ -1752,19 +1806,33 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # Offloaded to a thread: onnxruntime is sync and would block the event loop,
     # stalling every other session's stream for the duration.
     hits = []
-    if char_mem is not None and settings.recall_enabled:
-        last_user = next((m.content for m in reversed(session.messages)
-                          if m.role == "user" and m.content), "")
-        if last_user:
-            hits = await asyncio.to_thread(
-                memory.index_search,
-                _memory_index_path(cur, session.character_id, persona.id),
-                last_user, settings.recall_top_k)
+    scene_hits = []
+    last_user = next((m.content for m in reversed(session.messages)
+                      if m.role == "user" and m.content), "")
+    if char_mem is not None and settings.recall_enabled and last_user:
+        hits = await asyncio.to_thread(
+            memory.index_search,
+            _memory_index_path(cur, session.character_id, persona.id),
+            last_user, settings.recall_top_k)
+        if settings.story_memory:
+            # Episodes and world details: their own index, their own gate.
+            hits += await asyncio.to_thread(
+                memory.search_story,
+                _story_index_path(cur, session.character_id, persona.id), last_user)
+    elif (scenario and not assistant and settings.recall_enabled and settings.story_memory
+          and last_user):
+        # A scenario chat has no pairing memory; it recalls from its own past instead.
+        turns_ix, story_ix = _scene_index_paths(cur, session.id)
+        scene_hits = (await asyncio.to_thread(memory.index_search, turns_ix, last_user,
+                                              settings.recall_top_k)
+                      + await asyncio.to_thread(memory.search_story, story_ix, last_user))
 
     lt_budget = memory.LONGTERM_BUDGET_CHARS - (memory.RECALL_RESERVE_CHARS if hits else 0)
     lt_note = memory.longterm_block(char_mem, card.name, persona.name, lt_budget) if char_mem else ""
     recall_note = memory.recall_block(
         hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note) if hits else ""
+    if scene_hits:
+        recall_note = memory.recall_block(scene_hits, memory.SCENE_RECALL_CHARS)
     if asst_mem is not None:
         lt_note = assistant_memory.block(asst_mem, card.name, persona.name)
     if hits and not recall_note and char_mem is not None:
