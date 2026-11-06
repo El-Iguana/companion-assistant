@@ -340,6 +340,8 @@ POST   /api/sessions/{id}/messages/{mid}/truncate   drop everything after it ("S
          consistent; a truncate below the summary resets it, like clearing (tests/test_messages.py)
 POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
                                            continue_turn: roleplay Continue — her turn with no new user message
+                                           direction: the user's note for Continue / Another take (never saved)
+PUT  /api/sessions/{id}/options            per-chat options: {allow_side_characters}
 POST /api/narrate                          roleplay: SSE narrator event, saved as a role "narrator" message
                                            ({session_id, direction?, replace?} — replace re-rolls a trailing narration)
 POST /api/draft                            roleplay: SSE draft of {{user}}'s next message for the composer; never saved
@@ -377,6 +379,18 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   relationship or sprites; memory transcripts label them `Narrator:`. "Another take" on a reply
   is withheld while a narration is the last message (the re-roll would answer the narration);
   a trailing narration has its own Another take. `_keepalive()` wraps all three streams.
+  **Your note guides every voice (2026-11-06):** text typed in the box before Narrate, "{name}
+  continues/responds" or Write for me steers that piece, and with text in the box "Another
+  take" on her last reply or the last narration becomes **"Rewrite with your note"**. For her
+  turns the note travels as `ChatRequest.direction` → `prompt_builder.direction_note()`, an
+  out-of-character line in the trailing block placed **before the boundary note**, so it steers
+  the scene and never widens what she'll do; it is never saved as a message, and a stopped or
+  failed turn puts it back in the box. **"Side characters"** (checkbox in the bar,
+  `ChatSession.allow_side_characters`, default on, `PUT /api/sessions/{id}/options`): off gives
+  the narrator `NARRATOR_SYSTEM_ALONE` (nobody but the two of them, no dialogue), and
+  `prompt_builder.strip_dialogue()` drops any sentence with quoted speech that gets through, in
+  code, since a prompt rule alone is a request. `_save_turn` keeps the stored option, so a box
+  ticked while a reply streams stays ticked. Not yet measured on a live model.
 - **Swipes:** alternates per message; each swipe's emotion cached in `swipe_expressions`. `▶` past the end regenerates.
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
 - **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;

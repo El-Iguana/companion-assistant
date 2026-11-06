@@ -426,7 +426,12 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 .pt-rpbtn:hover:not(:disabled) { border-color: var(--accLine); background: var(--accSoft); }
 .pt-rpbtn:disabled { opacity: .45; cursor: default; }
 .pt-rpbtn .mdi { font-size: 15px; color: var(--accText); }
-@media (max-width: 520px) { .pt-rpbar { gap: 5px; flex-wrap: nowrap; } .pt-rpbtn { padding: 5px 9px; font-size: 12px; gap: 4px; white-space: nowrap; } }
+.pt-rpchk { font: 600 12.5px var(--sans); display: inline-flex; align-items: center; gap: 6px; margin-left: auto;
+  padding: 6px 4px; color: var(--mut); cursor: pointer; user-select: none; }
+.pt-rpchk input { margin: 0; accent-color: var(--acc); cursor: pointer; }
+/* Phone: the three buttons keep one row; the checkbox takes the line under them. */
+@media (max-width: 520px) { .pt-rpbar { gap: 5px; } .pt-rpbtn { padding: 5px 9px; font-size: 12px; gap: 4px; white-space: nowrap; }
+  .pt-rpchk { font-size: 12px; margin-left: 0; flex-basis: 100%; padding: 2px 4px; } }
 .pt-inrow { display: flex; align-items: flex-end; gap: 8px; background: var(--bg2); border: 1px solid var(--line);
   border-radius: 20px; padding: 8px; }
 .pt-inrow:focus-within { border-color: var(--accLine); }

@@ -313,3 +313,92 @@ def test_trim_caps_the_paragraphs_and_always_keeps_the_first():
     assert prompt_builder.trim_narration("A.\n\nB.\n\nC.\n\nD.", "Mira", "Sam") == "A.\n\nB.\n\nC."
     assert prompt_builder.trim_narration("Mira looks up.", "Mira", "Sam") == "Mira looks up."
     assert prompt_builder.trim_narration("", "Mira", "Sam") == ""
+
+
+# ---- side characters ------------------------------------------------------------
+
+def test_side_characters_on_by_default_and_the_narrator_may_voice_them(session):
+    card, persona = CharacterCard(name="Hermione"), Persona(name="Brian")
+    assert session.allow_side_characters is True
+    n = prompt_builder.build_narrator_messages(card, persona, session)
+    assert "play every other person" in n[0]["content"] and "line they say out loud" in n[1]["content"]
+
+
+def test_side_characters_off_gives_the_narrator_nobody_to_play(session):
+    card, persona = CharacterCard(name="Hermione"), Persona(name="Brian")
+    session.allow_side_characters = False
+    n = prompt_builder.build_narrator_messages(card, persona, session, "a storm rolls in")
+    assert "Only the two of them" in n[0]["content"] and "play every other person" not in n[0]["content"]
+    assert "bring in no one else" in n[1]["content"] and "line they say out loud" not in n[1]["content"]
+    assert "a storm rolls in" in n[1]["content"]
+
+
+def test_strip_dialogue_drops_whole_sentences_with_speech():
+    text = ('Rain drums on the roof. A dockhand shoulders in. "Tide\'s turned early," he mutters.'
+            '\n\n“Harbourmaster’s closing up.” The lamp gutters.')
+    assert prompt_builder.strip_dialogue(text) == \
+        "Rain drums on the roof. A dockhand shoulders in.\n\nThe lamp gutters."
+    assert prompt_builder.strip_dialogue('"All hands!" someone shouts.') == ""
+    assert prompt_builder.strip_dialogue("Thunder rolls over the hills.") == "Thunder rolls over the hills."
+
+
+def test_narration_with_side_characters_off_keeps_no_dialogue(cur, session, model):
+    session.allow_side_characters = False
+    main._save(session, cur.sessions)
+    model["tokens"] = ["Wind rattles the shutters. ", '"Close them!" a voice calls.']
+    asyncio.run(_run(main.narrate, SceneRequest(session_id=session.id), cur))
+    assert _reload(cur, session).messages[-1].content == "Wind rattles the shutters."
+    assert "Only the two of them" in model["prompts"][-1][0]["content"]
+
+
+def test_narration_that_is_only_dialogue_is_an_error_with_side_characters_off(cur, session, model):
+    session.allow_side_characters = False
+    main._save(session, cur.sessions)
+    model["tokens"] = ['"Who goes there?" a guard calls.']
+    evs = asyncio.run(_run(main.narrate, SceneRequest(session_id=session.id), cur))
+    assert any("error" in e for e in evs) and _roles(cur, session) == ["char", "user", "char"]
+
+
+def test_options_are_saved_and_a_turn_does_not_undo_them(cur, session, model):
+    from models.schema import SessionOptions
+
+    r = asyncio.run(main.set_session_options(
+        session.id, SessionOptions(session_id=session.id, allow_side_characters=False), cur=cur))
+    assert r["allow_side_characters"] is False and _reload(cur, session).allow_side_characters is False
+    stale = session                                   # loaded before the box was unticked
+    assert stale.allow_side_characters is True
+    main._save_turn(cur, stale)
+    assert _reload(cur, session).allow_side_characters is False
+
+
+# ---- your note guides her turn ---------------------------------------------------
+
+def test_direction_steers_continue_and_is_not_saved(cur, session, model):
+    asyncio.run(_run(main.chat, ChatRequest(session_id=session.id, input_text="", continue_turn=True,
+                                            direction="she admits she is afraid"), cur))
+    sent = model["prompts"][-1]
+    tail = sent[-1]["content"]
+    assert "Direction from" in tail and "she admits she is afraid" in tail
+    assert "next reply" in tail
+    s = _reload(cur, session)
+    assert all("afraid" not in m.content for m in s.messages if m.role != "char")
+    assert [m.role for m in s.messages] == ["char", "user", "char", "char"]
+
+
+def test_direction_on_another_take_asks_for_a_rewrite_before_the_boundary(cur, session, model):
+    asyncio.run(_run(main.chat, ChatRequest(session_id=session.id, input_text="", regenerate=True,
+                                            direction="shorter, and more teasing"), cur))
+    tail = model["prompts"][-1][-1]["content"]
+    assert "rewritten reply" in tail and "shorter, and more teasing" in tail
+    assert tail.index("Direction from") > tail.index("another take")
+    bound = tail.find("Boundaries")
+    if bound >= 0:
+        assert tail.index("Direction from") < bound
+    s = _reload(cur, session)
+    assert len(s.messages) == 3 and len(s.messages[-1].swipes) == 2
+
+
+def test_no_direction_no_note():
+    s = ChatSession(messages=[ChatMessage(role="user", content="Hi.")])
+    tail = prompt_builder.build_messages(CharacterCard(name="Hermione"), Persona(name="Brian"), s)[-1]
+    assert "Direction from" not in tail["content"]

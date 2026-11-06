@@ -312,6 +312,25 @@ def retake_note(takes: List[str], char: str, user: str) -> str:
             f"different words, not a rephrasing of it.")
 
 
+DIRECTION_CHARS = 400      # of the user's note
+
+
+def direction_note(direction: str, char: str, user: str, retake: bool = False) -> str:
+    """The user's out-of-character note on how this reply should go: what Continue or
+    Another take should do. Placed before the boundary note, so it steers the scene but
+    can never widen what {char} is willing to do."""
+    d = " ".join((direction or "").split())
+    if not d:
+        return ""
+    if len(d) > DIRECTION_CHARS:
+        d = d[:DIRECTION_CHARS].rsplit(" ", 1)[0] + " …"
+    what = f"{char}'s rewritten reply" if retake else f"{char}'s next reply"
+    return (f"[Direction from {user}, out of character — not something said in the scene] "
+            f"For {what}: {d}\n"
+            f"Follow it, in {char}'s own voice and manner, as part of the scene. Do not "
+            f"mention, quote or answer the direction itself.")
+
+
 def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
     """The closing line of every prompt: answer THIS, from where things stand now.
 
@@ -390,6 +409,22 @@ NARRATOR_SYSTEM = (
     "happened. Do not recap, and never mention being a game master, a narrator or an AI."
 )
 
+# The same game master with nobody else to play: "Allow side characters" off.
+NARRATOR_SYSTEM_ALONE = (
+    "You are the narrator of an ongoing roleplay between {{char}} and {{user}}. Only the two "
+    "of them are in this scene, and it stays that way. Write ONE short beat that happens in "
+    "the scene right now and gives both of them something to react to — something in the "
+    "surroundings, a sound, a change in light or weather, an object, the time passing.\n"
+    "Do not bring in, describe or voice anyone else: no barkeep, guard, stranger, passer-by, "
+    "messenger or crowd, and no voices from off-stage. No one speaks in your beat, so write "
+    "no dialogue and no quotation marks.\n"
+    "Keep it neutral: it takes no side, resolves nothing, and does not push the scene toward "
+    "romance, intimacy or violence. Third person, present tense, two to five sentences. "
+    "Never write a word {{char}} or {{user}} says, nor their actions, thoughts, feelings or "
+    "decisions. Stay consistent with the setting and what has happened. Do not recap, and "
+    "never mention being a narrator or an AI."
+)
+
 DRAFT_SYSTEM = (
     "You write {{user}}'s next message in an ongoing roleplay with {{char}}. Write ONLY "
     "{{user}}'s single next reply, in {{user}}'s own voice — what {{user}} says, and briefly "
@@ -453,11 +488,18 @@ def build_narrator_messages(card: CharacterCard, persona: Persona, session: Chat
     # ran for paragraphs. The system rules alone, many hundred tokens back, didn't hold.
     ask = (what + f"One paragraph, two to five sentences: what happens and what is seen or "
            f"heard. Write nothing that {char} or {user} says, does, thinks or feels — they "
-           f"react next, not you. Everyone else is yours to play: if someone other than "
-           f"{char} and {user} is in the scene, end with a line they say out loud, in "
-           f"quotation marks, in their own voice.")
+           f"react next, not you. ")
+    if session.allow_side_characters:
+        ask += (f"Everyone else is yours to play: if someone other than {char} and {user} is "
+                f"in the scene, end with a line they say out loud, in quotation marks, in "
+                f"their own voice.")
+        system = NARRATOR_SYSTEM
+    else:
+        ask += (f"Nobody but {char} and {user} is here: bring in no one else, and write no "
+                f"dialogue.")
+        system = NARRATOR_SYSTEM_ALONE
     return [
-        {"role": "system", "content": substitute_macros(NARRATOR_SYSTEM, char, user)},
+        {"role": "system", "content": substitute_macros(system, char, user)},
         {"role": "user", "content": _scene_context(card, persona, session, stage_rank)
          + f"\n\n[{ask}]"},
     ]
@@ -519,6 +561,25 @@ def trim_narration(text: str, char: str, user: str) -> str:
     return "\n\n".join(keep)
 
 
+_QUOTED = re.compile(r'["\u201c][^"\u201c\u201d]{2,}["\u201d]')
+# A sentence ends at . ! ? or …, or just after a closing quote that follows one.
+_SENTENCE = re.compile(r"(?:(?<=[.!?…])|(?<=[.!?…][\"\u201d'\u2019]))\s+(?=[A-Z*\"\u201c])")
+
+
+def strip_dialogue(text: str) -> str:
+    """Drop the sentences that carry quoted speech: the narration when side characters
+    are off. The prompt says "no dialogue"; this holds when it doesn't (a rule in a
+    prompt is a request, and the narrator has broken this one before — see trim_narration).
+    Whole sentences go, never half of one; what's left may be empty, which the caller
+    treats as a failed narration."""
+    out = []
+    for para in re.split(r"\n\s*\n", (text or "").strip()):
+        keep = [x for x in _SENTENCE.split(para.strip()) if x and not _QUOTED.search(x)]
+        if keep:
+            out.append(" ".join(keep))
+    return "\n\n".join(out)
+
+
 # Orpheus voices perform these instead of reading them (services/orpheus.py). Offered
 # only to cards whose voice is Orpheus; the chat view hides them, Kokoro strips them.
 # A subset of what Orpheus knows: cough/sniffle/yawn read as noise in conversation.
@@ -555,7 +616,8 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    boundary_note: str = "", longterm_note: str = "",
                    expr_labels: List[str] | None = None,
                    context_tokens: int = 0, trimmed: list | None = None,
-                   retake_of: List[str] | None = None) -> List[Dict]:
+                   retake_of: List[str] | None = None,
+                   direction: str = "") -> List[Dict]:
     """The chat prompt. With `context_tokens`, the oldest history turns are dropped
     until the whole prompt plus the reply fits that window (services/context.py);
     the count dropped is appended to `trimmed` when one is passed."""
@@ -684,6 +746,10 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         # it also lets the DRY sampler penalise reusing its wording. Before the boundary
         # note, which stays as late as possible.
         tail.append(retake_note(retake_of, char_name, user_name))
+    if direction and direction.strip():
+        # The user's note for Continue / Another take. Before the boundary note: it
+        # steers what happens, and the boundary still has the last word on what she'll do.
+        tail.append(direction_note(sub(direction), char_name, user_name, retake=bool(retake_of)))
     if boundary_note:
         tail.append(sub(boundary_note))
     latest = next((m for m in reversed(session.messages) if m.role != "system"), None)

@@ -1,5 +1,5 @@
 """BFF: one chat — open it, stream replies, swipe, edit, delete, resend, clear, sweep, and
-(roleplay) narrator events, Continue and drafts of the user's reply.
+(roleplay) narrator events, Continue, drafts of the user's reply, and the chat's options.
 
 Every method is a thin call into Pantheon's own handlers (``main.*``), so generation,
 swipes, mood, the relationship, memory folding and the idle sweep behave exactly as on
@@ -87,14 +87,33 @@ class Chat:
         }
 
     @bff_stream()
-    async def send(self, session_id: str, text: str, regenerate: bool = False, cont: bool = False):
-        """A chat turn. ``cont``: roleplay Continue — she goes on with no new message."""
+    async def send(self, session_id: str, text: str, regenerate: bool = False, cont: bool = False,
+                   direction: str = ""):
+        """A chat turn. ``cont``: roleplay Continue — she goes on with no new message.
+        ``direction``: the user's note on how this reply (Continue, Another take) should go;
+        it steers the prompt and is never saved."""
         from models.schema import ChatRequest
 
         async for ev in self._relay("chat", lambda: ChatRequest(
                 session_id=session_id, input_text=text or "", regenerate=bool(regenerate),
-                continue_turn=bool(cont))):
+                continue_turn=bool(cont), direction=direction or "")):
             yield ev
+
+    async def set_options(self, session_id: str, allow_side_characters: bool) -> dict:
+        """Per-chat options from the roleplay bar."""
+        import main
+        from fastapi import HTTPException
+        from models.schema import SessionOptions
+
+        cur = self._cur()
+        if cur is None:
+            return {"ok": False, "error": "not signed in", "signed_out": True}
+        try:
+            return await main.set_session_options(
+                session_id, SessionOptions(session_id=session_id,
+                                           allow_side_characters=bool(allow_side_characters)), cur=cur)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail)}
 
     @bff_stream()
     async def narrate(self, session_id: str, direction: str = "", replace: bool = False):

@@ -352,6 +352,9 @@ class ChatSession(BaseModel):
     relationship: Optional["Relationship"] = None   # session-scoped snapshot (scenario mode); else persistent file
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     pending_milestone: str = ""          # one-time beat injected into the next reply after a tier crossing
+    # Roleplay: may the narrator bring in and voice other people (a barkeep, a guard)?
+    # Off keeps the scene to {{char}} and {{user}}. Per chat; set from the roleplay bar.
+    allow_side_characters: bool = True
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 
@@ -359,6 +362,12 @@ class ChatSession(BaseModel):
 # ---------------------------------------------------------------------------
 # Backend connection settings
 # ---------------------------------------------------------------------------
+class SessionOptions(BaseModel):
+    """Per-chat options set from the chat page."""
+    session_id: str
+    allow_side_characters: Optional[bool] = None   # None = leave as is
+
+
 class SceneRequest(BaseModel):
     """A narrator event or a draft of {{user}}'s reply (roleplay chats only)."""
     session_id: str
@@ -385,3 +394,5 @@ class ChatRequest(BaseModel):
     regenerate: bool = False             # re-roll the last char message (swipe)
     continue_turn: bool = False          # roleplay: she takes a turn with no new user message
                                          # (after a narrator event, or to carry the scene on)
+    direction: str = ""                  # the user's note on how this reply should go (Continue,
+                                         # Another take); guides the prompt, never saved as a message

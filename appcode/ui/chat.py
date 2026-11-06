@@ -229,18 +229,23 @@ class ChatView:
         if not self._roleplay():
             return ""
         name = esc(self._first_name())
+        side = bool(self.data["session"].get("allow_side_characters", True))
         return (
             '<div class="pt-rpbar" id="ch-rpbar">'
             '<button class="pt-rpbtn" data-rp="narrate" title="The narrator describes something '
-            'happening in the scene, and anyone else there may speak. Type in the box first to '
-            'say what.">'
+            'happening in the scene. Type in the box first to say what.">'
             '<i class="mdi mdi-feather"></i>Narrate</button>'
             f'<button class="pt-rpbtn" data-rp="continue" id="ch-rp-cont" title="{name} takes the '
-            f'next turn without you saying anything"><i class="mdi mdi-play"></i>'
+            f'next turn without you saying anything. Type in the box first to say how it should '
+            f'go: your note guides her, and is not sent as a message."><i class="mdi mdi-play"></i>'
             f'<span id="ch-rp-cont-label">{name} continues</span></button>'
             '<button class="pt-rpbtn" data-rp="draft" title="Write your reply into the box for you '
             'to edit before sending. Type a few words first to steer it.">'
             '<i class="mdi mdi-pencil-outline"></i>Write for me</button>'
+            '<label class="pt-rpchk" title="Let the narrator bring in and voice other people: a '
+            'barkeep, a guard, a stranger. Off keeps the scene to the two of you.">'
+            f'<input type="checkbox" id="ch-rp-side"{" checked" if side else ""}>'
+            'Side characters</label>'
             '</div>')
 
     def _first_name(self) -> str:
@@ -456,15 +461,19 @@ class ChatView:
         for b in (self.root.querySelectorAll("[data-rp]") if self.root is not None else []):
             b.disabled = on
 
-    def send(self, text: str, regenerate: bool = False, restore: str = "", cont: bool = False) -> None:
+    def send(self, text: str, regenerate: bool = False, restore: str = "", cont: bool = False,
+             direction: str = "") -> None:
         if self.streaming or not self.data:
             return
         text = (text or "").strip()
+        direction = (direction or "").strip()
         if not text and not regenerate and not cont:
             return
-        self.task = spawn(self._stream(text, regenerate, restore or text, cont), "chat")
+        self.task = spawn(self._stream(text, regenerate, restore or text or direction, cont, direction),
+                          "chat")
 
-    async def _stream(self, text: str, regenerate: bool, restore: str, cont: bool = False) -> None:
+    async def _stream(self, text: str, regenerate: bool, restore: str, cont: bool = False,
+                      direction: str = "") -> None:
         card = self.data["card"]
         box = by_id("ch-msgs")
         msgs = self.data["session"]["messages"]
@@ -494,7 +503,7 @@ class ChatView:
         v = voice()
         if v:
             v.beginReply()
-        stream = Chat().send(self.sid, text, bool(regenerate), bool(cont))
+        stream = Chat().send(self.sid, text, bool(regenerate), bool(cont), direction)
         try:
             async for ev in stream:
                 if not isinstance(ev, dict):
@@ -532,7 +541,10 @@ class ChatView:
             except Exception:  # noqa: BLE001
                 pass
             self._set_streaming(False)
-        await self._after(acc, done, error, restore if (self.stopped or error) and not regenerate else "")
+        # A stopped or failed turn gives back what was typed: the message, or the note
+        # that guided a Continue or Another take.
+        await self._after(acc, done, error,
+                          restore if (self.stopped or error) and (not regenerate or direction) else "")
 
     async def _after(self, acc: str, done, error: str, restore: str) -> None:
         if done:
@@ -547,7 +559,7 @@ class ChatView:
             self._render_sugs()
             self._portrait()
         if self.stopped:
-            toast("Stopped — that turn was not saved." + (" Your message is back in the box." if restore else ""),
+            toast("Stopped — that turn was not saved." + (" What you typed is back in the box." if restore else ""),
                   "info", 5000)
         elif error:
             toast(f"{self.data['card']['name']} could not answer: {error}", "error", 8000)
@@ -777,6 +789,10 @@ class ChatView:
             else:
                 v.handsFree()
             return
+        side = closest(ev, "#ch-rp-side")
+        if side:
+            spawn(self._set_side_characters(bool(side.checked)), "side characters")
+            return
         rp = closest(ev, "[data-rp]")
         if rp:
             if rp.disabled or self.streaming:
@@ -785,11 +801,10 @@ class ChatView:
             inp = by_id("ch-input")
             typed = str(inp.value or "") if inp else ""
             if which == "continue":
-                self.send("", cont=True)
+                self._take_typed()                   # the typed text guides her turn
+                self.send("", cont=True, direction=typed)
             elif which == "narrate":
-                if inp:
-                    inp.value = ""                  # the typed text steers the narrator
-                    self._grow()
+                self._take_typed()                   # the typed text steers the narrator
                 self.narrate(typed)
             elif which == "draft":
                 self.draft(typed)
@@ -819,6 +834,32 @@ class ChatView:
         edit = closest(ev, "[data-edit]")
         if edit:
             spawn(self._edit_action(attr(edit, "data-edit")), "edit")
+
+    def _typed(self) -> str:
+        inp = by_id("ch-input")
+        return str(inp.value or "").strip() if inp else ""
+
+    def _take_typed(self) -> str:
+        """The composer's text, used as a note for a rewrite or a guided turn: the box is
+        cleared, and a stopped or failed turn puts it back."""
+        text = self._typed()
+        inp = by_id("ch-input")
+        if inp and text:
+            inp.value = ""
+            self._grow()
+        return text
+
+    async def _set_side_characters(self, on: bool) -> None:
+        r = await Chat().set_options(self.sid, on)
+        if isinstance(r, dict) and r.get("ok"):
+            self.data["session"]["allow_side_characters"] = bool(r.get("allow_side_characters"))
+            toast("The narrator may bring in other people." if on
+                  else "The narrator keeps the scene to the two of you.", "info", 3000)
+        else:
+            failed(r, "save the side-characters setting")
+            box = by_id("ch-rp-side")
+            if box:
+                box.checked = not on
 
     # --- swipes ------------------------------------------------------------------
     async def _swipe(self, delta: int) -> None:
@@ -857,10 +898,13 @@ class ChatView:
         last_char = self._rerollable()
         idx = msgs.index(m)
         items = []
+        # With text in the box, Another take becomes a rewrite that follows it.
+        retake = ("Rewrite with your note", "mdi-pencil-box-outline") if self._typed() \
+            else ("Another take", "mdi-autorenew")
         if m["role"] == "narrator" and idx == len(msgs) - 1:
-            items.append(MenuItem(id="renarrate", label="Another take", icon="mdi-autorenew"))
+            items.append(MenuItem(id="renarrate", label=retake[0], icon=retake[1]))
         if m["role"] == "char" and idx == last_char:
-            items.append(MenuItem(id="regen", label="Another take", icon="mdi-autorenew"))
+            items.append(MenuItem(id="regen", label=retake[0], icon=retake[1]))
         if m["role"] == "char":
             items.append(MenuItem(id="speak", label="Read aloud", icon="mdi-volume-high"))
         items += [
@@ -892,7 +936,9 @@ class ChatView:
                       MenuItem(separator=True),
                       MenuItem(id="clear", label="Clear chat", icon="mdi-broom", danger=True)]
         else:
-            items = [MenuItem(id="regen", label=f"Another take on {card['name']}'s last reply",
+            items = [MenuItem(id="regen", label=(f"Rewrite {card['name']}'s last reply with your note"
+                                                 if self._typed() else
+                                                 f"Another take on {card['name']}'s last reply"),
                               icon="mdi-autorenew"),
                      MenuItem(id="clear", label="Clear chat", icon="mdi-broom", danger=True)]
         self.menu.set_items(items)
@@ -908,9 +954,10 @@ class ChatView:
         card = self.data["card"]
         if item == "regen":
             if not self.streaming and self._rerollable() >= 0:
-                self.send("", regenerate=True)
+                self.send("", regenerate=True, direction=self._take_typed())
         elif item == "renarrate":
-            self.narrate("", replace=True)
+            if not self.streaming:
+                self.narrate(self._take_typed(), replace=True)
         elif item == "edit" and mid:
             self.editing = mid
             self._render_messages()

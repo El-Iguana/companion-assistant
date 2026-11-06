@@ -27,7 +27,7 @@ from fastapi.responses import (
 
 from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
-    SceneRequest,
+    SceneRequest, SessionOptions,
     AppSettings, AssistantMemory, CharacterMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient, ExprEvent
@@ -1467,7 +1467,7 @@ _memory_tasks: set[asyncio.Task] = set()      # strong refs: the loop keeps only
 
 
 def _save_turn(cur: Ctx, session: ChatSession) -> None:
-    """Save a finished turn without rolling back memory written while it ran.
+    """Save a finished turn without rolling back memory or options written while it ran.
 
     A turn never changes `memory`: the memory job writes the summary, and the Memory
     modal writes pinned facts and the summary. So the stored memory always wins. This
@@ -1476,6 +1476,8 @@ def _save_turn(cur: Ctx, session: ChatSession) -> None:
     fresh = _load(cur.sessions, session.id, ChatSession)
     if fresh:
         session.memory = fresh.memory
+        # Nor does it change the chat's options: a box ticked while a reply streamed stays ticked.
+        session.allow_side_characters = fresh.allow_side_characters
     _save(session, cur.sessions)
 
 
@@ -1771,7 +1773,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         expr_labels=sorted(card.expressions.keys()) if card.expressions else [],
         context_tokens=window, trimmed=trimmed,
         # Another take: quote what is being replaced, so the new one differs from it.
-        retake_of=_pending_swipes if req.regenerate else None)
+        retake_of=_pending_swipes if req.regenerate else None,
+        # The user's note for Continue / Another take: steers this reply only.
+        direction=req.direction)
     if trimmed and trimmed[0]:
         # Not an error: the summary absorbs these turns on its next fold. Logged
         # because a session that trims every turn wants a lower "Summarize after".
@@ -2022,6 +2026,19 @@ async def _stream_text(messages: list, params: dict, acc: list):
         yield _sse({"token": tok})
 
 
+@app.put("/api/sessions/{session_id}/options")
+async def set_session_options(session_id: str, opts: SessionOptions, cur: Ctx = Depends(get_ctx)):
+    """Per-chat options (today: whether the narrator may bring in side characters).
+    Written onto a fresh read, so nothing else in the session is touched."""
+    session = _load(cur.sessions, session_id, ChatSession)
+    if not session:
+        raise HTTPException(404, "session not found")
+    if opts.allow_side_characters is not None:
+        session.allow_side_characters = bool(opts.allow_side_characters)
+    _save(session, cur.sessions)
+    return {"ok": True, "allow_side_characters": session.allow_side_characters}
+
+
 @app.post("/api/narrate")
 async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
     session, card, persona = _scene_parts(req, cur)
@@ -2048,6 +2065,8 @@ async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
         text = prompt_builder.trim_narration(
             prompt_builder.clean_piece(acc[0], ["Narrator", "Narration", "Game Master", "GM"]),
             card.name, persona.name)
+        if not session.allow_side_characters:
+            text = prompt_builder.strip_dialogue(text)
         if not text:
             yield _sse({"error": "the narrator came up empty — try again"})
             return
