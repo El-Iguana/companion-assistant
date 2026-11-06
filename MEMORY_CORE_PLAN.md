@@ -246,6 +246,8 @@ Each phase ends with tests passing and, where prompts change, an eval run record
    bridge.
 6. **Long-term consolidation + fact metadata + `self` facts**, each behind a setting and each
    measured.
+7. to 11. **Reinforcement, a rare-word dedupe veto, hybrid recall, a recall reranker, and a
+   sectioned long-term page.** From the 2026-11-06 external review; see "Next phases" below.
 
 ## Decisions carried over (don't re-open)
 
@@ -264,6 +266,129 @@ never adds compliance; boundary phrasing and trailing placement are load-bearing
 - Should a Pantheon character imported into Rhapsode bring its pairing memory along (read-only
   copy, like cards today)? It's possible once both use the same store shape, but it's a product
   call.
+
+## Next phases: from the external review (2026-11-06)
+
+Muninn (at `f2560be`) was compared against outside memory systems: **claude-mem**
+(`thedotmack/claude-mem` v15.10.1, a Claude Code plugin, cloned to `~/Development/claude-mem`),
+**GBrain**, Karpathy's **LLM Wiki** pattern and Google's **Code Wiki**, plus the options for the
+recall layer. None of them replaces Muninn. Each solves a different problem (agent memory for
+coding tools, or a knowledge base an agent browses with tool calls), while Muninn puts memory
+straight into an 8–16K prompt for a local model, every turn, without ever failing the turn. A few
+of their parts do fit, and they are planned below. claude-mem is Apache-2.0: ported code keeps a
+credit line.
+
+Every phase follows the README's rules: a change to `tests/data/golden.json` is decided on purpose
+and explained in the commit, and anything that changes what is stored or recalled gets an eval
+run on the same model as the baselines (Cydonia-24B), in `eval/companion_memory` and
+`eval/story_memory`.
+
+7. **Reinforcement: repeats keep a memory alive.** *(Completes Phase 6's "fact metadata".)*
+   - **The gap.** The consolidation fold no longer sees stored memory, so when a chat restates
+     something already remembered, `consolidate.append` drops the repeat and records nothing.
+     Past `LONGTERM_KEEP_BULLETS` the oldest bullets go, so a detail raised in every chat is
+     evicted on age alone, exactly like one mentioned once. Erosion is still 2/3. The same
+     applies to `episodic.add_notes` (oldest auto note first) and Pantheon's auto facts.
+   - **The mechanism** (claude-mem `src/services/reinforcement/`, about 220 lines): each item
+     keeps the days it was re-confirmed, at most 10, oldest dropped first. A second confirmation
+     on the same day does nothing. Strength is
+     `ln(1 + age_created^-0.5 + α·Σ age_reinforced^-0.5)`, the ACT-R power-law decay. Nothing is
+     deleted by decay; strength only decides eviction order.
+   - **The change.** `facts.dedupe_facts` already computes which stored item each repeat
+     matches. It returns that match (index and score) as well as the new items, and callers
+     reinforce the matched item instead of discarding the signal. Eviction becomes "weakest auto
+     item first", with the newest quarter protected (claude-mem's `recencyHeadSize`). Curated
+     entries (`user`, `quest`) still outrank every auto entry, as decided.
+   - **Storage.** Bullets need a little structure: `{text, created, seen: [dates]}` beside the
+     rendered `summary`, read as plain bullets when the field is missing, so no migration. `Note`
+     and `MemoryFact` gain `seen`. This is the `last_seen_at` the long-term tier section asks for.
+   - **Measure.** Erosion and missed details on `eval/companion_memory` with `--consolidate`.
+     Expect no change in a single chat: the effect only shows across several.
+
+8. **A rare-word veto on dedupe.** *(Ships with 7; both change `facts.dedupe_facts`.)*
+   - **The gap.** A fixed cosine cutoff (0.86) can merge items that differ in one important
+     word: "plans a trip to Lisbon" and "…to Porto", or two notes that differ only by a name.
+     That is silent data loss, now in three callers. Rhapsode has no embedder, so it only
+     catches exact repeats and misses rewordings.
+   - **The mechanism** (claude-mem `src/services/dedup/`, about 60 lines): IDF-weighted cosine
+     over whitespace tokens (compound names stay one token), and a veto when any word present on
+     only one side is rare across the store. It requires at least 2 shared tokens before trusting
+     the score. claude-mem validated it on 7,651 work-log titles, not chat facts, so the
+     thresholds are ours to set.
+   - **The change.** Run the veto after the embedding check, using the scope's own items as the
+     document set. Without the embedder, use the TF-IDF cosine as the reword check, so Rhapsode
+     gains it with no model.
+   - **Measure.** Add dedupe fixtures (true rewordings, and near-misses that differ by a name or
+     place) to the golden set, then check that auto-fact and note counts on both evals don't drop.
+
+9. **Hybrid recall: keyword matching beside embeddings.**
+   - **The gap.** Embeddings are weakest on what roleplay depends on: names, places and invented
+     words ("Biscuit", "Captain Imra", "the Vael Ridge").
+   - **The change.** A keyword index (BM25) next to the `.vec.npz` index for the same entries,
+     the two ranked lists merged by reciprocal rank fusion, then the existing gate. Pantheon can
+     keep both in its per-scope files. Rhapsode can use SQLite FTS5 in `rhapsode.db`, which makes
+     recall possible there without the embedder and partly answers the open question about the
+     33 MB model.
+   - **Not a vector database.** At about 2,000 vectors per pairing, a direct numpy search takes
+     well under a millisecond. Chroma, pgvector or Qdrant would add a service and gain nothing.
+   - **Measure.** The recall check in `eval/companion_memory` (relevant found, irrelevant leaked),
+     with fixtures built around names and places.
+
+10. **A reranker for the recall gate.**
+    - **The gap.** Eval bug 5: with small talk in the index, 7/11 irrelevant queries leak. The
+      margin gate was calibrated on a set with no small talk.
+    - **The change.** Score the top ~20 candidates from 9 against the query with a small
+      cross-encoder (`bge-reranker-base` class, int8 ONNX, CPU, baked like the embedder), and
+      gate on its score instead of the margin. Optional like the embedder: missing model, old
+      gate.
+    - **Cost.** One CPU pass over 20 short pairs per turn, before the reply starts. Measure
+      latency next to the chat model, which already uses CPU threads (see the SNAC thread cap
+      in `CLAUDE.md`).
+    - **Measure.** Same recall check, with the small-talk fixtures that exposed bug 5.
+
+11. **Long-term memory as a page with sections.** *(From the LLM Wiki pattern.)*
+    - **The idea.** Store the long-term memory as a short page with fixed sections instead of one
+      flat list: *About {user}*, *About {char}* (her own canon, finding 5), *Shared history*,
+      *Open threads*. The fold appends bullets under a section, the review already acts as the
+      wiki's "health check", and caps are per section, so a burst of history can't push out what
+      she knows about you.
+    - **For Rhapsode** the same shape fits world lore and NPC memory that carry across adventures
+      (still opt-in, as decided), next to `world-builder`.
+    - **Depends on** 7 (per-item metadata) and the `self` facts decision. Prompt changes, so it
+      needs its own eval run, and it ships behind a setting first.
+
+Folded into existing phases:
+
+- **Phase 3 (priority assembler):** claude-mem's `fitContextToBudget`
+  (`src/services/context/ContextBudget.ts`, about 100 lines) is a proven first version of
+  `assemble()`. Render with a pure function, measure, drop the next item on a fixed ordered list,
+  render again, and return what was dropped (`PROMPT_BUDGET.md` step 6). Items are always removed
+  whole. Build that loop first and add per-section shares on top.
+- **Phase 4 (episodes):** give each episode a one-line context header before embedding it ("In
+  the chat about the move to Porto…"), which improves recall cheaply. When a recall hit is an
+  episode, also offer its neighbours (claude-mem's search → timeline → details), within the same
+  budget.
+- **Embedder swap:** only if an eval says so. EmbeddingGemma-300M and Qwen3-Embedding-0.6B are
+  the candidates. Both are larger than BGE-small, so the gain has to show on Cydonia.
+
+Order: 7 and 8 together, then 9, then 10. 11 waits for 7 and the `self` facts decision.
+
+### Evaluated and not adopted
+
+So these don't get re-opened without a new reason:
+
+- **claude-mem's architecture**: hooks on every event, a background worker, an LLM pass per tool
+  call, Chroma. Wrong shape for a library that never touches app storage. Its "modes" (memory
+  types and prompts in JSON) are the shared-path-with-config design that Phase 6 of
+  `MEMORY_PLAN.md` moved away from.
+- **GBrain** (MIT, April 2026): markdown in git, indexed in Postgres + pgvector, used by agents
+  over MCP. It assumes an agent that searches its own memory with tool calls, and it adds a
+  Postgres service. Our models get memory placed in the prompt.
+- **LLM Wiki as a system**: navigating pages by index files needs a strong agent model and
+  costs extra calls per turn. Only its page shape is taken (11).
+- **Code Wiki** (Google, preview): documents code, not characters, and only public repos are
+  supported.
+- **A vector database** for recall: see 9.
 
 ## Progress
 
