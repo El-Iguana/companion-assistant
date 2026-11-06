@@ -709,21 +709,36 @@ async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_
     card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
-    checkpoint = body.get("checkpoint")
-    if not checkpoint:
-        raise HTTPException(400, "checkpoint is required")
     if "appearance" in body:
         card.appearance = body["appearance"]
 
-    # Base source: the uploaded portrait (img2img) vs. txt2img. Persist the choice so
-    # single-sprite regen from the gallery stays consistent with the batch.
-    from_upload = bool(body.get("from_upload")) and bool(card.image)
+    # Two explicit choices (the Studio's "Make sprites from" / "Change the expression
+    # with"): `source` = "portrait" | "prompt", `method` = "kontext" | "img2img". The
+    # older `from_upload` / `kontext` flags still work when those are absent. A choice
+    # that can't be honoured is an error, never a quiet fallback: a portrait request on a
+    # card with no saved portrait used to come back as a brand-new character drawn from
+    # the appearance prompt, which looked exactly like "it ignored my portrait".
+    from_upload = (body["source"] == "portrait") if "source" in body else bool(body.get("from_upload"))
+    if from_upload and not card.image:
+        raise HTTPException(400, "this character has no saved portrait — upload one in the "
+                                 "Studio and save before generating from it")
+    kontext = (body["method"] == "kontext") if "method" in body else bool(body.get("kontext", card.expr_kontext))
+    if kontext and not await comfy.has_kontext():
+        if "method" in body:
+            raise HTTPException(400, "Flux Kontext isn't installed in ComfyUI — pick img2img and a model")
+        kontext = False                 # the old checkbox only meant "when installed"
+    checkpoint = body.get("checkpoint") or ""
+    # Portrait + Kontext uses no model: the portrait is the base and Kontext does each edit.
+    if not checkpoint and not (from_upload and kontext):
+        raise HTTPException(400, "checkpoint is required")
+    use_kontext = kontext
+    # Persist the choices so single-sprite regen from the gallery matches the batch.
     card.expr_from_upload = from_upload
+    card.expr_kontext = kontext
     denoise = min(0.9, max(0.2, float(body.get("denoise", 0.55))))
     card.expr_denoise = denoise
-    card.expr_checkpoint = checkpoint
-    card.expr_kontext = bool(body.get("kontext", card.expr_kontext))
-    use_kontext = card.expr_kontext and await comfy.has_kontext()
+    if checkpoint:
+        card.expr_checkpoint = checkpoint
 
     # Resolve which emotions to generate: explicit list > preset ("core"|"full").
     emotions = body.get("emotions")
@@ -899,8 +914,11 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx
     card = _load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(404, "card not found")
-    checkpoint = body.get("checkpoint")
-    if not checkpoint:
+    # Match the batch: its source and method are stored on the card.
+    from_upload = card.expr_from_upload and bool(card.image)
+    use_kontext = card.expr_kontext and await comfy.has_kontext()
+    checkpoint = body.get("checkpoint") or card.expr_checkpoint or ""
+    if not checkpoint and not (from_upload and use_kontext):
         raise HTTPException(400, "checkpoint is required")
     if "appearance" in body:
         card.appearance = body["appearance"]
@@ -908,8 +926,8 @@ async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx
         sprites = await expressions.generate_expressions(
             comfy, card, checkpoint=checkpoint, style=body.get("style", "anime"),
             emotions=[emotion], transparent=body.get("transparent", True),
-            from_upload=card.expr_from_upload, denoise=card.expr_denoise,   # match the batch
-            use_kontext=card.expr_kontext and await comfy.has_kontext(),
+            from_upload=from_upload, denoise=card.expr_denoise,
+            use_kontext=use_kontext,
         )
     except Exception as e:
         raise HTTPException(502, f"generation failed: {e}")

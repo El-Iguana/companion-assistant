@@ -569,6 +569,11 @@ body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px;
 .pt-seg input:focus-visible + span { outline: 2px solid var(--accLine); outline-offset: 1px; }
 .pt-seg span { display: block; padding: 7px 14px; border-radius: 999px; font: 700 13px var(--sans); color: var(--mut); }
 .pt-seg input:checked + span { background: var(--grad); color: var(--ink); }
+.pt-seg input:disabled + span { opacity: .45; cursor: not-allowed; }
+/* Studio sprite panel: the two choices side by side, the portrait it will start from. */
+.pt-spr-choice { display: flex; flex-wrap: wrap; gap: 14px 24px; }
+.pt-spr-portrait { display: flex; align-items: center; gap: 12px; }
+.pt-spr-thumb { width: 72px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: var(--bg2); }
 .pt-vrm-info { font-size: 13px; line-height: 1.6; color: var(--txt); background: var(--bg2); border-radius: 12px; padding: 10px 12px; }
 .pt-vrm-info code { font-family: ui-monospace, monospace; font-size: 12px; }
 .pt-good { color: #5bd38a; }

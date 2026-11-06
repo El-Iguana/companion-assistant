@@ -317,7 +317,7 @@ GET  /api/cards/{id}/export?version=2|3    download PNG card
 # expressions / ComfyUI
 GET  /api/comfyui/status | /checkpoints
 GET  /api/expressions/emotions             {core:[8], full:[28]}
-POST /api/cards/{id}/expressions           generate set — REPLACES all sprites (checkpoint, style, preset core|full, transparent, from_upload, denoise)
+POST /api/cards/{id}/expressions           generate set — REPLACES all sprites (source portrait|prompt, method kontext|img2img, checkpoint, style, preset core|full, transparent, denoise)
 GET  /api/cards/{id}/expressions           labels the card has sprites for
 GET/POST/DELETE /api/cards/{id}/expression/{emotion}   serve PNG / regen one / delete one
 # personas
@@ -402,6 +402,17 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   portrait as base" checkbox, persisted on `card.expr_from_upload` so single-sprite regen matches the
   batch. (img2img still restyles the upload toward the checkpoint, so likeness drifts somewhat; the
   likeness-preserving upgrade is LivePortrait — see `vtuber-upgrade-plan.md`/models present.)
+  **Sprites from the portrait (2026-11-06):** the Studio asks two things explicitly — *Make
+  sprites from* the portrait or the appearance prompt, and *Change the expression with* Flux
+  Kontext or a model (img2img, with the strength slider) — sent as `source` / `method` to
+  `generate_expressions`. Portrait + Kontext needs no model. A choice that can't be honoured
+  is a 400, never a fallback: a portrait request on a card with no saved portrait used to
+  come back as a new character drawn from the prompt, and the portrait option only appeared
+  after a reload (it read `has_portrait` once, at load). Generating from a portrait picked but
+  not saved saves first. Audio checkpoints (ACE-Step, Stable Audio) are left out of the model
+  list. `remove_background` keeps the uncut image when the cutout leaves under 5% of the
+  pixels (it erased a flat drawing entirely). `/pmedia/card/{id}.png?upload=1` serves the
+  uploaded portrait itself. Tests: `tests/test_sprites_from_portrait.py`.
   Sets: **Core 8** / **Full 28** (SillyTavern-compatible). Portrait reflects the running **mood**.
   **FLUX (2026-10-27):** `flux1-schnell-Q4_K_S.gguf` (models/unet) is listed by
   `comfy.list_checkpoints()` and loads split (`_flux_loaders`: UnetLoaderGGUF + DualCLIPLoader

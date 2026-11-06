@@ -15,6 +15,8 @@ Holds nothing between calls.
 """
 from __future__ import annotations
 
+import re
+
 from pytincture.dataclass import backend_for_frontend
 
 # Card fields the Studio edits, by name. Anything else on the card is preserved.
@@ -26,6 +28,10 @@ EDITABLE = (
     "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode",
     "portrait_source", "portrait_sprite",
 )
+
+
+# Audio checkpoints in the shared ComfyUI (Nocturne's ACE-Step, Stable Audio).
+AUDIO_MODEL = re.compile(r"ace[_-]?step|stable[_-]?audio|audio", re.I)
 
 
 @backend_for_frontend
@@ -64,6 +70,8 @@ class Studio:
             checkpoints = await main.comfy.list_checkpoints()
         except Exception:  # noqa: BLE001 - ComfyUI down is a normal state
             checkpoints = []
+        # The shared ComfyUI also holds Nocturne's audio models; they can't draw a sprite.
+        checkpoints = [c for c in checkpoints if not AUDIO_MODEL.search(c)]
         kontext = bool(checkpoints) and await main.comfy.has_kontext()
         running = jobs.running_for(cur.user.id, card.id) if card_id else None
         return {
@@ -194,10 +202,15 @@ class Studio:
         cur = self._cur()
         if cur is None:
             return {"ok": False, "error": "not signed in", "signed_out": True}
-        if main._load(cur.cards, card_id or "", CharacterCard) is None:
+        card = main._load(cur.cards, card_id or "", CharacterCard)
+        if card is None:
             return {"ok": False, "error": "save the character first"}
-        if not (args[-1] or {}).get("checkpoint"):
-            return {"ok": False, "error": "pick a checkpoint (ComfyUI must be running)"}
+        params = args[-1] or {}
+        # Portrait + Kontext needs no model (the handler checks the rest, and says why).
+        no_model_needed = (params.get("source") == "portrait" and params.get("method") == "kontext") \
+            or (handler == "regenerate_expression" and card.expr_from_upload and card.expr_kontext)
+        if not params.get("checkpoint") and not no_model_needed:
+            return {"ok": False, "error": "pick a model (ComfyUI must be running)"}
         try:
             job = jobs.start(cur.user.id, card_id, label,
                              lambda: getattr(main, handler)(*args, cur=cur))

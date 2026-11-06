@@ -58,7 +58,7 @@ def _etag(path, extra: str = "") -> str:
 
 
 @router.get("/card/{card_id}.png")
-def card_portrait(card_id: str, request: Request):
+def card_portrait(card_id: str, request: Request, upload: int = 0):
     import main
     from models.schema import CharacterCard
 
@@ -68,6 +68,12 @@ def card_portrait(card_id: str, request: Request):
     card = main._load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(status_code=404, detail="no such card")
+    # `upload=1`: the uploaded portrait itself, whatever the profile picture is set to
+    # (the Studio shows what "sprites from the portrait" will start from).
+    if upload:
+        if not card.image:
+            raise HTTPException(status_code=404, detail="no uploaded portrait")
+        return _png(request, card.image, _etag(cur.cards / f"{card_id}.json", "u"))
     # Whatever the card's "Profile picture" setting picks (pantheon_web.present).
     from pantheon_web.present import portrait_b64
 

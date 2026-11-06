@@ -196,9 +196,28 @@ def remove_background(b64_png: str, style: str = "anime") -> str:
         model = "isnet-anime" if style == "anime" else "u2net"
         raw = base64.b64decode(b64_png)
         cut = remove(raw, session=_rembg_session(model))  # bytes in -> RGBA PNG bytes out
+        if _mostly_gone(cut):
+            # The cutout took the character too (a flat drawing, a logo, a low-contrast
+            # portrait): a sprite that is nearly all transparent is worse than one with
+            # its background, so keep the original, as on any other failure.
+            return b64_png
         return base64.b64encode(cut).decode()
     except Exception:
         return b64_png
+
+
+CUTOUT_MIN_SHARE = 0.05      # a sprite must keep at least this share of its pixels
+
+
+def _mostly_gone(png: bytes) -> bool:
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(png))
+    if im.mode != "RGBA":
+        return False
+    alpha = im.getchannel("A").point(lambda a: 255 if a > 10 else 0)
+    kept = alpha.histogram()[255]
+    return kept < CUTOUT_MIN_SHARE * im.width * im.height
 
 
 async def generate_expressions(
@@ -233,8 +252,11 @@ async def generate_expressions(
     appearance = _appearance_prompt(card)
     seed = _seed_for(card)
     d = get_checkpoint_defaults(checkpoint)
-    # Portrait aspect regardless of the model's square default.
-    w, h = (768, 1024) if d["is_sdxl"] or d["is_flux"] else (512, 768)
+    # Portrait aspect regardless of the model's square default. Kontext works near a
+    # megapixel whatever model is picked (or none: portrait + Kontext needs no model).
+    w, h = (768, 1024) if d["is_sdxl"] or d["is_flux"] or use_kontext else (512, 768)
+    if not (from_upload and card.image) and not checkpoint:
+        raise ValueError("a model is needed to draw the base portrait from the appearance prompt")
 
     # The base is reproducible (fixed seed / fixed upload), so regenerating a single
     # emotion later still matches the rest.
