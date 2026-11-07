@@ -53,7 +53,7 @@ With [`ai-stack`](https://github.com/JotunheimPress/ai-stack) on the Linux works
 then `stack companion-assistant`. It runs `run-podman.sh`, which joins the `ai-net` network when it
 exists (backends by name), falls back to host networking, keeps data in `data/`, mounts Piper
 voices from `../jarvis`, and derives `TZ` from the host. It runs beside the roleplay app
-(`companion`, port 7861):
+(Whimsy, the `companion` repo, port 7861):
 
 ```bash
 ./run-podman.sh              # build + run on :7867
