@@ -198,7 +198,7 @@ install the NVIDIA Container Toolkit, following
 
 ## 3. Get Pantheon and configure it
 
-The repository is **private** (`JotunheimPress/companion`), so you need a
+The repository is **private** (`JotunheimPress/npc_maker`), so you need a
 GitHub account that has been given access. Clone it with the GitHub CLI,
 which asks you to sign in once:
 
@@ -209,7 +209,7 @@ folder: the build looks for Muninn at `../muninn`, next to Pantheon.
 ```sh
 gh auth login
 gh repo clone JotunheimPress/muninn muninn
-gh repo clone JotunheimPress/companion pantheon
+gh repo clone JotunheimPress/npc_maker pantheon
 cd pantheon
 ```
 
@@ -217,11 +217,11 @@ or with an SSH key registered on your GitHub account:
 
 ```sh
 git clone git@github.com:JotunheimPress/muninn.git muninn
-git clone git@github.com:JotunheimPress/companion.git pantheon
+git clone git@github.com:JotunheimPress/npc_maker.git pantheon
 cd pantheon
 ```
 
-(The folder is called `pantheon` here; the repository keeps its old name. The
+(The folder is called `pantheon` here; the repository is named `npc_maker`. The
 Muninn folder must be called `muninn`.)
 
 > **Windows:** the repository forces Unix line endings (`.gitattributes`), so
