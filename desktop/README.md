@@ -25,6 +25,22 @@ whoever you chatted with last. She continues her latest chat rather than startin
 
 Options: `--url`, `--width`, `--height`.
 
+### Start her with your session (optional)
+
+Cantinero runs the desktop shell on its own; ai-stack doesn't manage it. To have her come
+up when you log in, install the systemd user unit, rendered with this checkout's path:
+
+```bash
+mkdir -p ~/.config/systemd/user
+sed "s|@DIR@|$PWD|g" desktop/pantheon-desktop.service \
+  > ~/.config/systemd/user/pantheon-desktop.service
+systemctl --user daemon-reload
+systemctl --user enable --now pantheon-desktop.service   # start now and at every login
+```
+
+Stop it with `systemctl --user stop pantheon-desktop`, and use `disable` to stop it starting at
+login. It only frames the app, so Cantinero itself (`./run-podman.sh`) has to be running.
+
 ## Positioning it — just drag her
 
 Pick **"Move her (drag to position)"** from the tray menu. A grab bar appears at

@@ -1,13 +1,13 @@
-# Pantheon desktop avatar, as a systemd --user unit.
+# Cantinero desktop avatar, as a systemd --user unit (optional: running
+# ./desktop/pantheon-desktop.py by hand works just as well).
 #
-# A unit rather than a bare process for one concrete reason: the stack-ui
-# container has the host session bus but NO Wayland display, so anything it
-# spawns itself cannot open a window. It can, however, ask the host user manager
-# to start this -- and units started there inherit WAYLAND_DISPLAY, DISPLAY and
-# XAUTHORITY from the session. One unit therefore gives a launch path that works
-# identically from a terminal, from `stack desktop`, and from the dashboard.
+# A unit so she comes up with your graphical session, and so systemd restarts
+# her if she crashes. Units started by the user manager inherit WAYLAND_DISPLAY,
+# DISPLAY and XAUTHORITY from the session.
 #
-# Installed by `stack install desktop` (path rendered from @ECO@).
+# Install it rendered, with @DIR@ = this checkout (see desktop/README.md):
+#   sed "s|@DIR@|$PWD|g" desktop/pantheon-desktop.service \
+#     > ~/.config/systemd/user/pantheon-desktop.service
 [Unit]
 Description=Cantinero desktop avatar
 # She is a window onto the companion-assistant container; without it there is nothing to show.
@@ -16,7 +16,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@ECO@/companion-assistant/desktop/pantheon-desktop.py
+ExecStart=@DIR@/desktop/pantheon-desktop.py
 Restart=on-failure
 RestartSec=3
 # The renderer is a continuous WebGL loop sharing the GPU with KoboldCPP and
