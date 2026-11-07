@@ -83,6 +83,18 @@ def _local_set(key: str, value: str) -> None:
         pass
 
 
+def _set_favicon() -> None:
+    """The tab icon: El Iguana behind the bar (static/brand, public so the sign-in page has it too)."""
+    for rel, href in (("icon", "/static/brand/favicon.png"),
+                      ("apple-touch-icon", "/static/brand/apple-touch-icon.png")):
+        link = js.document.querySelector(f'link[rel="{rel}"]')
+        if not link:
+            link = js.document.createElement("link")
+            link.rel = rel
+            js.document.head.appendChild(link)
+        link.href = href
+
+
 class Pantheon(MainWindow):
     layout_config = LayoutConfig(rows=[CellConfig(id="app", grow=1)])
 
@@ -99,6 +111,7 @@ class Pantheon(MainWindow):
         self.set_theme("dark")
         self.apply_theme(_local_get(THEME_KEY) or "bone")
         js.document.title = "Cantinero"
+        _set_favicon()
 
         self.attach_html("app", self._skeleton())
         root = by_id("pt-app")
@@ -140,7 +153,7 @@ class Pantheon(MainWindow):
         return (
             '<div class="pt-app" id="pt-app">'
             '<aside class="pt-side" id="pt-side">'
-            '<a class="pt-brand" href="#/discover"><span class="pt-logo">C</span>'
+            '<a class="pt-brand" href="#/discover"><span class="pt-logo"><img src="/static/brand/cantinero-logo.png" alt=""></span>'
             '<span><b>Cantinero</b><small>Pull up a stool. What&rsquo;ll it be?</small></span></a>'
             f'<nav class="pt-nav">{tiles}</nav>'
             '<div class="pt-side-scroll">'
