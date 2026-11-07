@@ -1,5 +1,7 @@
 # Cantinero
 
+<p align="center"><img src="docs/cantinero.jpg" alt="El Iguana in a fez behind the bar, holding out an old fashioned" width="420"></p>
+
 *El Iguana's bartender — at your service.*
 
 A self-hosted, fully-local **voice assistant built on character cards**. You talk to it, it talks

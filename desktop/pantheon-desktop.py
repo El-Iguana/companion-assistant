@@ -48,6 +48,8 @@ from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
+# The tray icon: El Iguana behind the bar. The SNI host looks the icon name up here first.
+ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 DEFAULT_URL = "http://127.0.0.1:7867/desktop"
 # The HUD lives in a strip along the bottom. Only that strip accepts clicks;
 # everything above it passes through to whatever is on the desktop behind her.
@@ -67,7 +69,7 @@ class DesktopShell(Gtk.Application):
         self._mi_chars = None
         self._char_ids = {}
         self.tray = None
-        self.icon_name = "face-smile"
+        self.icon_name = "cantinero"
         self.kwin = None
         self._geom = None
         self._geom_file = os.path.join(
@@ -288,7 +290,7 @@ class DesktopShell(Gtk.Application):
             MenuItem(5, "Quit", lambda _i: self.quit()),
         ]
         self.tray = Tray(APP_ID, "Cantinero", self.icon_name, items,
-                         on_activate=self._menu_toggle_visible)
+                         on_activate=self._menu_toggle_visible, icon_theme_path=ICON_DIR)
         if not self.tray.start():
             self.tray = None
 
@@ -440,7 +442,8 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=420)
     ap.add_argument("--height", type=int, default=620)
     ap.add_argument("--no-tray", action="store_true", help="run without a tray icon")
-    ap.add_argument("--icon", default="face-smile", help="themed tray icon name")
+    ap.add_argument("--icon", default="cantinero",
+                    help="tray icon: a name in desktop/icons/ (default: cantinero) or the icon theme")
     args = ap.parse_args()
 
     app = DesktopShell(args.url, args.width, args.height, not args.no_tray)

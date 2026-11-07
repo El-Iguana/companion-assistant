@@ -127,8 +127,10 @@ class MenuItem:
 
 class Tray:
     def __init__(self, app_id: str, title: str, icon: str,
-                 items: list[MenuItem], on_activate: Callable | None = None):
+                 items: list[MenuItem], on_activate: Callable | None = None,
+                 icon_theme_path: str = ""):
         self.app_id, self.title, self.icon = app_id, title, icon
+        self.icon_theme_path = icon_theme_path   # a folder searched for `icon` before the theme
         self.items = items
         self.on_activate = on_activate
         self.revision = 1
@@ -205,7 +207,7 @@ class Tray:
             "Status": GLib.Variant("s", "Active"),
             "WindowId": GLib.Variant("i", 0),
             "IconName": GLib.Variant("s", self.icon),
-            "IconThemePath": GLib.Variant("s", ""),
+            "IconThemePath": GLib.Variant("s", self.icon_theme_path),
             "AttentionIconName": GLib.Variant("s", ""),
             "OverlayIconName": GLib.Variant("s", ""),
             "ToolTip": GLib.Variant("(sa(iiay)ss)", (self.icon, [], self.title, "")),

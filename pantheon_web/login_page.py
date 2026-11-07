@@ -31,8 +31,8 @@ _HEAD = b"""<style>
        border-radius:22px !important;box-shadow:0 20px 60px rgba(0,0,0,.5) !important;
        padding:34px 34px 30px !important;width:min(360px,90vw) !important;max-width:none !important;
        text-align:center;}
-  .su-mark{width:52px;height:52px;margin:0 auto 14px;border-radius:14px;background:#f5f1e8;color:#0e0e12;
-       display:flex;align-items:center;justify-content:center;font:700 28px Georgia,Charter,serif;}
+  .su-mark{width:72px;height:72px;margin:0 auto 14px;border-radius:18px;display:block;object-fit:cover;
+       box-shadow:0 6px 20px rgba(0,0,0,.45);}
   .login-container h2{margin:0 0 4px !important;font:700 26px Georgia,Charter,serif !important;color:#f5f1e8 !important;}
   .su-tag{margin:0 0 22px;color:#a39c8f;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;}
   .input-field{width:100% !important;box-sizing:border-box;background:#141419 !important;color:#f5f1e8 !important;
@@ -47,13 +47,15 @@ _HEAD = b"""<style>
   .error,.login-error,.alert{color:#f0a3a3 !important;}
 </style>
 <title>Cantinero</title>
+<link rel="icon" type="image/png" href="/static/brand/favicon.png">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
 </head>"""
 
 _REWRITES: tuple[tuple[bytes, bytes], ...] = (
     (b'type="email" name="email"', b'type="text" name="email" autocomplete="username" autofocus'),
     (b'placeholder="Email"', b'placeholder="Username"'),
     (b'value="Login with Email"', b'value="Sign in"'),
-    (b"<h2>Welcome</h2>", b'<div class="su-mark">C</div><h2>Cantinero</h2>'),
+    (b"<h2>Welcome</h2>", b'<img class="su-mark" src="/static/brand/cantinero-logo.png" alt=""><h2>Cantinero</h2>'),
     (b"<p>Please log in to continue</p>", b'<p class="su-tag">Pull up a stool. What&rsquo;ll it be?</p>'),
     # Last, so these rules override the page's own stylesheet.
     (b"</head>", _HEAD),

@@ -81,7 +81,8 @@ Two objects are published — `/StatusNotifierItem` for the icon and `/MenuBar`
 is asked to adopt them. Left-click shows or hides her; the menu carries
 show/hide, a click-through checkbox, reload and quit.
 
-`--icon NAME` picks a themed icon (default `face-smile`). `--no-tray` skips it;
+`--icon NAME` picks the tray icon: a PNG in `desktop/icons/` (default `cantinero`, El Iguana
+behind the bar), or else a name from the icon theme. `--no-tray` skips it;
 if no watcher is running the shell says so and carries on without one.
 
 ## Known gaps

@@ -39,6 +39,14 @@ page's hero, the rail); *"El Iguana's bartender — at your service."* where the
 (frontend.json, the image label, README, the Guide). Account and user management stay plain.
 Model-facing prompts and tool definitions don't use this vocabulary.
 
+**The brand image** is El Iguana behind the bar (fez, cigar, old fashioned). The original is the user's
+`~/Pictures/eliguana/caninero.png` (1254², not committed). Everything below is cut from it: the head
+crop `static/brand/cantinero-logo.png` (256², the rail logo and the sign-in mark), `favicon.png` (64²)
+and `apple-touch-icon.png` (180²), the tray icon `desktop/icons/cantinero.png` (128²), and the README
+banner `docs/cantinero.jpg` (900², not in the image). `static/` is public, which is why they live there:
+the sign-in page shows the logo before anyone is signed in. pytincture owns the page's `<head>`, so the
+favicon is added by `appcode/pantheon.py` `_set_favicon()`, and by `login_page._HEAD` on the sign-in page.
+
 **Mira** is the example bartender: `seed/characters/mira.json` (fixed id `mira`, Kokoro
 `af_sarah`, wake word "Mira", avatar `baseline.vrm`, the redistributable pixiv sample in
 `data/vrm/`). `main._seed_library()` copies her into a library only when it is created (first-run

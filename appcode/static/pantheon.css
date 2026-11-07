@@ -50,7 +50,8 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 
 .pt-brand { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; padding: 2px 2px 4px; }
 .pt-logo { width: 38px; height: 38px; border-radius: 11px; background: var(--grad); color: var(--ink);
-  display: flex; align-items: center; justify-content: center; font: 700 21px var(--serif); flex: none; }
+  display: flex; align-items: center; justify-content: center; font: 700 21px var(--serif); flex: none; overflow: hidden; }
+.pt-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pt-brand b { display: block; font-size: 19px; font-weight: 750; letter-spacing: .2px; }
 .pt-brand small { display: block; font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mut); margin-top: 1px; }
 
