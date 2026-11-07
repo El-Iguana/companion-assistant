@@ -1,0 +1,10 @@
+{
+  "repo": "companion",
+  "brand": "companion",
+  "description": "Character-card AI companion",
+  "port": 7861,
+  "health": "http://127.0.0.1:7861/api/health",
+  "container": "companion",
+  "start": "run-podman.sh",
+  "icon": "mdi-account-heart-outline"
+}
