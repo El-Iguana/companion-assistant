@@ -1,4 +1,4 @@
-# Pantheon desktop mode (Phase 6)
+# Cantinero desktop mode (Phase 6)
 
 Her in the corner of the screen instead of a browser tab.
 
@@ -11,7 +11,7 @@ Two pieces, and neither holds application logic:
 | **`/desktop`** | a small page (`pantheon_web/desktop.py`, `static/js/desktop.js`) on the same voice island (`voice.js`) and avatar renderer (`vtuber.mjs`) as the main page — so speech, the mic loop and the avatar behave identically in both |
 | **`pantheon-desktop.py`** | a borderless transparent GTK4 + WebKitGTK window pointed at that URL |
 
-The container on `127.0.0.1:7861` stays the brain. The shell is a picture frame.
+The container on `127.0.0.1:7867` stays the brain. The shell is a picture frame.
 
 Which character: `?card=<id>` on the URL, else **Settings → Desktop-mode character**, else
 whoever you chatted with last. She continues her latest chat rather than starting a new one.
@@ -90,5 +90,5 @@ if no watcher is running the shell says so and carries on without one.
   use the wake word, which already works.
 - **Login persists via a cookie store** under `~/.local/share/pantheon-desktop`.
   First launch shows the sign-in page, which returns to `/desktop` afterwards. The
-  2026-10-26 switch-over moved the address to `http://127.0.0.1:7861/desktop` and
+  2026-10-26 switch-over moved the address to `http://127.0.0.1:7867/desktop` and
   the session to the new page's, so the shell asks once more after that update.

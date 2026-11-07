@@ -1,4 +1,4 @@
-"""BFF: personas (who you are in a chat) and relationship presets (scenario seeds).
+"""BFF: personas (who you are in a chat).
 
 Thin calls into ``main``'s handlers; validation is Pantheon's own models. Holds nothing.
 """
@@ -7,9 +7,6 @@ from __future__ import annotations
 from pytincture.dataclass import backend_for_frontend
 
 PERSONA_FIELDS = ("name", "title", "description", "background", "is_default")
-PRESET_FIELDS = ("name", "description", "character_id", "persona_id", "scenario_note",
-                 "power_dynamic", "social_acceptance", "affection", "trust", "attraction",
-                 "tension", "emotional_intimacy", "physical_willingness")
 
 
 @backend_for_frontend
@@ -86,59 +83,4 @@ class People:
             await main.delete_persona(persona_id or "", cur=cur)
         except HTTPException as exc:
             return {"ok": False, "error": str(exc.detail)}
-        return {"ok": True}
-
-    # --- presets -----------------------------------------------------------------
-    async def presets(self) -> dict:
-        import main
-        from models.schema import CharacterCard, Persona, RelationshipPreset
-
-        cur = self._cur()
-        if cur is None:
-            return {"ok": False, "error": "not signed in", "signed_out": True}
-        return {"ok": True,
-                "presets": [p.model_dump() for p in sorted(main._list(cur.presets, RelationshipPreset),
-                                                           key=lambda p: p.name.lower())],
-                "characters": [{"id": c.id, "name": c.name}
-                               for c in sorted(main._list(cur.cards, CharacterCard), key=lambda c: c.name.lower())],
-                "personas": [{"id": p.id, "name": p.name}
-                             for p in sorted(main._list(cur.personas, Persona), key=lambda p: p.name.lower())]}
-
-    async def save_preset(self, preset_id: str, fields: dict) -> dict:
-        import main
-        from models.schema import RelationshipPreset
-        from pydantic import ValidationError
-
-        cur = self._cur()
-        if cur is None:
-            return {"ok": False, "error": "not signed in", "signed_out": True}
-        base = main._load(cur.presets, preset_id, RelationshipPreset) if preset_id else RelationshipPreset()
-        if base is None:
-            return {"ok": False, "error": "that preset no longer exists"}
-        data = base.model_dump()
-        for key in PRESET_FIELDS:
-            if key in (fields or {}):
-                data[key] = fields[key]
-        if not str(data.get("name") or "").strip():
-            return {"ok": False, "error": "a preset needs a name", "field": "name"}
-        try:
-            preset = RelationshipPreset(**data)
-        except ValidationError as exc:
-            return {"ok": False, "error": str(exc.errors()[0]["msg"])}
-        from datetime import datetime
-
-        preset.updated_at = datetime.now().isoformat()
-        if preset_id:
-            saved = await main.update_preset(preset_id, preset, cur=cur)
-        else:
-            saved = await main.create_preset(preset, cur=cur)
-        return {"ok": True, "id": saved["id"]}
-
-    async def delete_preset(self, preset_id: str) -> dict:
-        import main
-
-        cur = self._cur()
-        if cur is None:
-            return {"ok": False, "error": "not signed in", "signed_out": True}
-        await main.delete_preset(preset_id or "", cur=cur)
         return {"ok": True}

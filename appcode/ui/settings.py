@@ -1,7 +1,7 @@
 """Settings (one page, in sections), the in-app Guide, and — for admins — Users.
 
 Every knob is the classic page's ⚙ Settings, with its explanation: thinking, the memory
-tuning, recall and automatic facts, and the voice/hands-free settings with the
+tuning and automatic facts, and the voice/hands-free settings with the
 microphone picker. Device names only come with microphone access, so the picker lists
 them straight away when access was granted before, and otherwise behind "Find
 microphones". Saving hands the new values to the voice island at once.
@@ -25,37 +25,25 @@ GROUPS = [
          "Turn off if replies feel less thoughtful."),
         ("context_limit", "Context window", "context", None,
          "How much the model reads per reply: the system prompt, memory and the recent chat. "
-         "When a chat outgrows it, the oldest messages are left out (the summary already "
-         "holds them), never the character or her memory. Larger windows remember more "
+         "When a chat outgrows it, the oldest messages are left out (her memory folds "
+         "them in), never the character or her memory. Larger windows remember more "
          "word for word but reply slower and use more VRAM."),
     ]),
     ("memory", "Memory", [
-        ("summarize_after", "Summarize after", "range", (6, 60, 2, "{} messages"),
-         "Fold older turns into the running summary once this many un-summarized messages pile up. "
-         "Lower summarizes sooner (cheaper prompt, more lossy)."),
+        ("summarize_after", "Fold memory after", "range", (6, 60, 2, "{} messages"),
+         "Once this many messages pile up, the older ones are read into her memory — standing "
+         "instructions, facts and where things stand — and leave the prompt. Lower folds sooner "
+         "(cheaper prompt, fewer turns word for word)."),
         ("keep_recent", "Keep recent verbatim", "range", (2, 40, 2, "{} messages"),
-         "The most recent turns are always sent word for word, never summarized."),
-        ("summary_max_tokens", "Summary length", "range", (100, 1000, 50, "{} tokens"),
-         "Token budget for the “story so far”. Raise it if summaries feel truncated."),
-        ("recall_enabled", "Semantic recall", "check", None,
-         "Look up related moments from earlier chats and slip the few that match into the context. "
-         "Runs on the CPU; uses no VRAM."),
-        ("recall_top_k", "Recall depth", "range", (1, 10, 1, "{} snippets"),
-         "How many remembered snippets may be injected per turn. Shares the long-term budget."),
-        ("story_memory", "Remember the story", "check", None,
-         "Keep a running record of what happened (a short note per stretch of the chat) and of "
-         "the people, places and things the story mentions, and recall them when they come up "
-         "again. Scenario chats get their own. Adds one short model call each time memory is "
-         "folded."),
-        ("auto_facts_enabled", "Remember facts automatically", "check", None,
-         "Pull durable facts (names, allergies, preferences) out of finished conversations into "
-         "long-term memory. They show as AUTO in a chat's Memory, where you can edit or remove them."),
-        ("auto_facts_max_new", "Facts per conversation", "range", (1, 10, 1, "{} at most"),
+         "The most recent turns are always sent word for word."),
+        ("summary_max_tokens", "Fold length", "range", (100, 1000, 50, "{} tokens"),
+         "Token budget for one memory fold. Raise it if task notes feel truncated."),
+        ("auto_facts_enabled", "Remember automatically", "check", None,
+         "Pull instructions (\u201caddress me as Sir\u201d) and facts (names, preferences, your setup) out "
+         "of finished conversations. They show as AUTO in a chat's Memory, where you can edit or "
+         "remove them."),
+        ("auto_facts_max_new", "Entries per conversation", "range", (1, 10, 1, "{} at most"),
          "Ceiling on how many may be added from one swept conversation."),
-        ("longterm_consolidate", "Consolidate long-term memory", "check", None,
-         "Each chat adds new notes without rewriting the old ones, and a finished chat gets one "
-         "tidy-up that removes notes that stopped being true. Off: the whole memory is rewritten "
-         "every time, which can slowly lose older details."),
     ]),
     ("voice", "Voice &amp; hands-free", [
         ("wake_word", "Wake word / phrase", "text", "e.g. hey luna (blank = always listen)",
@@ -79,7 +67,7 @@ GROUPS = [
         ("mic_device_id", "Microphone", "mic", None,
          "For interrupting over speakers pick an echo-cancelled source (aec_source — "
          "<code>scripts/setup-aec.sh --persist</code> creates it) <b>and</b> play through aec_sink."),
-        ("desktop_card_id", "Desktop-mode character", "chars", None,
+        ("desktop_card_id", "On shift on the desktop", "chars", None,
          "Who appears in the corner of the screen at /desktop."),
     ]),
 ]
@@ -161,7 +149,7 @@ class SettingsView:
                     f'<small>{hint}</small></label>')
         if kind in ("select", "chars"):
             options = extra if kind == "select" else (
-                [("", "her most recent chat's character")] + [(c["id"], c["name"]) for c in self.data.get("characters") or []])
+                [("", "whoever you talked to last")] + [(c["id"], c["name"]) for c in self.data.get("characters") or []])
             opts = "".join(f'<option value="{esc(o)}"{" selected" if str(o) == str(v or "") else ""}>{esc(t)}</option>'
                            for o, t in options)
             return (f'<label class="pt-setting"><span><b>{label}</b></span><select data-s="{key}">{opts}</select>'
@@ -379,8 +367,7 @@ class SettingsView:
 
 
 _COPY_GROUPS = (("character", "Characters", "Portrait, sprites, voice and VRM come along."),
-                ("persona", "Personas", "Copies are never made their active persona."),
-                ("preset", "Presets", "A pairing follows only if its character/persona is copied too."))
+                ("persona", "Personas", "Copies are never made their active persona."))
 
 
 class CopyToUserModal:
@@ -414,7 +401,7 @@ class CopyToUserModal:
             '<div class="pt-form">'
             f'<h2>Copy to <span class="pt-dim">{esc(self.name)}</span></h2>'
             '<p class="pt-dim">Copies go into their library; your originals are unchanged. '
-            'Chats, memories and relationships are not copied.</p>'
+            'Chats and memories are not copied.</p>'
             + body +
             '<div class="pt-form-actions"><button class="pt-btn ghost" data-close="1">Cancel</button>'
             '<button class="pt-btn primary" data-copy="1"><i class="mdi mdi-content-copy"></i>Copy</button></div></div>')

@@ -112,11 +112,10 @@ def test_without_a_window_nothing_is_dropped():
 def test_overflow_drops_oldest_turns_and_keeps_system_and_tail():
     card, persona, s = _session(41, 2000)          # ~20k tokens of history
     trimmed: list = []
-    msgs = prompt_builder.build_messages(card, persona, s, boundary_note="BOUNDARY",
-                                         context_tokens=8192, trimmed=trimmed)
+    msgs = prompt_builder.build_messages(card, persona, s, context_tokens=8192, trimmed=trimmed)
     assert trimmed[0] > 0
     assert msgs[0]["role"] == "system" and "Mira" in msgs[0]["content"]     # system block kept
-    assert "BOUNDARY" in msgs[-1]["content"]                                # trailing note kept
+    assert "[Now]" in msgs[-1]["content"]                                   # trailing note kept
     chat = [m for m in msgs if m["role"] in ("user", "assistant")]
     assert chat[-1]["content"].startswith("turn 40 ")                       # newest kept
     assert not any(m["content"].startswith("turn 0 ") for m in chat)        # oldest gone

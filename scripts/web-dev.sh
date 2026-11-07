@@ -4,14 +4,14 @@
 #   PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start|stop|restart|log
 #
 # Never point PANTHEON_DATA_DIR at the real data/: the smoke test writes to it.
-# Port 7871 by default (7861 is the real container's). Needs .venv and the browser
+# Port 7877 by default (7867 is the real container's). Needs .venv and the browser
 # wheel in appcode/ — see CLAUDE.md, "Running".
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${PANTHEON_DATA_DIR:?set PANTHEON_DATA_DIR to a scratch library}"
-PORT="${PANTHEON_DEV_PORT:-7871}"
-STATE="${XDG_RUNTIME_DIR:-/tmp}/pantheon-web-dev"
+PORT="${PANTHEON_DEV_PORT:-7877}"
+STATE="${XDG_RUNTIME_DIR:-/tmp}/pantheon-assistant-web-dev"
 PIDFILE="$STATE/pid"
 LOG="$STATE/log"
 mkdir -p "$STATE"

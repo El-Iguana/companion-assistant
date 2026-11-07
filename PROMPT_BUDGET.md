@@ -1,7 +1,16 @@
-# Prompt budget — shared decision doc
+# Prompt budget — decision doc
 
-Owned jointly by `RELATIONSHIP_PLAN.md` and `MEMORY_PLAN.md`. Both systems inject into the same
-context window, both are capped only in isolation, and **nothing accounts for the total**. This file
+> **Since the split (2026-11-07)** this repo has no relationship descriptor, boundary note, session
+> summary, long-term narrative block or recall; those rows and measurements below are history from
+> El-Iguana/companion, kept because the overflow findings still hold. Here the injected memory is
+> `assistant_memory.block()` (≤ 2400 ch, directives never truncated) plus pinned facts, the system
+> prompt is `DEFAULT_ASSISTANT`, and the last thing in every prompt is the one trailing note
+> (`ASSISTANT_FORMAT_NOTE` … `focus_note`), which takes the boundary note's place as the most
+> overflow-resistant part.
+
+Originally owned jointly by `RELATIONSHIP_PLAN.md` and `MEMORY_PLAN.md` (in companion). Everything
+injects into the same context window, each part is capped only in isolation, and **nothing accounts
+for the total**. This file
 records what actually goes into a prompt, what happens when it overflows, and what to do about it.
 
 Status: **steps 1 and 3 of the proposed design are built (2026-10-30)**: the app reads the real
@@ -73,11 +82,9 @@ That's the point: nothing is broken today, and nothing warns you as you approach
 
 | Part | Cap | Where |
 |---|---|---|
-| Long-term memory block | **2400 ch ≈ 480 tok** (shared with recall) | `LONGTERM_BUDGET_CHARS` |
-| Session summary | **400 tok** (settings: 100–1200) | `summary_max_tokens` |
-| Relationship descriptor | bounded by construction, ~149 tok measured | `descriptor()` |
-| Boundary note | bounded by construction, ~84 tok measured | `boundary_note()` |
-| Built-in system prompt | fixed, ~130 tok | `DEFAULT_ROLEPLAY` |
+| Assistant memory block | **2400 ch ≈ 480 tok**, directives exempt | `assistant_memory.BUDGET_CHARS` |
+| Trailing note (format + focus, + expression beats / voice tags / retake) | bounded by construction | `build_messages()` |
+| Built-in system prompt | fixed | `DEFAULT_ASSISTANT` |
 | Reply | 220 tok, ×2 on auto-continue | `GenerationConfig.max_tokens` |
 | — | — | — |
 | Tool schemas, if skills ship | **none** — +51 (System Info) / +218 (DJ) / +256 (both), every turn | `SKILLS_PLAN.md` |
@@ -129,9 +136,9 @@ combinations cannot fit.
    safety valve for when a fold hasn't happened yet or turns are unusually long.
 4. **Priority order for eviction**, coarsest first — deliberately the inverse of what front-truncation
    does today:
-   `mes_example` → lorebook (lowest `insertion_order` first) → session summary → long-term block →
-   older history → char def. **Never** evict: the system prompt, persona, relationship descriptor,
-   or boundary note.
+   `mes_example` → lorebook (lowest `insertion_order` first) → facts and notes →
+   older history → char def. **Never** evict: the system prompt, persona, directives, or the
+   trailing note.
 5. **Cap what's uncapped.** Per-part ceilings for `mes_example`, total lorebook, and pinned facts,
    following the pattern `longterm_block()` already established (cap per entry *and* total, drop from
    the oldest/lowest-priority end, never truncate a block mid-way).

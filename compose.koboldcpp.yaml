@@ -1,4 +1,4 @@
-# KoboldCPP in a container next to Pantheon (NVIDIA GPU, x86_64 Linux or
+# KoboldCPP in a container next to Cantinero (NVIDIA GPU, x86_64 Linux or
 # Windows). Stack it on compose.yaml together with the GPU file for your
 # engine — without one, KoboldCPP has no GPU:
 #
@@ -11,7 +11,7 @@
 # containers there cannot use the GPU.
 
 services:
-  pantheon:
+  companion-assistant:
     environment:
       KOBOLD_URL: http://koboldcpp:5001
     depends_on:
@@ -23,7 +23,7 @@ services:
     build:
       context: backends/koboldcpp
       dockerfile: Containerfile
-    container_name: pantheon-koboldcpp
+    container_name: companion-assistant-koboldcpp
     restart: unless-stopped
     environment:
       KOBOLD_MODEL: ${KOBOLD_MODEL:-}
@@ -32,7 +32,7 @@ services:
       KOBOLD_ARGS: ${KOBOLD_ARGS:-}
     volumes:
       - ${KOBOLD_MODELS_DIR:-./llm-models}:/models:ro,z
-    # Not published: Pantheon reaches it by name. To query it from this
+    # Not published: Cantinero reaches it by name. To query it from this
     # computer too, uncomment:
     # ports:
     #   - "127.0.0.1:5001:5001"

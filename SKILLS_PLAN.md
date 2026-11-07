@@ -1,10 +1,19 @@
-# Skills — plan
+# The Menu (skills) — plan
 
-Give **assistant-mode characters** real capabilities: read the host system, and run the media.
+> **Vocabulary.** In Cantinero's UI and help, skills are **the Menu**: a skill is *on the menu*,
+> and enabling one for a bartender is *adding it to the menu*. Assistant cards are **the staff**.
+> This plan keeps the engineering word "skill" for the code (`CharacterCard.skills`,
+> `services/skills/`); anything a user reads says "the Menu". See CLAUDE.md, Vocabulary.
+>
+> **Since the split (2026-11-07)** this repo has no roleplay mode, relationship system or boundary
+> note. Mentions of them below are history from El-Iguana/companion; the constraints that cited
+> them now apply to the trailing system note (`ASSISTANT_FORMAT_NOTE` + `focus_note`) instead.
+
+Give the staff (assistant characters) real capabilities: read the host system, and run the media.
 A skill is a set of tool definitions plus the code behind them, attached to a character card.
 
-First two skills: **System Info** (host date/time + machine status) and **Media** (the Orpheus media
-server — find music and video by voice and play them on any Orpheus player). *Media was the "DJ"
+First two on the menu: **System Info** (host date/time + machine status) and **Media** (the Orpheus
+media server — find music and video by voice and play them on any Orpheus player; the DJ). *Media was the "DJ"
 skill, built on Navidrome, until 2026-09-15 — see Skill 2.*
 
 Status: **mostly not built.** The date/time half of System Info shipped early (2026-08-17) without
@@ -77,11 +86,11 @@ build_messages(+ tools)  →  stream
 
 Constraints this must respect, all of which already have hard-won reasons:
 
-- **`boundary_note` stays last.** It is deliberately appended after `post_history_instructions`, and
-  `kobold.chat_generate_stream` re-appends it on each auto-continue round so `"Continue."` can't
-  demote it. The second pass is another round — it must re-append too, or the physical boundary
-  silently drops out of exactly the turns that ran a skill. See `RELATIONSHIP_PLAN.md`.
-- **Only the final visible reply** gets classified for emotion / mood / relationship / memory. Tool
+- **The trailing system note stays last.** It is deliberately appended after
+  `post_history_instructions`, and `kobold.chat_generate_stream` re-appends the trailing system turn
+  on each auto-continue round. The second pass is another round — it must re-append too, or the
+  reply-format rules silently drop out of exactly the turns that ran a skill.
+- **Only the final visible reply** gets classified for emotion / mood / memory. Tool
   round-trips are not conversation and must not move the relationship axes or land in memory.
 - **The frontend must not render the intermediate pass.** The SSE stream should emit a distinct event
   (e.g. `skill`) so the UI can show "🎵 searching the library…" instead of leaking a tool-call blob
@@ -295,7 +304,7 @@ already verified above. The wake word (`applyWakeWord`) is unchanged.
   `compose.yaml`; assistant-mode date/time injected as a trailing system message in
   `prompt_builder.build_messages`. No skill machinery involved.
 - **Phase 0b — skill scaffolding.** `CharacterCard.skills`, a skill registry, the two-pass tool loop
-  in `chat()` with `boundary_note` re-appended, an SSE `skill` event, and tool schemas counted
+  in `chat()` with the trailing note re-appended, an SSE `skill` event, and tool schemas counted
   against the prompt budget. **Nothing has been built here yet** — this is the real first
   implementation step, and Phase 2 depends on it.
 - **Phase 1 — System Info.** Now just `get_system_status` over read-only bind mounts. Still worth
@@ -353,7 +362,7 @@ the same reasoning that killed the hardcoded admin password applies here, harder
 - `prompt_builder.build_messages` — tools ride alongside, not inside, the system block.
 - `PROMPT_BUDGET.md` — tool schemas are a new fixed cost on every turn; add them to the table.
 - `AppSettings` + `GET/PUT /api/settings` — Orpheus server ID, URL, device token, default player, and
-  per-skill toggles.
+  per-skill toggles (shown to users as what is on each bartender's menu).
 - `Ctx` — per-user isolation for skill config, same as every other data route.
 - The `piper:` TTS backend is the precedent for a **pluggable provider behind one interface**; the
   library provider and playback sink should follow it.

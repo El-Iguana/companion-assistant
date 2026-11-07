@@ -2,7 +2,7 @@
 pills, and the 3:4 portrait grid of your characters.
 
 Clicking a card opens its profile (ui/profile.py), as on Ember — a card is never a
-one-click chat, because which greeting, persona or scenario to start with is the
+one-click chat, because which greeting or persona to start with is the
 decision the profile is for. The corner pill is the shortcut: **Continue →** the latest
 chat, or **Chat →** a fresh one for someone you have not talked to yet.
 
@@ -26,9 +26,7 @@ def _card_html(c: dict) -> str:
            f'<span class="pt-card-letter">{esc((c["name"] or "?")[:1].upper())}</span>')
     pill = ("Continue →", "continue") if c.get("latest_chat") else ("Chat →", "new")
     meta = [f'{c["chats"]} chat{"s" if c["chats"] != 1 else ""}' if c.get("chats") else "new"]
-    if c.get("mode") == "assistant":
-        meta.append('<span class="pt-tag">assistant</span>')
-    elif c.get("tags"):
+    if c.get("tags"):
         meta.append(f'<span class="pt-tag">{esc(c["tags"][0])}</span>')
     return (
         f'<article class="pt-card" data-open="{esc(c["id"])}" tabindex="0" '
@@ -84,14 +82,15 @@ class DiscoverView:
         if not chars:
             self.root.innerHTML = (
                 '<div class="pt-page"><section class="pt-hero">'
-                '<div class="pt-kicker">Your cast is empty</div>'
-                '<h1 class="pt-h1 big">Make someone. <em>They\'ll remember you.</em></h1>'
-                '<p class="pt-lead">Write a character in the studio, or import a V2/V3 card '
-                'from SillyTavern or Chub.</p>'
+                '<div class="pt-kicker">No staff yet</div>'
+                '<h1 class="pt-h1 big">Pull up a stool. <em>What\'ll it be?</em></h1>'
+                '<p class="pt-lead">No staff yet — hire your first bartender: write one in the '
+                'studio, or import a V2/V3 card from SillyTavern or Chub.</p>'
                 '<div class="pt-hero-btns"><a class="pt-btn primary" href="#/create">'
-                '<i class="mdi mdi-plus"></i>Create one</a></div></section></div>')
+                '<i class="mdi mdi-account-plus-outline"></i>Hire</a></div></section></div>')
             return
         n_chats = sum(c.get("chats", 0) for c in chars)
+        on_shift = next((c for c in chars if c["id"] == shell.get("on_shift")), None)
         tags: dict[str, int] = {}
         for c in chars:
             for t in c.get("tags") or []:
@@ -103,21 +102,21 @@ class DiscoverView:
         self.root.innerHTML = (
             '<div class="pt-page">'
             '<section class="pt-hero">'
-            f'<div class="pt-kicker">{len(chars)} character{"s" if len(chars) != 1 else ""} · long memory</div>'
-            '<h1 class="pt-h1 big">Pick someone. <em>They\'ll remember you.</em></h1>'
-            '<p class="pt-lead">Talk for five minutes or five months — they pick up where you '
-            'left off, and what you mean to each other grows with every chat.</p>'
+            + (f'<div class="pt-kicker">On shift: {esc(on_shift["name"])}</div>' if on_shift else "")
+            + '<h1 class="pt-h1 big">Pull up a stool. <em>What\'ll it be?</em></h1>'
+            '<p class="pt-lead">Say the name of whoever is on shift, or just start talking. They '
+            'keep your standing orders and pick up where you left off.</p>'
             '<div class="pt-hero-btns">'
-            '<button class="pt-btn primary" data-act="browse"><i class="mdi mdi-cards-outline"></i>Browse your cast</button>'
-            '<a class="pt-btn" href="#/create"><i class="mdi mdi-plus"></i>Create one</a>'
+            '<button class="pt-btn primary" data-act="browse"><i class="mdi mdi-glass-cocktail"></i>See the staff</button>'
+            '<a class="pt-btn" href="#/create"><i class="mdi mdi-account-plus-outline"></i>Hire</a>'
             '<button class="pt-btn" data-act="surprise"><i class="mdi mdi-shuffle-variant"></i>Surprise me</button>'
             '</div>'
             '<div class="pt-hero-stats">'
-            f'<span><b>{len(chars)}</b> characters</span><span><b>{n_chats}</b> conversations</span>'
+            f'<span><b>{len(chars)}</b> on staff</span><span><b>{n_chats}</b> conversations</span>'
             f'<span><b>{len(shell.get("personas") or [])}</b> personas</span>'
             '</div></section>'
             + self._continue_rail(recent)
-            + '<div class="pt-section-h" id="dc-cast"><h2>Your cast</h2>'
+            + '<div class="pt-section-h" id="dc-cast"><h2>The staff</h2>'
             f'<span id="dc-count"></span></div>'
             f'<div class="pt-pills">{pills}</div>'
             '<div class="pt-grid" id="dc-grid"></div>'
@@ -165,11 +164,11 @@ class DiscoverView:
         count = self.root.querySelector("#dc-count")
         if count:
             count.textContent = (f"{len(shown)} of {len(chars)}" if len(shown) != len(chars)
-                                 else f"{len(chars)} character{'s' if len(chars) != 1 else ''}")
+                                 else f"{len(chars)} on staff")
         grid.innerHTML = "".join(_card_html(c) for c in shown) or (
             '<div class="pt-empty" style="grid-column:1/-1">'
             '<div class="pt-empty-ico"><i class="mdi mdi-magnify"></i></div>'
-            'No characters match. Try another search — or <a href="#/create">create one</a>.</div>')
+            'Nobody on the staff matches. Try another search — or <a href="#/create">hire someone</a>.</div>')
 
     # --- events ----------------------------------------------------------------
     def _on_click(self, ev) -> None:

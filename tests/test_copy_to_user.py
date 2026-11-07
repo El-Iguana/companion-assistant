@@ -1,4 +1,4 @@
-"""Admin: copy characters, personas and presets into another user's library
+"""Admin: copy characters and personas into another user's library
 (``main.copy_to_user``), and the VRM delete guard that now checks every library.
 
     .venv/bin/python -m pytest -q tests/test_copy_to_user.py
@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
 import main  # noqa: E402
-from models.schema import CharacterCard, Persona, RelationshipPreset, User  # noqa: E402
+from models.schema import CharacterCard, Persona, User  # noqa: E402
 from services import auth  # noqa: E402
 
 
@@ -76,22 +76,10 @@ def test_persona_copy_is_never_the_targets_default(admin, other):
     assert copy.name == "Captain" and copy.image == "UE5H" and copy.is_default is False
 
 
-def test_preset_pairing_follows_copies_or_is_cleared(admin, other):
-    cur = main._ctx_for(admin)
-    card, persona = _card(admin), Persona(name="Me")
-    main._save(persona, cur.personas)
-    preset = RelationshipPreset(name="Tavern", character_id=card.id, persona_id=persona.id, trust=40)
-    main._save(preset, cur.presets)
-
-    # paired character copied alongside -> pairing points at the copy; persona not copied -> cleared
-    r = run(main.copy_to_user(other.id, {"items": [{"kind": "preset", "id": preset.id},
-                                                   {"kind": "character", "id": card.id}]}, admin))
-    ids = {c["kind"]: c for c in r["copied"]}
-    copy = main._load(main._ctx_for(other).presets, ids["preset"]["id"], RelationshipPreset)
-    assert copy.character_id == ids["character"]["id"]
-    assert copy.persona_id == ""
-    assert copy.trust == 40
-    assert "pairing cleared" in ids["preset"]["note"]
+def test_presets_are_not_a_copy_kind(admin, other):
+    with pytest.raises(HTTPException) as e:
+        run(main.copy_to_user(other.id, {"items": [{"kind": "preset", "id": "x"}]}, admin))
+    assert e.value.status_code == 400
 
 
 def test_refusals(admin, other):

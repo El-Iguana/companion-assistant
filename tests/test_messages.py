@@ -1,6 +1,6 @@
 """Edit / delete / truncate one message (main.py) — and that they keep the two position
-indices that memory folding depends on consistent: the rolling summary's
-``last_summarized_index`` and the pairing store's ``swept_sessions[id]``.
+indices that memory folding depends on consistent: the chat's
+``last_summarized_index`` and the pairing's assistant memory's ``swept_sessions[id]``.
 
     .venv/bin/python -m pytest -q tests/test_messages.py
 
@@ -50,9 +50,9 @@ def chat(cur):
     s.memory.last_summarized_index = 4
     s.memory.summary = "they talked"
     main._save(s, cur.sessions)
-    mem = main._load_character_memory(cur, card.id, s.persona_id)
+    mem = main._load_assistant_memory(cur, card.id, s.persona_id)
     mem.swept_sessions[s.id] = 5
-    main._save_character_memory(cur, mem)
+    main._save_assistant_memory(cur, mem)
     return s
 
 
@@ -61,7 +61,7 @@ def _reload(cur, s):
 
 
 def _mark(cur, s):
-    return main._load_character_memory(cur, s.character_id, s.persona_id).swept_sessions.get(s.id)
+    return main._load_assistant_memory(cur, s.character_id, s.persona_id).swept_sessions.get(s.id)
 
 
 def test_edit_user_message(cur, chat):

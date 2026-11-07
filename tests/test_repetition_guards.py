@@ -45,8 +45,8 @@ def test_another_take_quotes_the_take_it_replaces(cur, session, model, monkeypat
     first, retake = prompts[0][0][-1]["content"], prompts[1][0][-1]["content"]
     assert "another take" not in first
     assert "another take" in retake and "Iris laughs and pours the tea." in retake
-    assert retake.rstrip().endswith(prompt_builder.focus_note("Tea?", "Iris", main._default_persona(cur).name,
-                                                              False).rstrip())   # focus stays last
+    assert retake.rstrip().endswith(prompt_builder.focus_note("Tea?", "Iris", main._default_persona(cur).name
+                                                              ).rstrip())   # focus stays last
     assert prompts[1][1]["dry_multiplier"] == 0.8
 
 

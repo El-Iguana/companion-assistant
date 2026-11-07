@@ -79,10 +79,16 @@ class Shell:
             "id": c.id, "name": c.name, "tagline": tagline(c), "tags": list(c.tags or [])[:6],
             "has_portrait": has_portrait(c),
             "chats": chats_per_card.get(c.id, 0), "latest_chat": resume_per_card.get(c.id, ""),
-            "mode": c.chat_mode,
             "updated_at": c.updated_at,
         } for c in sorted(cards, key=lambda c: c.name.lower())]
         settings = main._load_settings(cur)
+        # Who is on shift: the desktop's chosen card, else whoever you talked to last,
+        # else Mira (the seeded example), else the first card. Display only.
+        ids = {c.id for c in cards}
+        newest = next((s.character_id for s in sorted(sessions, key=lambda s: s.updated_at or "",
+                                                      reverse=True) if s.character_id in ids), "")
+        on_shift = next((x for x in (settings.desktop_card_id, newest, "mira") if x in ids),
+                        characters[0]["id"] if characters else "")
         return {
             "ok": True,
             "me": {"username": cur.user.username, "role": cur.user.role},
@@ -92,6 +98,7 @@ class Shell:
                         "has_portrait": bool(active.image)},
             "recent": recent,
             "characters": characters,
+            "on_shift": on_shift,
             "theme": settings.ui_theme if settings.ui_theme in THEMES else "bone",
         }
 
@@ -117,7 +124,7 @@ class Shell:
                 "id": s.id, "character_id": card.id, "character": card.name,
                 "has_portrait": has_portrait(card), "persona": persona.name if persona else "",
                 "preview": _preview(s), "updated_at": s.updated_at, "created_at": s.created_at,
-                "messages": len(s.messages), "scenario": s.relationship is not None,
+                "messages": len(s.messages),
             })
         return {"ok": True, "chats": out}
 

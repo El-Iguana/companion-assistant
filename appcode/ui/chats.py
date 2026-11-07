@@ -56,12 +56,11 @@ class ChatsView:
         for c in shown:
             url = portrait_url(c["character_id"]) if c.get("has_portrait") else ""
             who = c["character"] + (f" · {c['persona']}" if c.get("persona") else "")
-            badge = '<span class="pt-tag">scenario</span>' if c.get("scenario") else ""
             sure = self.sure == c["id"]
             rows.append(
                 f'<a class="pt-crow" href="#/chat/{esc(c["id"])}">'
                 + avatar_html(c["character"], url, 44)
-                + f'<span class="pt-crow-txt"><span class="pt-crow-name">{esc(who)} {badge}</span>'
+                + f'<span class="pt-crow-txt"><span class="pt-crow-name">{esc(who)}</span>'
                 f'<span class="pt-crow-sub">{esc(c.get("preview") or "No messages yet")}</span></span>'
                 f'<span class="pt-crow-meta">{esc(ago(c.get("updated_at", "")))}<br>'
                 f'{c["messages"]} message{"s" if c["messages"] != 1 else ""}</span>'
@@ -69,7 +68,7 @@ class ChatsView:
                 f'title="Delete this chat">{"Sure?" if sure else "×"}</button></a>')
         self.root.querySelector("#cl-list").innerHTML = "".join(rows) or (
             '<div class="pt-empty"><div class="pt-empty-ico"><i class="mdi mdi-forum-outline"></i></div>'
-            + ("Nothing matches." if q else 'No chats yet — <a href="#/discover">start one from Discover</a>.')
+            + ("Nothing matches." if q else 'No chats yet — <a href="#/discover">pick someone from the Staff</a>.')
             + '</div>')
 
     def _on_click(self, ev) -> None:

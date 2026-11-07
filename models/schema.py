@@ -1,8 +1,12 @@
-"""Companion data model.
+"""Assistant data model.
 
 Character cards follow the Character Card V2/V3 spec (the SillyTavern / Chub
 ecosystem) so cards can be imported/exported losslessly. See services/card_io.py
 for the PNG-embedded (tEXt `chara` / `ccv3`) import + export.
+
+Pydantic ignores unknown fields, so JSON written by the roleplay app this repo was
+split from (chat_mode, power_dynamic, a session's relationship, pending_milestone,
+allow_side_characters, ...) still loads; those fields are dropped on the next save.
 """
 from __future__ import annotations
 
@@ -10,11 +14,6 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime
-
-# The relationship models belong to Muninn's engine (muninn.models); re-exported
-# so every `from models.schema import Relationship` keeps working.
-from muninn.models import Relationship, RelationshipPreset  # noqa: F401
-from muninn.episodic import Moment  # noqa: E402
 
 
 def _uid() -> str:
@@ -75,23 +74,12 @@ class AppSettings(BaseModel):
         if v != 0 and v not in CONTEXT_SIZES:
             raise ValueError(f"must be 0 (Auto) or one of {', '.join(map(str, CONTEXT_SIZES))}")
         return v
-    # Long-term memory: rolling-summarizer tuning (services/memory.py).
-    summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-summarized turns pile up
+    # Assistant memory fold tuning (services/assistant_memory.py).
+    summarize_after: int = Field(24, ge=6, le=200)          # fold once this many un-folded turns pile up
     keep_recent: int = Field(12, ge=2, le=100)              # most recent turns always kept verbatim
-    summary_max_tokens: int = Field(400, ge=100, le=1200)   # token budget for the "Story so far" summary
-    # Semantic recall (muninn.embeddings + muninn.recall).
-    recall_enabled: bool = True                             # retrieve related past turns/facts per turn
-    recall_top_k: int = Field(4, ge=1, le=10)               # max retrieved snippets injected
-    # Story memory (services/memory.py): episodes + world details in their own index, and a
-    # scenario chat's own recall. Episodes cost one short model call per memory fold.
-    story_memory: bool = True
-    auto_facts_enabled: bool = True                         # extract durable facts into long-term memory
-    auto_facts_max_new: int = Field(3, ge=1, le=10)         # max facts extracted per fold
-    # Long-term consolidation (muninn.consolidate): folds append new bullets and an idle
-    # review deletes stale ones, instead of rewriting the whole memory every fold.
-    # On by default since its fold stopped seeing stored memory and its lines are filtered:
-    # clean 16/33 vs the rewrite's 9, missed 5 vs 6 (MEMORY.md, Consolidation).
-    longterm_consolidate: bool = True
+    summary_max_tokens: int = Field(400, ge=100, le=1200)   # token budget for one fold pass
+    auto_facts_enabled: bool = True                         # extract instructions + facts into memory
+    auto_facts_max_new: int = Field(3, ge=1, le=10)         # max entries extracted per fold
     # The pytincture page's colourway (Ember's palette): bone|ember|moss|dusk|harbor.
     # Per account rather than per browser, so it follows you; the old page ignores it.
     ui_theme: str = "bone"
@@ -126,7 +114,6 @@ class LorebookEntry(BaseModel):
     secondary_keys: List[str] = []
     constant: bool = False               # always injected, no key needed
     position: str = "before_char"        # before_char | after_char
-    min_stage: str = ""                  # gate: only injected at/above this relationship stage ("" = always)
     comment: str = ""
 
 
@@ -146,8 +133,6 @@ class CharacterCard(BaseModel):
     id: str = Field(default_factory=_uid)
     image: Optional[str] = None          # base64 PNG portrait (the card art)
     appearance: str = ""                 # visual prompt used to generate expression sprites
-    power_dynamic: float = 0.0           # -100 ({{user}} holds power) .. +100 (character holds power); |value| = caution
-    social_acceptance: float = 50.0      # 0 taboo/stigmatized .. 100 fully accepted (default context)
     tts_voice: str = ""                  # voice id: Kokoro ("af_sarah") or Piper ("piper:jarvis-medium"); "" = default
     tts_speed: float = Field(1.0, ge=0.5, le=1.5)  # speaking pace; 1.0 = the voice's own tempo, lower = slower
     expr_from_upload: bool = False       # derive expression sprites from the uploaded portrait (img2img) vs. txt2img
@@ -185,20 +170,14 @@ class CharacterCard(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
     # --- Character Card V2 spec fields ---
-    name: str = "Companion"
+    name: str = "Assistant"
     description: str = ""                 # persistent character definition
     personality: str = ""                # short personality summary
-    scenario: str = ""                   # current situation / setting
+    scenario: str = ""                   # background (spec field; injected as "Background:")
     first_mes: str = ""                  # opening greeting
     mes_example: str = ""                 # example dialogue (<START> blocks)
     creator_notes: str = ""
-    system_prompt: str = ""              # overrides default system prompt if set
-    chat_mode: str = "roleplay"          # "roleplay" (scene/world) | "assistant" (personality, no scene); picks the default system prompt
-    # Pronouns used when the app writes ABOUT the character — the relationship
-    # descriptor and boundary note. "she/her" | "he/him" | "they/them", or a custom
-    # "subject/object/possessive". Blank keeps she/her, which is what every card
-    # written before this field existed was silently getting.
-    pronouns: str = ""
+    system_prompt: str = ""              # overrides prompt_builder.DEFAULT_ASSISTANT if set
     post_history_instructions: str = ""  # injected after chat history (jailbreak/UJB)
     alternate_greetings: List[str] = []
     tags: List[str] = []
@@ -230,7 +209,7 @@ class Persona(BaseModel):
 # ---------------------------------------------------------------------------
 class ChatMessage(BaseModel):
     id: str = Field(default_factory=_uid)
-    role: str                            # "char" | "user" | "narrator" (a scene event, roleplay) | "system"
+    role: str                            # "char" | "user" | "system" ("narrator" only in sessions from the roleplay app; never prompted)
     content: str
     timestamp: str = Field(default_factory=_now)
     image: Optional[str] = None          # optional inline base64 PNG
@@ -241,10 +220,13 @@ class ChatMessage(BaseModel):
 
 
 class MemoryState(BaseModel):
-    """Long-term memory: a rolling summary plus pinned facts."""
-    summary: str = ""                    # rolling summary of older turns
+    """A chat's own memory: pinned facts plus how far the assistant fold has read.
+
+    `summary` is never written or injected here; it exists so a session copied from
+    the roleplay app keeps its recap until assistant_memory.fold() clears it."""
+    summary: str = ""                    # roleplay-era recap only; cleared by the fold
     pinned: List[str] = []               # author's-note style always-on facts
-    last_summarized_index: int = 0       # message index up to which summary covers
+    last_summarized_index: int = 0       # message index up to which memory has folded
 
 
 class MemoryFact(BaseModel):
@@ -260,35 +242,8 @@ class MemoryFact(BaseModel):
     created_at: str = Field(default_factory=_now)
 
 
-class CharacterMemory(BaseModel):
-    """Cross-session memory for one (character, persona) pairing.
-
-    The durable sibling of ChatSession.memory, deliberately NOT folded into it:
-    MemoryState is scoped to one chat and dies with it, this survives across all
-    chats in the pairing. Scoped exactly like Relationship (same {cid}__{pid}
-    file convention) — same character with a different persona is genuinely a
-    different history.
-
-    `swept_sessions` maps session_id -> the message index already folded in, so a
-    sweep is idempotent and a session that keeps growing can be swept repeatedly
-    without re-folding what it already covered.
-    """
-    character_id: str = ""
-    persona_id: str = ""
-    facts: List[MemoryFact] = []
-    summary: str = ""                    # cumulative history across every chat in this pairing
-    swept_sessions: Dict[str, int] = {}  # session_id -> message index folded into `summary`
-    reviewed_summary: str = ""         # `summary` as the last consolidation review left it
-    # Moments that moved the relationship (muninn.episodic): what {{user}} said and her
-    # line, recorded when one reply moves it sharply or a milestone fires. The "why"
-    # behind the relationship numbers; reviewable and removable in the Memory modal.
-    moments: List[Moment] = []
-    created_at: str = Field(default_factory=_now)
-    updated_at: str = Field(default_factory=_now)
-
-
 class AssistantMemory(BaseModel):
-    """Memory for a task-driven assistant. The deliberate sibling of CharacterMemory.
+    """Memory for a task-driven assistant.
 
     A companion remembers a *history*; an assistant must remember *how to behave*
     and *what is true*, and must not drift. So the two halves are stored apart:
@@ -319,10 +274,9 @@ class AssistantMemory(BaseModel):
 
 
 class MoodState(BaseModel):
-    """Running emotional state with inertia. Foundation for a relationship system."""
+    """Running emotional state with inertia; drives the sprite or the avatar's face."""
     valence: float = 0.0     # running positive/negative position, [-1, 1]
     mood: str = "neutral"    # current display emotion (drives the portrait); persists through neutral turns
-    # future: arousal, per-topic affinity, relationship/affection score
 
 
 class GenerationConfig(BaseModel):
@@ -352,12 +306,7 @@ class ChatSession(BaseModel):
     messages: List[ChatMessage] = []
     memory: MemoryState = Field(default_factory=MemoryState)
     mood: MoodState = Field(default_factory=MoodState)
-    relationship: Optional["Relationship"] = None   # session-scoped snapshot (scenario mode); else persistent file
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
-    pending_milestone: str = ""          # one-time beat injected into the next reply after a tier crossing
-    # Roleplay: may the narrator bring in and voice other people (a barkeep, a guard)?
-    # Off keeps the scene to {{char}} and {{user}}. Per chat; set from the roleplay bar.
-    allow_side_characters: bool = True
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 
@@ -365,19 +314,6 @@ class ChatSession(BaseModel):
 # ---------------------------------------------------------------------------
 # Backend connection settings
 # ---------------------------------------------------------------------------
-class SessionOptions(BaseModel):
-    """Per-chat options set from the chat page."""
-    session_id: str
-    allow_side_characters: Optional[bool] = None   # None = leave as is
-
-
-class SceneRequest(BaseModel):
-    """A narrator event or a draft of {{user}}'s reply (roleplay chats only)."""
-    session_id: str
-    direction: str = ""                  # optional: what should happen / what {{user}} wants to do
-    replace: bool = False                # narrate: re-roll the narration that is the last message
-
-
 class KoboldSettings(BaseModel):
     url: str = "http://koboldcpp:5001"
 
@@ -395,7 +331,3 @@ class ChatRequest(BaseModel):
     session_id: str
     input_text: str
     regenerate: bool = False             # re-roll the last char message (swipe)
-    continue_turn: bool = False          # roleplay: she takes a turn with no new user message
-                                         # (after a narrator event, or to carry the scene on)
-    direction: str = ""                  # the user's note on how this reply should go (Continue,
-                                         # Another take); guides the prompt, never saved as a message

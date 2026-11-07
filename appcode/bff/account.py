@@ -15,8 +15,7 @@ from pytincture.dataclass import backend_for_frontend
 # AppSettings fields the Settings screen edits. ``put_settings`` ignores unknown keys too.
 SETTINGS = (
     "disable_thinking", "context_limit", "summarize_after", "keep_recent", "summary_max_tokens",
-    "recall_enabled", "recall_top_k", "story_memory", "auto_facts_enabled", "auto_facts_max_new",
-    "longterm_consolidate",
+    "auto_facts_enabled", "auto_facts_max_new",
     "wake_word", "wake_mode", "sleep_phrase", "farewell", "sleep_after_s",
     "vad_silence_ms", "vad_threshold", "full_duplex", "desktop_card_id",
     "hands_free", "mic_device_id", "mic_device_label",
@@ -108,9 +107,9 @@ class Account:
         return await self._admin_call("reset_password", user_id or "", {"password": password or ""})
 
     async def copy_sources(self) -> dict:
-        """What the admin can copy to another user: their own characters, personas, presets."""
+        """What the admin can copy to another user: their own characters and personas."""
         import main
-        from models.schema import CharacterCard, Persona, RelationshipPreset
+        from models.schema import CharacterCard, Persona
 
         cur, err = self._admin()
         if err:
@@ -128,8 +127,7 @@ class Account:
             if c.tts_voice:
                 extras.append("voice")
             cards.append({"id": c.id, "name": c.name, "extras": " · ".join(extras)})
-        return {"ok": True, "character": cards, "persona": rows(cur.personas, Persona),
-                "preset": rows(cur.presets, RelationshipPreset)}
+        return {"ok": True, "character": cards, "persona": rows(cur.personas, Persona)}
 
     async def copy_to_user(self, user_id: str, items: list) -> dict:
         """Copy the chosen items into ``user_id``'s library (``main.copy_to_user``)."""

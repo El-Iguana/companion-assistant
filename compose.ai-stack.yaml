@@ -3,11 +3,11 @@
 #
 #   podman compose -f compose.yaml -f compose.ai-stack.yaml up -d
 #
-# `stack companion` does the same without compose (run-podman.sh), in a
-# container named "companion" — run one or the other, not both.
+# `stack companion-assistant` does the same without compose (run-podman.sh), in
+# a container named "companion-assistant" — run one or the other, not both.
 
 services:
-  pantheon:
+  companion-assistant:
     environment:
       KOBOLD_URL: http://koboldcpp:5001
       COMFYUI_URL: http://comfyui:8188

@@ -39,7 +39,7 @@ _VOICE = ("hands_free", "wake_word", "wake_mode", "sleep_phrase", "farewell", "s
 def _card_info(card) -> dict:
     from pantheon_web.present import has_portrait
 
-    return {"id": card.id, "name": card.name, "mode": card.chat_mode,
+    return {"id": card.id, "name": card.name,
             "updated_at": card.updated_at, "has_portrait": has_portrait(card),
             "expressions": sorted(card.expressions.keys()),
             "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
@@ -75,15 +75,14 @@ async def state(request: Request):
         "characters": [{"id": c.id, "name": c.name,
                         "avatar": bool(c.vrm) and c.avatar_mode == "vrm"} for c in cards],
         # Only what picking a chat needs: whose, and how recent.
-        "recent": [{"id": s.id, "character_id": s.character_id, "scenario": s.relationship is not None}
-                   for s in sessions[:50]],
+        "recent": [{"id": s.id, "character_id": s.character_id} for s in sessions[:50]],
         "settings": {k: settings.get(k) for k in _VOICE + ("desktop_card_id",)},
     }
 
 
 @router.post("/pdesk/open")
 async def open_chat(request: Request):
-    """Her most recent non-scenario chat, or a new one. Continuing rather than starting
+    """Her most recent chat, or a new one. Continuing rather than starting
     cold on every launch: a desktop companion that forgets each boot is worse."""
     import main
     from models.schema import CharacterCard, ChatSession
@@ -96,7 +95,7 @@ async def open_chat(request: Request):
     if card is None:
         raise HTTPException(status_code=404, detail="no such character")
     mine = sorted((s for s in main._list(cur.sessions, ChatSession)
-                   if s.character_id == cid and s.relationship is None),
+                   if s.character_id == cid),
                   key=lambda s: s.updated_at, reverse=True)
     session = mine[0] if mine else ChatSession(**await main.create_session({"character_id": cid}, cur=cur))
     last = next((m for m in reversed(session.messages) if m.role == "char"), None)
@@ -145,7 +144,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pantheon</title>
+<title>Cantinero</title>
 <link rel="stylesheet" href="/static/css/desktop.css">
 </head>
 <body>

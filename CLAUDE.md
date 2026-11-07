@@ -1,42 +1,73 @@
-# Pantheon — Project Context
+# Cantinero — Project Context
 
-The product name is **Pantheon** (formerly *La Cantina* — renamed 2026-08-27; the old name may still
-appear in older commits and notes). The project directory, image, container, and `stack` command all
-remain `companion` (renaming them was deliberately deferred).
+**Cantinero** — *El Iguana's bartender, at your service.* A self-hosted **voice assistant on
+character cards**: TTS (Kokoro / Piper / Orpheus) + STT (faster-whisper), hands-free with wake
+word and barge-in, a face from **expression sprites or a VRM avatar**, a **desktop shell**, and
+**assistant memory** (standing instructions, facts, task notes). FastAPI + uvicorn in a Podman
+container, talking to **KoboldCPP** (text) and **ComfyUI** (sprites) on the shared `ai-net`
+network. Everything local; no external services, no database.
 
-A self-hosted **character-card AI companion**. FastAPI + uvicorn, runs as a Podman container,
-talks to **KoboldCPP** (text) and **ComfyUI** (portraits/expressions) on the shared
-`ai-net` network. Everything local; no external services, no database.
+**Split from El-Iguana/companion on 2026-11-07.** This repo (`El-Iguana/companion-assistant`) was
+cloned with companion's full history and trimmed to the assistant half. The sibling `../companion`
+is the **RPG chat** (roleplay, relationships, narrator, story memory; no voice, VRM or desktop).
+The two are separate products now: fixes move between them by cherry-pick, if at all. Removed here:
+the `chat_mode` switch (every card is an assistant), the relationship system and presets/scenarios,
+the narrator / Continue / Write for me, the companion memory pipeline (rolling story summary,
+`CharacterMemory`, semantic recall, story memory) and the baked embedding model. JSON copied over
+from companion still loads (pydantic ignores the dropped fields; `narrator` messages are never
+prompted; a session's old `memory.summary` is never injected and the next fold clears it).
 
-Built around the **Character Card V2/V3 spec** (SillyTavern/Chub compatible). Scaffolded from
-`~/Development/ai_ecosystem/ai_story_maker` (reused `services/kobold.py` + `services/comfyui.py`).
-The page is **pytincture + wapyt** (Python in the browser, `appcode/`), laid out after
-Emberfolk (perchance.org/character-ai-ember); voice and the 3D avatar are two JavaScript islands
-(`static/js/voice.js`, `static/js/vtuber.mjs`). It replaced the vanilla-JS page on 2026-10-26 —
-plan and decision log in **`PYTINCTURE_PLAN.md`**.
+**Names.** The product name the user sees is **Cantinero** (it was Pantheon, and *La Cantina*
+before that). Repo, image, container and `stack` name are **`companion-assistant`**, port **7867**.
+**Internal identifiers still say pantheon** — `PANTHEON_*` env vars, the `pantheon_web` package,
+`appcode/pantheon.py` and its `Pantheon` class / `APP_ENTRYPOINT`, the `/pantheon` URL path,
+`/pmedia` `/pdesk` `/pstatic`, `window.PantheonVoice`, the compose `pantheon-koboldcpp` image,
+`COMPANION_ADMIN_PASSWORD`, `pantheon.css`, the desktop shell's file names and D-Bus ids.
+Renaming them is deliberately deferred; don't half-rename.
 
-Companion features layered on top: streaming chat, swipes, transparent expression sprites with a
-live-swapping portrait, a running **mood/valence**, and a **relationship system** (multi-axis +
-intimacy/consent). Relationship design detail in `RELATIONSHIP_PLAN.md`.
+### Vocabulary (user-facing copy)
+
+| the UI and help say | the code says |
+|---|---|
+| **the Staff** — the library of assistant cards; each card is a **bartender**. Creating one is **Hire** | characters, `CharacterCard`, `cards` |
+| **on shift** — the bartender you are talking to: the desktop's `desktop_card_id`, else whoever you talked to last, else Mira (`bff/shell.py` `on_shift`) | the active / most recent card |
+| **the Menu** — what the staff can do beyond talk; a skill is **on the menu**, enabling one is **adding it to the menu**. The DJ (Media via Orpheus) is on the menu (planned) | skills, `SKILLS_PLAN.md` |
+| **standing orders** (help text) | directives (`AssistantMemory.directives`) |
+
+Taglines: *"Pull up a stool. What'll it be?"* where the user is invited in (login, the Staff
+page's hero, the rail); *"El Iguana's bartender — at your service."* where the app is described
+(frontend.json, the image label, README, the Guide). Account and user management stay plain.
+Model-facing prompts and tool definitions don't use this vocabulary.
+
+**Mira** is the example bartender: `seed/characters/mira.json` (fixed id `mira`, Kokoro
+`af_sarah`, wake word "Mira", avatar `baseline.vrm`, the redistributable pixiv sample in
+`data/vrm/`). `main._seed_library()` copies her into a library only when it is created (first-run
+ADMIN, `create_user`), never again, so deleting her sticks. `_vrm_dir()` copies the bundled
+baseline into any library's `data/vrm/` that lacks it (once, `.baseline-seeded` marker). Her
+original model (Vita) is "Redistribution_Prohibited" and must never be bundled.
+
+The page is **pytincture + wapyt** (Python in the browser, `appcode/`), laid out after Emberfolk;
+voice and the 3D avatar are two JavaScript islands (`static/js/voice.js`, `static/js/vtuber.mjs`).
+Plan and decision log in **`PYTINCTURE_PLAN.md`**.
 
 ## Running
 
 ```bash
-./run-podman.sh              # build (first run) + start: http://127.0.0.1:7861/
+./run-podman.sh              # build (first run) + start: http://127.0.0.1:7867/
 ./run-podman.sh --rebuild    # REBUILD after ANY code/static change (baked into the image)
-# logs: podman logs -f companion ; stop: podman stop companion
+# logs: podman logs -f companion-assistant ; stop: podman stop companion-assistant
 ```
 
-**`http://<host>:7861/`, any device on the LAN, plain HTTP.** Pantheon is a local product for
+**`http://<host>:7867/`, any device on the LAN, plain HTTP.** Cantinero is a local product for
 whoever installs it; security against the LAN is not a goal. pytincture's
 `allow_development_auth_origin` mode signs users in over HTTP on whatever address the browser used,
 but answers 403 to non-loopback clients, so `service.LanAsLoopback` (outermost) presents every
-client as 127.0.0.1 — the spike. The container publishes `0.0.0.0:7861`; `localhost` is redirected
+client as 127.0.0.1 — the spike. The container publishes `0.0.0.0:7867`; `localhost` is redirected
 to `127.0.0.1` (`service.LocalhostRedirect`) so this computer keeps one sign-in. The microphone
-needs a secure context, so voice input works on this computer only. Accounts are Pantheon's own (`pantheon_web/auth.py` checks
+needs a secure context, so voice input works on this computer only. Accounts are the app's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
-The container runs **`service.py`**: `main` (Pantheon itself — accounts, data, clients, every
+The container runs **`service.py`**: `main` (the app itself — accounts, data, clients, every
 handler) plus the pytincture app, whose BFF classes call `main`'s handlers directly. `main.app`'s
 route table is **no longer served**; it stays as the handlers' contract and for the unit tests.
 `/desktop` is the desktop avatar's page (`pantheon_web/desktop.py`, below).
@@ -47,39 +78,40 @@ uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requi
     ~/Development/Pytinc/wa_pytincture_widgetset   # or git+https://github.com/WAwesome-AI/wa_pytincture_widgetset.git@<WAPYT_REF>
 uv pip install --python .venv/bin/python -e ../muninn                                 # the shared memory package
 PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
-PANTHEON_DATA_DIR=/tmp/pantheon-dev scripts/web-dev.sh start   # :7871 (PANTHEON_DEV_PORT), pidfile;
+PANTHEON_DATA_DIR=/tmp/cantinero-dev scripts/web-dev.sh start  # :7877 (PANTHEON_DEV_PORT), pidfile;
                                                                 # stop|restart|log; refuses the real data/
-PANTHEON_URL=http://127.0.0.1:7871 PANTHEON_USER=… PANTHEON_PASS=… \
+PANTHEON_URL=http://127.0.0.1:7877 PANTHEON_USER=… PANTHEON_PASS=… \
   CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \
   uv run --with playwright python tests/smoke_web.py      # every screen, fails on any console error
-.venv/bin/python -m pytest -q tests/test_messages.py tests/test_chat_stream.py tests/test_roleplay_scene.py
+.venv/bin/python -m pytest -q          # 63 tests; or e.g. tests/test_chat_stream.py tests/test_seed_and_legacy.py
 ```
 
 | var | default | what |
 |---|---|---|
-| `PANTHEON_PORT` | 7861 | listen port **and** the port in the address bar — publish it on the same number |
+| `PANTHEON_PORT` | 7867 | listen port **and** the port in the address bar — publish it on the same number |
 | `PANTHEON_BIND` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
 | `PANTHEON_DATA_DIR` | `./data` | another library (dev/test); read by `main.py` |
 | `KOBOLD_URL` / `COMFYUI_URL` | `http://koboldcpp:5001` / `http://comfyui:8188` | backends |
 | `ORPHEUS_URL` | `http://orpheus-tts:5005` | the stack's on-demand Orpheus TTS (expressive voice); absent → those voices aren't offered |
 
 Health: `GET /api/health` (public, `{"ok": true}`) — what `stack status` and the compose
-healthchecks probe. `stack companion` opens `http://localhost:7861/`, which redirects.
+healthchecks probe. `stack companion-assistant` opens `http://localhost:7867/`, which redirects.
 
 Prereqs: `~/Development/ai_ecosystem/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
 distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absolutereality_v181`) when both
-run. **Data (`data/…`) is a mounted volume**, so editing card/session/relationship JSON is live; **code
-is baked in — rebuild after edits.** `podman exec` needs `-i` to receive a stdin heredoc.
+run. **Data (`data/…`) is a mounted volume**, so editing card/session/memory JSON is live; **code
+is baked in — rebuild after edits.** It runs beside the RPG chat (`companion`, :7861); both share
+the backends. `podman exec` needs `-i` to receive a stdin heredoc.
 
 ### Installing elsewhere: compose (2026-09-26)
 
 **INSTALL.md** is the user guide: Windows/macOS/Linux, Docker or Podman. `run-podman.sh` (what
-`stack companion` runs) is unchanged and still the workstation path. Compose is for everyone else:
+`stack companion-assistant` runs) is unchanged and still the workstation path. Compose is for everyone else:
 
 | file | what |
 |---|---|
-| `compose.yaml` | container `pantheon`, `127.0.0.1:${PANTHEON_PORT:-7861}`, named volume `pantheon-data`, backends at `host.docker.internal` |
-| `compose.koboldcpp.yaml` | KoboldCPP container (`backends/koboldcpp/`, official CUDA binary) + `KOBOLD_URL=http://koboldcpp:5001` |
+| `compose.yaml` | service + container `companion-assistant`, `127.0.0.1:${PANTHEON_PORT:-7867}`, named volume `companion-assistant-data`, backends at `host.docker.internal` |
+| `compose.koboldcpp.yaml` | KoboldCPP container `companion-assistant-koboldcpp` (`backends/koboldcpp/`, official CUDA binary) + `KOBOLD_URL=http://koboldcpp:5001` |
 | `compose.gpu.docker.yaml` / `compose.gpu.podman.yaml` | its GPU: `deploy…devices` vs CDI `nvidia.com/gpu=all` + `label=disable` |
 | `compose.ai-stack.yaml` | join external `ai-net`, backends by name |
 | `compose.host-network.yaml` | standalone (not an override): Linux, backends on 127.0.0.1; uvicorn binds 127.0.0.1 itself |
@@ -114,7 +146,7 @@ Traps, all measured:
 
 | Container  | Network         | Address                         | Role         |
 |------------|-----------------|---------------------------------|--------------|
-| companion  | ai-net | `127.0.0.1:7861`                | this app      |
+| companion-assistant | ai-net | `127.0.0.1:7867`     | this app      |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
 | orpheus-tts | ai-net         | `orpheus-tts:5005`              | voice (on demand) |
@@ -122,28 +154,27 @@ Traps, all measured:
 ## File structure
 
 ```
-main.py                 # Pantheon: every handler + JSON file store (_save/_load/_list, relationship helpers);
+main.py                 # every handler + JSON file store (_save/_load/_list, memory helpers, _seed_library);
                         #   its FastAPI route table is not served (service.py is) — the BFFs call the handlers
 service.py              # the server: pytincture app + /pmedia + /desktop + /api/health; localhost -> 127.0.0.1
-run.py                  # dev launcher (service:app, autoreload, :7861)
+run.py                  # dev launcher (service:app, autoreload, :7867)
 models/schema.py        # Pydantic models (below)
 services/
   kobold.py             # KoboldCPP client. chat_generate_stream() = OpenAI SSE + auto-continue (2 rounds)
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
-  prompt_builder.py     # macros, system prompt, lorebook scan, injects relationship_note + date/time
+  prompt_builder.py     # macros, DEFAULT_ASSISTANT, lorebook scan, memory + date/time, the trailing note
   context.py            # the context window: muninn.context + this app's CONTEXT_SIZES
-  memory.py             # COMPANION memory: session summary + cross-session store + recall + auto-facts
-  assistant_memory.py   # ASSISTANT memory: directives + facts + task notes. Separate module, not a branch
+  memory.py             # what the assistant fold shares: needs_summary, the transcript, fold_chunks/budget
+  assistant_memory.py   # assistant memory: directives + facts + task notes (fold, extract, block)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`) + Orpheus (`orpheus:<name>`), text -> WAV, strips *action* narration
   orpheus.py            # Orpheus TTS client: load/release on the orpheus-tts service, prompt, SNAC ONNX decode (CPU)
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
-../muninn/              # SEPARATE REPO, shared with Rhapsode: context fit, fold passes, recall index + gate,
-                        #   fact dedupe, embeddings, emotion valence, the relationship engine + models
-                        #   (`from muninn import relationship`). PRIVATE repo (JotunheimPress/muninn), so
+../muninn/              # SEPARATE REPO, shared with companion and Rhapsode: context fit, fold passes (this app
+                        #   uses muninn.context + muninn.fold only; recall/relationship are companion's). PRIVATE repo (JotunheimPress/muninn), so
                         #   builds take the sibling checkout: run-podman.sh and compose.yaml both pass
                         #   ../muninn; MUNINN_REF in the Containerfile records the tested commit. Golden test
                         #   pins behaviour — see ../muninn/README.md and MEMORY_CORE_PLAN.md
@@ -164,22 +195,22 @@ tests/test_messages.py  # message edit/delete/truncate vs. the summary and sweep
 tests/test_chat_stream.py # chat stream keep-alive + the after-done memory job vs. concurrent turns/edits
 tests/test_context_budget.py # context window: backend probe, Settings clamp, history trim, fold budget
 tests/conftest.py       # stubs kobold.context_limit (8192) so no test probes a real backend
-scripts/web-dev.sh      # run Pantheon host-side against a scratch library
+scripts/web-dev.sh      # run the app host-side against a scratch library (:7877)
 scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
-data/u/<uid>/  characters/ personas/ sessions/ relationships/ presets/ settings/ memories/ assistant/  # per-user isolated library
+data/u/<uid>/  characters/ personas/ sessions/ settings/ assistant/  # per-user isolated library
+data/vrm/               # avatar models, shared by all users; baseline.vrm is tracked (Mira's)
+seed/characters/        # example cards put into every NEW library (mira.json); baked into the image
 models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
-models/embed/           # baked: bge-small-en-v1.5 int8 ONNX + tokenizer — semantic recall
-RELATIONSHIP.md         # relationship system reference — axes, ladder, boundary injection
-RELATIONSHIP_PLAN.md    # relationship system design + decision log (phases 1-3 done)
-MEMORY.md               # memory reference — BOTH pipelines, the layers, recall gate, auto-facts, the eval
-MEMORY_PLAN.md          # memory design + decision log (phases 1-6 done) + open questions
+models/snac/            # baked: SNAC 24 kHz decoder ONNX — Orpheus audio codes -> sound
+MEMORY.md               # memory reference — the assistant pipeline, its fold, injection, the eval
+MEMORY_PLAN.md          # memory design + decision log from before the split (companion phases are history)
 PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (steps 1+3 built)
-SKILLS_PLAN.md          # assistant skills via tool calling: System Info + Media via Orpheus (Phase 0 done)
-eval/                   # NOT baked into the image — `podman cp eval companion:/app/eval` to run
+SKILLS_PLAN.md          # the Menu (skills) via tool calling: System Info + Media via Orpheus (Phase 0 done)
+eval/                   # NOT baked into the image — `podman cp eval companion-assistant:/app/eval` to run
   assistant_memory/     # 5 labelled fixtures + runner + RESULTS.md (see MEMORY.md § The eval)
   assistant_replies/    # probe set for assistant reply style (narration, closing offers)
 ```
@@ -191,18 +222,18 @@ Login-gated, role-based, per-user isolated libraries.
   salt (`services/auth.py`, stdlib — no bcrypt dep). Roles: **`admin`** | **`user`**.
 - **Session**: pytincture's signed session cookie (key `data/auth/pytincture.key`), claims
   `user_id/username/role` (`AUTH_SESSION_CLAIM_KEYS`). Sign-in is pytincture's form (restyled by
-  `pantheon_web/login_page.py`) checking Pantheon's accounts through `AUTH_USER_AUTHENTICATOR =
+  `pantheon_web/login_page.py`) checking the app's accounts through `AUTH_USER_AUTHENTICATOR =
   pantheon_web.auth.authenticate`. **`ctx_for(claims)` re-reads the account on every call**, so a
   deleted or demoted user loses access at once. BFF calls carry pytincture's CSRF check; the plain
   `/pmedia` and `/pdesk` POSTs mirror it (`_require_csrf`, `X-CSRF-Token` from the CSRF cookie).
   (`services/auth.py`'s HMAC token, `data/auth/secret` and main's `current_user` belonged to the
   classic page's cookie and are unused by the page now.)
 - **Isolation**: every handler resolves a per-request **`Ctx`** → `data/u/<uid>/{characters,personas,
-  sessions,relationships,presets,settings}`. Users never see each other's data. (`_load/_save/_list` take
-  the Ctx's folder; relationship/settings/persona helpers take `cur`.)
+  sessions,settings,assistant}`. Users never see each other's data. (`_load/_save/_list` take
+  the Ctx's folder; settings/memory/persona helpers take `cur`.)
 - **Admin-only**: user CRUD + password reset (Settings → Users; `bff/account.py`); guards against deleting yourself or the last admin
   (deleting a user removes their whole `data/u/<uid>` library). Normal users manage only their own libraries.
-- **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** and moves any legacy flat
+- **Seed + migrate (first run)**: `_seed_and_migrate()` creates **ADMIN** (with Mira, `_seed_library`) and moves any legacy flat
   `data/<subdir>/*` into the admin's library so nothing is orphaned. The password comes from
   `COMPANION_ADMIN_PASSWORD` if set, else `_seed_password()` mints a random one and
   `_announce_seed_password()` prints a startup banner + writes `data/auth/INITIAL_PASSWORD` (0600) —
@@ -212,39 +243,30 @@ Login-gated, role-based, per-user isolated libraries.
 - **Frontend**: signed out, every page route goes to `/pantheon/login` (and `/desktop` returns to
   itself after sign-in via `session["return_to"]`); a BFF answer with `signed_out` sends the page
   there too (`ui.common.failed`). The rail foot shows the account and Sign out.
-- **Volume**: the whole `data/` is now a single mount (bind mount in `run-podman.sh`, the `pantheon-data` volume in `compose.yaml`) so `data/u`,
+- **Volume**: the whole `data/` is now a single mount (bind mount in `run-podman.sh`, the `companion-assistant-data` volume in `compose.yaml`) so `data/u`,
   `data/auth`, and per-user subdirs all persist — no more per-subdir mount list to keep in sync.
 
 ## Data model (models/schema.py)
 
-- **CharacterCard** — V2/V3 spec fields (`description`, `personality`, `scenario`, `first_mes`,
-  `mes_example`, `alternate_greetings`, `system_prompt`, `post_history_instructions`,
-  `character_book`, `tags`, `nickname`, …). Local: `image` (base64 portrait), `appearance` (sprite
-  prompt), `expressions` (emotion→base64), **`power_dynamic`** (−100…100), **`social_acceptance`** (0…100),
-  **`tts_voice`** (per-character voice — Kokoro id or `piper:<name>`), **`tts_speed`** (0.5–1.5 speaking
+- **CharacterCard** — V2/V3 spec fields (`description`, `personality`, `scenario` — shown and
+  injected as "Background", `first_mes`, `mes_example`, `alternate_greetings`, `system_prompt`,
+  `post_history_instructions`, `character_book`, `tags`, `nickname`, …). Local: `image` (base64
+  portrait), `appearance` (sprite prompt), `expressions` (emotion→base64),
+  **`tts_voice`** (Kokoro id, `piper:<name>` or `orpheus:<name>`), **`tts_speed`** (0.5–1.5 speaking
   pace, 1.0 = the voice's own tempo; Kokoro multiplier / inverse Piper `length_scale`),
+  **`wake_word` / `sleep_phrase` / `farewell`** (per card; blank = the global setting),
+  **`vrm` + `avatar_mode`** (`sprite` | `vrm`; a model stays assigned while showing sprites),
   **`portrait_source`** (`""` auto = portrait else neutral sprite | `image` | `sprite` + `portrait_sprite`
   | `vrm` = `vrm_still`, a PNG of the model rendered in the browser by `vtuber.mjs` `captureStill()`,
   taken from `vrm_still_of`) — the Studio's "Profile picture"; `present.portrait_b64()` is the one
   place that picks, so `/pmedia/card/{id}.png` and `has_portrait` follow it everywhere. A missing
   source falls back to auto. The Studio retakes the still on save when the assigned model changed.
-  **`chat_mode`** (`roleplay`|`assistant`) — picks the built-in
-  system prompt (`prompt_builder.DEFAULT_ROLEPLAY` scene/world vs `DEFAULT_ASSISTANT` personality-only, no
-  invented setting); a custom `system_prompt` overrides both. Editor: "Chat mode" select.
-  **`pronouns`** (`""`|`she/her`|`he/him`|`they/them`|`it/its`|custom `subject/object/possessive`) — used
-  where the app writes *about* the character: the relationship descriptor and boundary note. Parsed by
-  `relationship.Pronouns`, which also carries verb agreement (`they are`/`they turn`, not `they is`).
-  Blank = she/her, which is what every card written before the field existed was silently getting.
-  Assistant cards also get a trailing **`ASSISTANT_FORMAT_NOTE`** after the history — the system
+  Every card gets **`DEFAULT_ASSISTANT`** (no invented setting; a custom `system_prompt` replaces it)
+  and a trailing **`ASSISTANT_FORMAT_NOTE`** after the history — the system
   block loses to the transcript, and a session whose history already contains narrated replies keeps
   producing them however firmly the system prompt forbids it (measured on a live 139-message session:
   3/6 replies narrated without the note, 0/6 with). It names the transcript's style as a habit to
-  ignore, which is the part that works. `memory.summarize()` is mode-aware for the same reason — the
-  roleplay prompt's "third person, present tense" prose was being injected as "Story so far:" and read
-  as a worked example of narrating; assistants get notes, labelled "Notes from earlier in this
-  conversation". Roleplay summaries are past-tense notes too (2026-10-28): the prose version read as
-  a recap to imitate. They end in a `Where things stand:` line, and the card's scenario is labelled
-  "Opening premise", so long chats stop getting pulled back to the first scene.
+  ignore, which is the part that works.
   **Everything after the history is one system message ending in `focus_note()`**, which quotes the
   latest user message back. Four separate trailing blocks used to sit between the user's line and the
   reply, and the model answered them instead (measured: unprompted date/time in 7/15 assistant
@@ -257,29 +279,21 @@ Login-gated, role-based, per-user isolated libraries.
   the strip took it to 1/15 (`eval/assistant_replies/`). Clarification questions survive; only
   "anything else?" forms are removed.
   **`DEFAULT_ASSISTANT` composes for the ear** — spoken prose, no markdown/tables/lists, numbers as
-  words — because assistant replies are spoken. A custom `system_prompt` drops that too; say it there.
+  words — because replies are spoken. A custom `system_prompt` drops that too; say it there.
+  Lorebook entries are kept (keyed injection is useful for an assistant's reference notes); their
+  old `min_stage` relationship gate is gone and the Studio drops it on save.
 - **Persona** — the `{{user}}` card (`name`, `title`/role, `description`, `background`, `image`, `is_default`);
   role+background injected as "About {{user}}". Sidebar has a personas list + editor; one active (default) at a time.
 - **ChatMessage** — `role`, `content`, `expression`, `swipes[]`, `swipe_index`, `swipe_expressions[]`.
 - **MoodState** — running `valence` (−1…1) + `mood` label (session-level, short-term).
-- **Relationship** — persistent per (character, persona): axes `affection/trust/attraction/tension`,
-  `emotional_intimacy`, `physical_willingness`, optional `power_dynamic`/`social_acceptance` overrides,
-  `milestones`.
-- **AssistantMemory** — the assistant-mode store, `data/u/<uid>/assistant/{cid}__{pid}.json`.
+- **AssistantMemory** — the memory store, `data/u/<uid>/assistant/{cid}__{pid}.json`.
   `directives[]` (standing instructions, OBEYED), `facts[]` (things known), `notes[]` (terse task
   state, rewritten whole each fold), `swept_sessions`. **No summary, no relationship, no scene.**
-  Served by `services/assistant_memory.py`, a separate module and not a branch in `memory.py` — every
-  leak found so far was roleplay framing reaching an assistant through a shared path that forgot to
-  branch, and a branch is a place the next feature forgets. Injection puts directives FIRST and never
-  truncates them. **→ `MEMORY.md` for the mechanics, `MEMORY_PLAN.md` Phase 6 for why.**
-- **CharacterMemory** — persistent per (character, persona), like Relationship: `facts[]`
-  (`MemoryFact{text, origin: user|auto}`), `summary` (cumulative across every chat in the pairing),
-  `swept_sessions` (session_id -> message index already folded, so sweeps are idempotent). Injected as
-  "What {{char}} remembers about {{user}}"; **not** used in scenario sessions. **→ `MEMORY.md`.**
-- **ChatSession** — `messages`, `memory` (MemoryState), `mood` (MoodState), `generation`
-  (GenerationConfig, `max_tokens=220`), `pending_milestone`, optional session-scoped `relationship`
-  (scenario mode), `character_id`, `persona_id`.
-  (Lorebook entries carry `min_stage` for stage-gating.)
+  Served by `services/assistant_memory.py`. Injection puts directives FIRST and never truncates
+  them. **→ `MEMORY.md` for the mechanics, `MEMORY_PLAN.md` Phase 6 for why.**
+- **ChatSession** — `messages`, `memory` (MemoryState: `pinned` facts, `last_summarized_index` =
+  how far the fold has read; `summary` only survives from companion-era sessions), `mood`
+  (MoodState), `generation` (GenerationConfig, `max_tokens=220`), `character_id`, `persona_id`.
 
 ## What the server answers
 
@@ -303,12 +317,12 @@ tests use them; nothing listens on them. User management requires admin (403).
 ```
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
-POST /api/users/{id}/copy                  ADMIN: clone characters/personas/presets from your library into theirs
-                                           (new ids; sprites/portrait/voice/VRM ride along; preset pairings remap or clear)
+POST /api/users/{id}/copy                  ADMIN: clone characters/personas from your library into theirs
+                                           (new ids; sprites/portrait/voice/VRM ride along)
 GET  /api/status                           KoboldCPP {online, version, model, context}
 POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
-GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, context_limit, memory + recall)
+GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, context_limit, memory fold)
 # cards
 GET/POST /api/cards                        list (trimmed, +has_expressions) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
@@ -322,75 +336,31 @@ GET  /api/cards/{id}/expressions           labels the card has sprites for
 GET/POST/DELETE /api/cards/{id}/expression/{emotion}   serve PNG / regen one / delete one
 # personas
 GET/POST /api/personas ; PUT/DELETE /api/personas/{id}
-GET/POST /api/presets ; GET/PUT/DELETE /api/presets/{id}   relationship presets (scenario seeds)
-# relationship (per character+persona)
-GET  /api/relationship?character_id=&persona_id=     summary (axes, stage, intimacy) + effective power/social + context_overridden
-PUT  /api/relationship                     override context {power_dynamic, social_acceptance} (null clears -> card default)
 # sessions + chat
-GET/PUT /api/memories?character_id=&persona_id=   cross-session memory (facts[] + history); facts round-trip by id
+GET/PUT /api/sessions/{id}/memory          this chat's pinned facts
 GET/PUT /api/assistant-memory?character_id=&persona_id=   assistant store (directives[] + facts[] + notes[]); round-trip by id
-POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into long-term memory (idempotent)
-GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?, preset_id?, mode?})
+POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into assistant memory (idempotent)
+GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?})
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
 PUT    /api/sessions/{id}/messages/{mid}            edit one message (a reply: the swipe shown)
 DELETE /api/sessions/{id}/messages/{mid}            delete one (not the greeting)
 POST   /api/sessions/{id}/messages/{mid}/truncate   drop everything after it ("Save & resend")
        — all three keep memory.last_summarized_index and the pairing's swept_sessions mark
-         consistent; a truncate below the summary resets it, like clearing (tests/test_messages.py)
-POST /api/chat                             SSE stream; done carries {expression, mood, valence, relationship, milestones}
-                                           continue_turn: roleplay Continue — her turn with no new user message
-                                           direction: the user's note for Continue / Another take (never saved)
-PUT  /api/sessions/{id}/options            per-chat options: {allow_side_characters}
-POST /api/narrate                          roleplay: SSE narrator event, saved as a role "narrator" message
-                                           ({session_id, direction?, replace?} — replace re-rolls a trailing narration)
-POST /api/draft                            roleplay: SSE draft of {{user}}'s next message for the composer; never saved
+         consistent; a truncate below the fold mark resets it, like clearing (tests/test_messages.py)
+POST /api/chat                             SSE stream; done carries {message_id, expression, mood, valence}
 ```
 
 ## How it works
 
-- **Chat:** `build_messages()` assembles system (default/card system prompt + persona + **relationship
-  descriptor** + lorebook + memory) → history → `post_history_instructions` → date/time (assistant
-  mode only) → **boundary note** (always last); streams via
-  `kobold.chat_generate_stream()`. System prompt enforces a **single concrete beat**, no repetition, no
-  writing for {{user}}; a stop-sequence on the user's turn is added. After the reply: classify emotion,
-  update mood + relationship (skipped on re-rolls), save, send `done` — then memory maintenance in the
-  background (`_memory_job`, see Conventions).
-- **Narrator / Continue / Write for me (roleplay only; assistant chats get a 400 and no buttons):**
-  the bar above the composer. *Narrate* streams a neutral scene beat (`build_narrator_messages`:
-  its own short prompt — the scene as a labelled transcript in one user turn, rules restated
-  last). **The narrator is a game master** (2026-10-30): it runs the world and voices every
-  side character — anyone but {{char}} and {{user}} — in quotation marks, in their own voice,
-  and sees the card's triggered lorebook entries ("World notes", stage-gated like her prompt;
-  `main._scene_stage`) so a card's NPCs speak as written. Measured on Rocinante, tavern scene
-  with an innkeeper in the lorebook: side-character dialogue 0/8 before → 12/12 after, her or
-  {{user}} written 0 both times. **What actually unlocked it was dropping the `"\n\n"` stop**:
-  the NPC's line opens its own paragraph, so the stop cut it every time (wording alone got
-  1–2/12). That stop existed because past a blank line the narrator used to carry on as her;
-  `prompt_builder.trim_narration()` now does that job — at most 3 paragraphs, cut at the first
-  later one that starts with her/{{user}}'s name or has one of them speaking or acting. The
-  narration is saved as `role="narrator"` onto a fresh load, so an edit made meanwhile isn't rolled back;
-  text typed in the box steers it. In her prompt a narration is a `[Narrator] …` **system**
-  turn (as a user turn she took it for {{user}}'s words) and the trailing note becomes
-  `roleplay_turn_note`: react to the event, or — Continue, she spoke last — carry the scene on.
-  *Continue* is `chat(continue_turn=True)`: no user message is appended; mood, relationship and
-  memory run as for any reply. *Write for me* (`build_draft_messages`) streams {{user}}'s reply
-  into the composer in their own style; nothing is saved. Narrations never touch mood,
-  relationship or sprites; memory transcripts label them `Narrator:`. "Another take" on a reply
-  is withheld while a narration is the last message (the re-roll would answer the narration);
-  a trailing narration has its own Another take. `_keepalive()` wraps all three streams.
-  **Your note guides every voice (2026-11-06):** text typed in the box before Narrate, "{name}
-  continues/responds" or Write for me steers that piece, and with text in the box "Another
-  take" on her last reply or the last narration becomes **"Rewrite with your note"**. For her
-  turns the note travels as `ChatRequest.direction` → `prompt_builder.direction_note()`, an
-  out-of-character line in the trailing block placed **before the boundary note**, so it steers
-  the scene and never widens what she'll do; it is never saved as a message, and a stopped or
-  failed turn puts it back in the box. **"Side characters"** (checkbox in the bar,
-  `ChatSession.allow_side_characters`, default on, `PUT /api/sessions/{id}/options`): off gives
-  the narrator `NARRATOR_SYSTEM_ALONE` (nobody but the two of them, no dialogue), and
-  `prompt_builder.strip_dialogue()` drops any sentence with quoted speech that gets through, in
-  code, since a prompt rule alone is a request. `_save_turn` keeps the stored option, so a box
-  ticked while a reply streams stays ticked. Not yet measured on a live model.
+- **Chat:** `build_messages()` assembles system (card system prompt or `DEFAULT_ASSISTANT` + persona
+  + lorebook + character block + pinned facts + assistant memory + today's date) → history (`char`
+  and `user` messages only) → `post_history_instructions` → **one trailing note** (exact time when
+  asked, expression beats, `ASSISTANT_FORMAT_NOTE`, Orpheus voice tags, the retake note, then
+  `focus_note`); streams via `kobold.chat_generate_stream()`. A stop sequence on the user's turn is
+  added. After the reply: strip bare labels, the courtesy question and the closing offer; pick the
+  expression (inline tag, else classify when the card has sprites); update mood; save; send `done`
+  — then the memory fold in the background (`_memory_job`, see Conventions).
 - **Swipes:** alternates per message; each swipe's emotion cached in `swipe_expressions`. `▶` past the end regenerates.
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
 - **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;
@@ -428,52 +398,16 @@ POST /api/draft                            roleplay: SSE draft of {{user}}'s nex
   at ~85 s) — Core 8 in 402 s, Full 28 ≈ 25 min — vs ~15 s for schnell img2img. Runs beside
   KoboldCPP (9.5 GB loaded) without OOM.
 - **Mood/valence:** per reply, `EMOTION_VALENCE` → running `session.mood` via EMA; **neutral holds**.
-  The emotion behind mood and the relationship is the sprite label when the card has sprites;
-  a roleplay card **without** sprites gets its own classify over `FULL_EMOTIONS` (the stored
-  message keeps no expression). Before 2026-10-29 the classifier only ran to pick a sprite, so
-  sprite-less cards never left Stranger (`tests/test_relationship_feel.py`).
-  Header mood meter shows it.
-- **Relationship (`muninn.relationship`):** per (character, persona), stored `data/relationships/{cid}__{pid}.json`.
-  Emotions move axes each reply (`RATE`); grows/drops, **no idle decay**. Stage derived (Stranger→Intimate,
-  romance gated on attraction; "(Strained)" at high tension). **Intimacy/consent:** `emotional_intimacy`
-  (capped by trust) + `physical_willingness` (gated by trust×attraction, `WRATE`, suppressed by tension) →
-  a **7-rung clinical ladder** (`PHYSICAL_TIERS`, cumulative, no cap). **Context** (`power_dynamic`,
-  `social_acceptance`; card default + per-relationship override) **slows pace & adds caution — never
-  compliance**; agency-preserving, consent enthusiastic/revocable. `descriptor()` injects all this into the character's prompt, in their own `pronouns`.
-  **Assistant-mode cards are outside the whole system** — `chat()` passes empty
-  `rel_note`/`boundary_note` (scene-and-feelings text under a "there is no scene" system prompt is
-  what had assistants narrating thoughts, gestures and self-description), skips `update()`/
-  `escalate()`/milestones entirely, and omits `relationship` from the done event; the frontend hides
-  the rel-strip for them. Their stored `{cid}__{pid}.json` is left intact, inert until the card is
-  switched back to roleplay.
-  **Boundary phrasing is load-bearing** — `_physical_clause()`/`boundary_note()` name the concrete acts
-  (`_TIER_ACTS`) and the FIRST refused rung, never just the abstract label. The old wording (`willing up
-  to "none" … engages at or below this`) was a null instruction at tier 0 and small models complied with
-  anything. `boundary_note()` is also re-injected as a **trailing system message after the history**
-  (`build_messages(boundary_note=…)`, placed after `post_history_instructions` so a card's UJB can't bury
-  it), and `kobold.chat_generate_stream` re-appends that trailing system turn on each auto-continue round
-  so `"Continue."` can't demote it. This is prompt steering, not a hard gate — an anti-refusal fine-tune
-  (the default `…-Uncensored-…-Aggressive` GGUF) still complies sometimes.
-  **Escalation:** once intimacy has begun and she's positively engaged, `classify_activity()` reads the act
-  depicted and `escalate()` nudges willingness toward the next rung (`ESC_RATE`; social acceptance modulates
-  pace, tension blocks it) — so doing acts gradually opens her further.
-  **Milestones** (`MILESTONES`/`newly_reached`): crossing a stage/tier fires a one-time toast + a one-time
-  beat injected next turn (`session.pending_milestone`), recorded so it never repeats. Lorebook entries can
-  be **stage-gated** (`LorebookEntry.min_stage`, filtered by `stage_rank`); context is **overridable per
-  relationship** (⚙ on rel-strip → `PUT /api/relationship`).
-- **Memory: `MEMORY.md` is the reference and `MEMORY_PLAN.md` the decision log — edit those, not this
-  bullet, when memory behaviour changes.** In outline: **two pipelines**, picked once per turn by
-  `chat_mode`, sharing no code path. *Companion* — per-session pinned facts + a rolling summary (folds
-  once ~24 turns accumulate, tunable in ⚙ Settings), cross-session `CharacterMemory` per (character,
-  persona) written by two triggers (the chat flow folds forward what the summary just absorbed;
-  `POST /sessions/{id}/sweep` on a 5-min idle timer folds a finished chat), plus margin-gated semantic
-  recall over an int8 BGE index, plus **story memory** (episodes + world details in a second
-  index with its own gate; scenario chats get their own pair, `memories/scene-*`). Deleting a
-  character or persona deletes its pairings' memories, indexes, assistant memory and
-  relationships (`_forget_pairings`). *Assistant* — `AssistantMemory`: directives, facts, task notes; no
-  summary, no recall. Both are budget-capped and drop oldest rather than truncating, both evict
-  auto-written entries before curated ones, and both are editable in the 📌 Memory modal, which
-  renders the assistant's different shape rather than a relabelled one.
+  Driven by the sprite label (or an inline `[expr:x]` tag), so a card without sprites keeps a
+  neutral mood. No header meter: the mood picks the sprite and the avatar's resting face.
+- **Memory: `MEMORY.md` is the reference.** One pipeline: `AssistantMemory` — directives, facts,
+  task notes, per (character, persona); plus this chat's pinned facts. When `summarize_after`
+  un-folded messages pile up, `_maintain_memory` folds all but `keep_recent` of them
+  (`assistant_memory.fold`: notes rewritten whole, directives/facts extracted from the user's turns
+  only) and moves `last_summarized_index`, so those turns leave the prompt. `POST
+  /sessions/{id}/sweep` on a 5-min idle timer folds a finished chat. No summary, no recall.
+  Budget-capped, oldest auto entries evicted first, editable in the chat's ⋮ → Memory modal.
+  Deleting a character or persona deletes its pairings' memory (`_forget_pairings`).
 - **Storage:** plain JSON under `data/`, UUID ids.
 
 ## Frontend map (appcode/ + the islands)
@@ -486,14 +420,14 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 
 | file | what |
 |---|---|
-| `pantheon.py` | the shell: 292 px rail (tile nav, Recent chats, Your characters, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Create), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
-| `ui/discover.py` · `ui/profile.py` | gallery home (search, tags, sort) · character profile modal (greetings, start / continue / scenario wizard) |
-| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, roleplay bar (Narrate / {name} continues·responds / Write for me) + narrator bubbles, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, mood + relationship in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
+| `pantheon.py` | the shell: 292 px rail (tile nav Staff/Hire/Chats/Personas/Settings, Recent chats, Staff with who is on shift, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Hire), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
+| `ui/discover.py` · `ui/profile.py` | the Staff page (route `discover`: hero with who is on shift, search, tags) · profile modal (greetings, start / continue, export, copy to user) |
+| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, persona + memory count in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
 | `ui/chats.py` | all chats |
-| `ui/studio.py` | the card editor: every V2/V3 field, greetings, starters, lorebook, power/social, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
-| `ui/people.py` | personas + presets |
+| `ui/studio.py` | the card editor ("Staff studio", route `create`): every V2/V3 field, greetings, starters, lorebook, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
+| `ui/people.py` | personas |
 | `ui/settings.py` | settings (model, memory, voice + microphone picker), password, users (admin), the guide |
-| `ui/memory.py` | the chat's Memory and Relationship-context modals |
+| `ui/memory.py` | the chat's Memory modal (pinned facts; instructions, facts, where things stand) |
 | `ui/common.py` | spawn, Listeners, Modal, toast/failed, csrf_token, avatar/portrait helpers |
 | `bff/*.py` | `shell`, `library`, `chat` (incl. the `@bff_stream` relay of `main.chat`), `studio`, `people`, `account`, `memory` |
 | `static/js/voice.js` | `window.PantheonVoice` + `pvoice:*` events (PYTINCTURE_PLAN.md, Phase 6) |
@@ -501,17 +435,13 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 
 ## Feature set (all built + verified)
 
-✅ Card V2/V3 import/export · ✅ streaming chat (single-beat, non-repetitive) · ✅ swipes + per-swipe
-emotions · ✅ rolling memory · ✅ **cross-session long-term memory** (per char+persona, idle sweep,
-curated + revertible facts) · ✅ persona · ✅ character editor (fields, portrait, **lorebook**, Duplicate,
-power/social) · ✅ ComfyUI expression sprites (img2img same-character, transparent via rembg, Core-8/Full-28,
-**gallery** w/ per-sprite regen/delete) · ✅ live portrait swap · ✅ running **mood/valence** · ✅ empty-greeting
-fallback · ✅ delete chats/characters · ✅ **relationship system** (multi-axis, per char+persona, behavior
-injection, rel-strip) · ✅ **intimacy/consent** (split willingness, 7-rung ladder, power/social context,
-agency-preserving) · ✅ **milestones** (toast + injected beat) · ✅ **stage-gated lorebook** · ✅
-per-relationship **context override** (⚙) · ✅ **persona editor modal** · ✅ **semantic recall**
-(int8 BGE, CPU) · ✅ local **TTS + STT** (Kokoro/Piper, faster-whisper) · ✅ **assistant memory**
-(directives/facts/notes, separate pipeline).
+✅ Card V2/V3 import/export · ✅ streaming chat · ✅ swipes + per-swipe emotions · ✅ **assistant
+memory** (directives/facts/notes, per char+persona, idle sweep, curated + revertible) · ✅ persona ·
+✅ card editor (fields, portrait, lorebook, Duplicate) · ✅ ComfyUI expression sprites (same-character,
+transparent via rembg, Core-8/Full-28, gallery w/ per-sprite regen/delete, Flux Kontext) · ✅ live
+portrait swap · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper/Orpheus,
+faster-whisper), hands-free, wake word, barge-in · ✅ **VRM avatar** (idle life, lip-sync, expressions,
+gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new libraries.
 
 ## Conventions & gotchas
 
@@ -525,28 +455,27 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 - **A BFF argument that may be `None` must be annotated `X | None`.** pytincture checks every
   BFF argument against its annotation, as written, before the method runs; `long: dict = None`
   answered 400 to the `None` the page sends, so the Memory modal's Save wrote nothing for
-  scenario and character-less chats (2026-11-04). `tests/test_bff_signatures.py` scans every
+  chats without long-term memory (2026-11-04). `tests/test_bff_signatures.py` scans every
   BFF method for it.
 - **Nothing that waits on the model may save a stale copy.** `_save_turn` always keeps the
-  stored `memory` (a turn never changes it; the job and the Memory modal do), and a long-term
-  fold, threshold or idle sweep, goes through `_store_fold`: only what the fold changed (entries
-  added or evicted by id, the summary or notes if nobody edited them, swept marks) is applied
-  to a fresh read. The assistant sweep moves only the session's index, on a fresh read.
+  stored `memory` (a turn never changes it; the job and the Memory modal do), and a fold,
+  threshold or idle sweep, goes through `_store_fold`: only what the fold changed (entries
+  added or evicted by id, the notes if nobody edited them, swept marks) is applied
+  to a fresh read. The sweep moves only the session's index, on a fresh read.
   Tests: `tests/test_chat_stream.py`, `tests/test_fold_merge.py`.
-- **Repetition guards** (`eval/repetition`): the DRY sampler is on by default
+- **Repetition guards** (measured in companion's `eval/repetition`, not carried here): the DRY sampler is on by default
   (`GenerationConfig.dry_*`, sent by `kobold_params`, so the auto-continue gets it too). It
   penalises reusing any word sequence already in the context, which `rep_pen` (single tokens)
-  doesn't. "Another take" quotes the take being replaced (`prompt_builder.retake_note`, before
-  the boundary note): the old take used to be dropped from the prompt, so the model had nothing
+  doesn't. "Another take" quotes the take being replaced (`prompt_builder.retake_note`, in the
+  trailing note): the old take used to be dropped from the prompt, so the model had nothing
   to differ from and often opened the same way. Tests: `tests/test_repetition_guards.py`.
-- **Memory maintenance runs after `done`** (`_memory_job`, 2026-10-29). A turn classifies, updates
-  the relationship, saves (`_save_turn`) and sends `done`; the summary + long-term fold then run in
-  a background task, one per session at a time (`_memory_locks`), starting from a fresh read. It can
-  overlap the next turn, an edit or a truncate, so it writes only `memory.summary` /
-  `last_summarized_index`, onto a fresh read, and only if neither moved and the folded turns are
-  unchanged (`_apply_memory`); `_save_turn` never writes back an older summary than the one on
-  disk. A dropped or lost job (restart) is harmless — the next turn re-checks the threshold.
-  Tests: `tests/test_chat_stream.py`, each guard mutation-checked.
+- **Memory maintenance runs after `done`** (`_memory_job`, 2026-10-29). A turn classifies, saves
+  (`_save_turn`) and sends `done`; the assistant fold then runs in a background task, one per
+  session at a time (`_memory_locks`), starting from a fresh read. It can overlap the next turn, an
+  edit or a truncate, so it writes only `memory.last_summarized_index` (and the pairing's store via
+  `_store_fold`), onto a fresh read, and only if the index didn't move and the folded turns are
+  unchanged (`_apply_memory`). A dropped or lost job (restart) is harmless — the next turn re-checks
+  the threshold. Tests: `tests/test_chat_stream.py`, `tests/test_fold_merge.py`.
   **A reply cancels a running job** (`_yield_memory_jobs`): KoboldCPP does one generation at a
   time, so a message sent while the summary ran waited behind it (first token at 52 s). The job's
   calls carry a genkey; the reply aborts it (`kobold.abort`), the job stores nothing and runs again
@@ -612,17 +541,15 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
     boot — and quitting it crashed both attached containers.
   Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>`.
   **Cards with an `orpheus:` voice are taught five of them** (`prompt_builder.voice_tag_note`, trailing,
-  after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins; roleplay
-  cards are told to put them inside quotes, the only part spoken). The note maps moments to tags (funny →
+  after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins). The note maps moments to tags (funny →
   laugh/chuckle, setback → sigh/groan, surprise → gasp) and leads its example with one — the first,
   permissive wording got 1/12 on inviting messages; this one 9/12 inviting, 2/12 neutral, 0 invented,
   1 double (Mira's live history, 2026-10-28). Tags are hidden in the chat view (`md()`), the chat-list
   preview (`shell._preview`) and the desktop caption, and stripped before Kokoro/Piper speak.
-- **What gets spoken** (`feedSpeech` in `static/js/voice.js`): roleplay cards speak only the **quoted dialogue**,
-  skipping narration and `*actions*` (a reply with no quotes at all falls back to the whole thing).
-  **Assistant cards speak everything**, flushed a sentence at a time as it streams — they have no
-  scene, so quotes there mark a term or a citation, and feeding only the quoted spans spoke the
-  citations and dropped the answer. `cleanForTTS` then unwraps any markdown that got through —
+- **What gets spoken** (`feedSpeech` in `static/js/voice.js`): **everything**, flushed a sentence at
+  a time as it streams. (The roleplay app speaks only quoted dialogue; here quotes mark a term or a
+  citation, and feeding only the quoted spans spoke the citations and dropped the answer.)
+  `cleanForTTS`  citations and dropped the answer. `cleanForTTS` then unwraps any markdown that got through —
   table rows become their cells, heading/list markers go while their text stays, fenced code is
   dropped, `~150` becomes "about 150" — since the prompt rule above is steering, not a gate.
   **Loudness:** Piper runs with `normalize_audio=False` + a fixed `PIPER_GAIN` (3.5) instead of its default
@@ -637,10 +564,10 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   correct (it shares the host kernel); only the *zone* was wrong, so `run-podman.sh` derives `TZ`
   from the host (`compose.yaml` defaults it — compose can't shell out). That alone does NOT make her
   know the time: nothing put the date in the prompt, so asked the time she invented one. Fixed by a
-  trailing `Current date and time: …` system message in `build_messages`, **assistant-mode only**
-  (roleplay cards must not announce the real date) and placed **after the history** — it changes
-  every minute, and in the system block that would invalidate KoboldCPP's cached prefix and
-  re-process the whole history every turn. It sits just before `boundary_note`, which stays last.
+  `Current date and time: …` line in the trailing note of `build_messages` when the user asks
+  about the time, placed **after the history** — it changes every minute, and in the system block
+  that would invalidate KoboldCPP's cached prefix and re-process the whole history every turn. The
+  system block carries only the date.
 - **Prompt overflow is silent and truncates from the FRONT** (measured — `PROMPT_BUDGET.md`), so
   the app now fits the prompt itself (`services/context.py`, 2026-10-30). The window is
   `context.effective()`: ⚙ Settings → Model → **Context window** (`AppSettings.context_limit`, 0 =
@@ -652,8 +579,8 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   trim is logged `[context] dropped N`. The memory folds size their transcript passes from the
   same window (`memory.fold_budget`). Raising the window past 8192 needs the backend too:
   `KOBOLDCPP_CONTEXT` in `koboldcpp/model.env` (ai-stack). Not built yet from PROMPT_BUDGET.md:
-  per-part caps and the eviction order for an oversized *system* block. The `boundary_note`
-  trailing placement makes it the most overflow-resistant part; don't move it.
+  per-part caps and the eviction order for an oversized *system* block. The trailing note is
+  the most overflow-resistant part; keep the format rules there.
 - CSS (`appcode/static/pantheon.css`): an element with its own `display` beats the `hidden`
   attribute, so each such rule carries a `[hidden] { display: none }` partner; accessible hidden
   radios use `opacity: 0`, not `display: none`.
@@ -661,9 +588,8 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 - **Sprite generation re-reads the card before saving** (`generate_expressions` /
   `regenerate_expression`). It takes minutes; saving the copy loaded at the start silently
   undid any edit made meanwhile, in either page. Only the sprite fields are written onto a fresh read.
-- Relationship/mood update on generation only (not re-rolls). Sprites are same-character via img2img from a
+- Mood updates on generation only (not re-rolls). Sprites are same-character via img2img from a
   reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
-- All characters adult; intimacy code is abstract state (tiers/thresholds) — the local model writes prose.
 - The whole `data/` is one bind mount now, so new subdirs persist automatically (no per-subdir mount list).
   Historically `run-podman.sh`/`compose.yaml` mounted each subdir and a missed one wiped state on rebuild.
 - `podman exec` heredocs need `-i`. Auth: never log/return password hashes; keep the scrypt params in
@@ -674,27 +600,8 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
 - **pytincture page** (`PYTINCTURE_PLAN.md`): ✅ Phases 0–7 — the page replaced the classic one on
   2026-10-26. ✅ **Phase 8: other devices** (2026-10-30) — plain
   HTTP on the LAN through `LanAsLoopback`, no TLS (an HTTPS proxy was built and dropped the same day).
-- ✅ **Relationship Phase 2 (done)** — milestones: `relationship.MILESTONES` + `newly_reached()`; crossing a
-  stage/tier fires a one-time toast (chat `done.milestones`) and injects a one-time beat via
-  `session.pending_milestone` into the next reply; recorded in `Relationship.milestones`.
-- ✅ **Relationship Phase 3 (mostly done)** — **lorebook stage-gating** (`LorebookEntry.min_stage`,
-  filtered in `prompt_builder.select_lorebook` via `stage_rank`; editor dropdown) + **per-relationship
-  context override UI** (⚙ on rel-strip → `PUT /api/relationship`; `GET` returns effective values).
-  ◻ Remaining: **stage-tagged greetings** (needs the alt-greetings editor reworked into a repeater +
-  auto-pick a stage-appropriate opening at session creation).
-- **Personas as cards + relationship presets + scenario new-chat** (design confirmed):
-  - ✅ **Phase A** — persona cards (name/role/description/background/portrait), sidebar list + editor,
-    single-active enforced, role+background feed the prompt.
-  - ✅ **Phase B** — reusable **preset library** (`RelationshipPreset` in `data/presets/`; `/api/presets`
-    CRUD; sidebar list + editor: name, optional character+persona pairing, scenario note, full metric
-    bundle power/social + axes + emotional/physical willingness).
-  - ✅ **Phase C** — **scenario new-chat wizard**: `POST /api/sessions` accepts `preset_id` + `mode`
-    (continue|scenario). Fresh scenario seeds a **session-scoped** `ChatSession.relationship` from the
-    preset (+ `scenario_note` into the opening); `chat()` uses it when present, else the persistent file.
-    `GET /api/sessions/{id}` returns `relationship_summary` for scenario sessions; the character list opens
-    the wizard (`openNewChat`). **A preset's slider values only apply in `scenario` mode** — picking a
-    preset now defaults the wizard to `scenario` (`ncPresetChanged`); `continue` intentionally ignores the
-    preset numbers and uses the persistent relationship.
+- ✅ **Personas as cards** — name/role/description/background/portrait, rail list + editor,
+  single-active enforced, role+background feed the prompt.
 - **VTuber upgrade** (voiced, animated avatar) — plan in `vtuber-upgrade-plan.md`.
   ✅ **Phase 0 done** — local Kokoro TTS + amplitude lip-sync + barge-in on existing sprites.
   ✅ **Phase 1 (push-to-talk) done** — local **faster-whisper** STT (`base.en`, CPU int8, in-process,
@@ -748,8 +655,8 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   `embarrassed`…) is used at full weight instead of the preset mapping (`resolveLabel`, `CUSTOM_ALIAS`;
   shown as `stats.custom`). `data/vrm/Butler2.vrm` = Butler1 + 12 such faces mixed from VRoid's `Fcl_*`
   shape keys in Blender (VRM Add-on). Procedural
-  gesture track (nod/tilt/leanIn/recoil/shrug; clips are Track B3) and posture bias from relationship
-  stage via a new `avatar:mood` event. **Pose composition rule: `resetPose()` returns every animated
+  gesture track (nod/tilt/leanIn/recoil/shrug; clips are Track B3) and a posture bias channel
+  (`avatar:mood`'s `stage`; this app always sends "", so the posture stays neutral). **Pose composition rule: `resetPose()` returns every animated
   bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
   is what sent the arms wandering, and shoulders must stay in the rest set.
   **All six channels of "fully animated" are now live.** ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
@@ -792,17 +699,17 @@ per-relationship **context override** (⚙) · ✅ **persona editor modal** · �
   clips · ◻ visemes (blocked on phoneme timings unless the ARKit route is taken). **Track B (sourcing a `.vrm`) now blocks 3b** —
   Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
   Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
-- **Skills for assistant characters** — plan in `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
+- **The Menu (skills) for the staff** — plan in `SKILLS_PLAN.md`; users see it as "the Menu" (Vocabulary). ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).
   **Verified live:** KoboldCPP + this Qwen3.5 fine-tune support OpenAI `tools` **including over
   streaming SSE**, with correct arguments, no spurious calls, and no loss of character voice — so
   skills use real tool calling, not `[tag]` scraping. Then ◻ System Info (`get_system_status`:
   uptime/disk/**GPU VRAM**/services) and ◻ **Media** — find and play music/video through **Orpheus**,
-  our own media server (on Homelab) + Flutter player, with Pantheon paired as a `controller` device.
+  our own media server (on Homelab) + Flutter player, with Cantinero paired as a `controller` device.
   Replaced the Navidrome/DJ plan on 2026-09-15; design in `../orpheus/docs/architecture.md`. NAS: UGREEN
-  NASync DH2300 @ `192.168.1.219` (SMB 445), mounted by the Orpheus server, not by Pantheon. Hard part
+  NASync DH2300 @ `192.168.1.219` (SMB 445), mounted by the Orpheus server, not by Cantinero. Hard part
   is still audio coexistence: music breaks the half-duplex mic gate in both directions.
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
-- Tuning knobs: `relationship.RATE/WRATE/ESC_RATE/_TIER_THRESHOLDS`, `expressions` img2img denoise, `GenerationConfig`.
+- Tuning knobs: `expressions` img2img denoise, `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.

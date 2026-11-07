@@ -1,10 +1,10 @@
 {
-  "repo": "companion",
-  "brand": "companion",
-  "description": "Character-card AI companion",
-  "port": 7861,
-  "health": "http://127.0.0.1:7861/api/health",
-  "container": "companion",
+  "repo": "companion-assistant",
+  "brand": "Cantinero",
+  "description": "El Iguana's bartender — at your service.",
+  "port": 7867,
+  "health": "http://127.0.0.1:7867/api/health",
+  "container": "companion-assistant",
   "start": "run-podman.sh",
-  "icon": "mdi-account-heart-outline"
+  "icon": "mdi-account-voice"
 }

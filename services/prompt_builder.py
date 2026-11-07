@@ -1,4 +1,4 @@
-"""Companion prompt construction.
+"""Assistant prompt construction.
 
 Builds the OpenAI-style `messages` list consumed by
 KoboldClient.chat_generate_stream(). Handles:
@@ -17,21 +17,8 @@ from models.schema import CharacterCard, Persona, ChatSession, CharacterBook
 from services import context
 
 
-# Scene/world roleplay (the historical default).
-DEFAULT_ROLEPLAY = (
-    "You are {{char}} in an immersive, ongoing roleplay with {{user}}. "
-    "Stay fully in character as {{char}} at all times. Write ONLY {{char}}'s single next reply and "
-    "then stop: one focused message that moves the scene forward by one concrete beat. "
-    "Do not write multiple exchanges or continue the conversation on both sides, and never speak, "
-    "act, narrate, or decide for {{user}}. Keep it reasonably concise and reactive to what {{user}} "
-    "just said. Do NOT repeat actions, phrasing, or descriptions you have already used — advance "
-    "the moment with something new each time. Never break character or mention being an AI."
-)
-
-# Personality-forward conversation — no invented setting/scene (for assistant-type
-# characters like a Jarvis). Keeps the same anti-repetition / one-reply / stay-in-
-# character guardrails, but drops the "advance the scene" framing that makes small
-# models improvise a world.
+# The built-in system prompt. Personality-forward conversation with no invented
+# setting or scene; a card's own `system_prompt` replaces it.
 DEFAULT_ASSISTANT = (
     "You are {{char}}, talking directly with {{user}} in a plain, ongoing conversation. "
     "There is no physical setting or scene: do NOT invent surroundings, locations, events, or a "
@@ -65,10 +52,6 @@ DEFAULT_ASSISTANT = (
     "listener cannot skim or re-read, so lead with the answer, keep it short, and stop; offer "
     "the detail and let {{user}} ask for it rather than delivering it unprompted."
 )
-
-# Back-compat alias.
-DEFAULT_SYSTEM = DEFAULT_ROLEPLAY
-
 
 # Courtesy questions an assistant tacks onto a finished answer. The prompt rule
 # above moved this from 9 replies in 15 to 8: a strong conversational habit does
@@ -129,11 +112,6 @@ def strip_initiative_question(text: str) -> str:
     return trimmed if trimmed else text
 
 
-def default_system_for(card) -> str:
-    """Pick the built-in system prompt for a card's chat_mode."""
-    return DEFAULT_ASSISTANT if getattr(card, "chat_mode", "roleplay") == "assistant" else DEFAULT_ROLEPLAY
-
-
 def substitute_macros(text: str, char_name: str, user_name: str) -> str:
     if not text:
         return ""
@@ -145,17 +123,8 @@ def substitute_macros(text: str, char_name: str, user_name: str) -> str:
 # ---------------------------------------------------------------------------
 # Lorebook / character_book scanning
 # ---------------------------------------------------------------------------
-# Relationship stage order (mirrors relationship._STAGE_ORDER) for lorebook gating.
-STAGE_ORDER = ["Stranger", "Acquaintance", "Friend", "Close", "Romantic", "Intimate"]
-
-
-def select_lorebook(book: CharacterBook | None, recent_text: str,
-                    stage_rank: int = 99) -> tuple[list[str], list[str]]:
-    """Return (before_char_blocks, after_char_blocks) of triggered entries.
-
-    `stage_rank` gates entries: an entry with `min_stage` is skipped until the
-    relationship has reached that stage.
-    """
+def select_lorebook(book: CharacterBook | None, recent_text: str) -> tuple[list[str], list[str]]:
+    """Return (before_char_blocks, after_char_blocks) of triggered entries."""
     if not book:
         return [], []
     hay = recent_text if book.entries and book.entries[0].case_sensitive else recent_text.lower()
@@ -165,10 +134,6 @@ def select_lorebook(book: CharacterBook | None, recent_text: str,
     for e in book.entries:
         if not e.enabled or not e.content:
             continue
-        if e.min_stage:                     # relationship-stage gate
-            req = STAGE_ORDER.index(e.min_stage) if e.min_stage in STAGE_ORDER else 0
-            if req > stage_rank:
-                continue
         triggered = e.constant
         if not triggered:
             keys = e.keys if e.case_sensitive else [k.lower() for k in e.keys]
@@ -197,12 +162,9 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
         parts.append(f"{char_name}'s personality: " +
                      substitute_macros(card.personality, char_name, user_name))
     if card.scenario:
-        # The card's scenario is where the story STARTED, and it stays in every
-        # prompt. Labelled plainly "Scenario:" it read as the current situation, so
-        # long chats kept getting dragged back to the opening scene.
-        parts.append("Opening premise (where the story began; the chat may have moved "
-                     "on since, so follow where it is now): " +
-                     substitute_macros(card.scenario, char_name, user_name))
+        # A card's scenario field, imported from a roleplay card, is background here:
+        # the assistant prompt has no scene, so it must not read as one to act out.
+        parts.append("Background: " + substitute_macros(card.scenario, char_name, user_name))
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -210,8 +172,7 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
 # contains narrated replies ("\"Sir,\" he says, tilting his head...") keeps producing
 # them however firmly the system prompt forbids it: eighteen demonstrated examples in
 # the live window outweigh one rule many turns back. This is the same recency finding
-# that put boundary_note last for roleplay cards — and for an assistant that slot is
-# now free, so it carries this instead. The last line matters most: the transcript's
+# the recency finding that puts trailing notes after the history. The last line matters most: the transcript's
 # style has to be named as a habit to ignore, or the model reads it as the format.
 ASSISTANT_FORMAT_NOTE = (
     "[Reply format] Speak only, in the first person. Write the words {char} says aloud "
@@ -237,48 +198,28 @@ ASSISTANT_FORMAT_NOTE = (
 # demonstrated shape far more reliably than they follow a described one. Static per
 # card, so it lives in the system block where KoboldCPP can keep it in the cached
 # prefix; a per-turn string here would invalidate the cache every turn.
-def expression_note(labels: List[str], assistant: bool = False) -> str:
+def expression_note(labels: List[str]) -> str:
     if not labels:
         return ""
     # The example must use a label the card actually has. Demonstrating one that is
     # not in the valid list invites the model to copy it, and we would drop the beat.
+    # Shown inside plain first-person speech: a demonstrated shape gets copied far more
+    # reliably than a described rule is followed, and an action-beat example taught the
+    # narration the system prompt forbids. Beats drive the sprite or the VRM face.
+    # Never spell out a placeholder tag ('[expr:LABEL]'): the model copied it verbatim.
     ok = sorted(labels)
-    preferred = (("thoughtful", "neutral", "happy", "joy", "surprised", "surprise")
-                 if assistant else
-                 ("embarrassment", "embarrassed", "surprise", "surprised",
-                  "sad", "sadness", "happy", "joy"))
+    preferred = ("thoughtful", "neutral", "happy", "joy", "surprised", "surprise")
     eg = next((l for l in preferred if l in labels), ok[0])
-
-    # Same mechanism, different demonstration. The roleplay example below is a
-    # third-person action beat plus quoted dialogue ("She looked away. [expr:x] ..."),
-    # and per the note above, a demonstrated shape gets copied far more reliably than a
-    # described rule is followed — so on an assistant card it was teaching precisely the
-    # narration the assistant system prompt forbids. Shown inside plain first-person
-    # speech instead. Beats still have to work here: an assistant with a VRM drives its
-    # face from them.
-    if assistant:
-        return (
-            "Expression beats: when your tone genuinely changes mid-reply, mark it inline "
-            "at that exact point, then carry on speaking normally.\n"
-            f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
-            f"Example: I did look into that. [expr:{eg}] It is not as simple as it sounds.\n"
-            "Use at most a few per reply, only on a real change. The tag is the ONLY thing "
-            "that marks the change — never narrate or describe yourself alongside it. Always "
-            "write the whole tag, brackets and expr: included; a bare label word on its own is "
-            "never valid. The tags are stripped before the reader sees them, so never mention "
-            "or explain them."
-        )
-    # Never spell out a placeholder tag here. An earlier wording said 'emit a tag
-    # [expr:LABEL]' and the model copied it verbatim — it read LABEL as the label.
-    # The shape is taught by example only; the list is the sole source of labels.
     return (
-        "Expression beats: when your feeling visibly changes mid-reply, mark it inline "
-        "at that exact point, then carry on writing normally.\n"
+        "Expression beats: when your tone genuinely changes mid-reply, mark it inline "
+        "at that exact point, then carry on speaking normally.\n"
         f"Valid labels — use one of these exactly, never invent one: {', '.join(ok)}.\n"
-        f'Example: She looked away. [expr:{eg}] "That is not what I meant."\n'
-        "Use at most a few per reply, only on a real change. Always write the whole tag, "
-        "brackets and expr: included; a bare label word on its own is never valid. The tags "
-        "are stripped before the reader sees them, so never mention or explain them."
+        f"Example: I did look into that. [expr:{eg}] It is not as simple as it sounds.\n"
+        "Use at most a few per reply, only on a real change. The tag is the ONLY thing "
+        "that marks the change — never narrate or describe yourself alongside it. Always "
+        "write the whole tag, brackets and expr: included; a bare label word on its own is "
+        "never valid. The tags are stripped before the reader sees them, so never mention "
+        "or explain them."
     )
 
 
@@ -308,276 +249,30 @@ def retake_note(takes: List[str], char: str, user: str) -> str:
         return ""
     return (f"This is another take on {char}'s reply; {user} set aside "
             + ("this one: " if len(quoted) == 1 else "these: ") + " / ".join(quoted)
-            + f" Write a clearly different reply: a different opening, different actions and "
-            f"different words, not a rephrasing of it.")
+            + " Write a clearly different reply: a different opening and different words, "
+            "not a rephrasing of it.")
 
 
-DIRECTION_CHARS = 400      # of the user's note
-
-
-def direction_note(direction: str, char: str, user: str, retake: bool = False) -> str:
-    """The user's out-of-character note on how this reply should go: what Continue or
-    Another take should do. Placed before the boundary note, so it steers the scene but
-    can never widen what {char} is willing to do."""
-    d = " ".join((direction or "").split())
-    if not d:
-        return ""
-    if len(d) > DIRECTION_CHARS:
-        d = d[:DIRECTION_CHARS].rsplit(" ", 1)[0] + " …"
-    what = f"{char}'s rewritten reply" if retake else f"{char}'s next reply"
-    return (f"[Direction from {user}, out of character — not something said in the scene] "
-            f"For {what}: {d}\n"
-            f"Follow it, in {char}'s own voice and manner, as part of the scene. Do not "
-            f"mention, quote or answer the direction itself.")
-
-
-def focus_note(last_user: str, char: str, user: str, assistant: bool) -> str:
+def focus_note(last_user: str, char: str, user: str) -> str:
     """The closing line of every prompt: answer THIS, from where things stand now.
 
     Quotes the message back (shortened) because a small model's attention fades
     across the rules between the history and the reply; one short quote right at
-    the end puts the moment back in front of it. Roleplay and assistant differ
-    only in what "drifting" looks like for each."""
+    the end puts the moment back in front of it."""
     q = " ".join(last_user.split())
     if len(q) > _FOCUS_QUOTE_CHARS:
         q = q[:_FOCUS_QUOTE_CHARS].rsplit(" ", 1)[0] + " …"
-    if assistant:
-        return (
-            f"[Now] Reply to {user}'s latest message: \"{q}\"\n"
-            f"Respond to exactly that, in the context of the conversation so far. Do not "
-            f"repeat an earlier reply of yours or bring up topics {user} did not raise, and "
-            f"do not announce the date or time unless asked — even if earlier replies did. "
-            f"If it is a short answer like \"yes\" or \"go on\", act on what was just "
-            f"being discussed.")
     return (
         f"[Now] Reply to {user}'s latest message: \"{q}\"\n"
-        f"Continue the scene from exactly where it stands at this moment — same place, "
-        f"same people, same thread. Do not recap or re-describe what already happened "
-        f"or the setting, do not restart the scene, and do not jump to a new topic or "
-        f"location unless {user} takes it there. Write {char}'s next beat only."
-    )
-
-
-def roleplay_turn_note(latest, char: str, user: str, sub) -> str:
-    """The closing line when {user} didn't speak last: the narrator did, or {char} did and
-    is asked to go on (Continue). Same role as focus_note; roleplay only."""
-    if latest.role == "narrator":
-        q = " ".join(sub(latest.content).split())
-        if len(q) > _FOCUS_QUOTE_CHARS:
-            q = q[:_FOCUS_QUOTE_CHARS].rsplit(" ", 1)[0] + " …"
-        return (
-            f"[Now] Something just happened in the scene (narration, not {user}'s words): \"{q}\"\n"
-            f"React to it as {char}, in the moment, from where the scene stands — same place, "
-            f"same people. Write {char}'s next beat only; do not decide how {user} reacts, "
-            f"and do not retell the event.")
-    return (
-        f"[Now] {user} has not spoken yet — {char} carries the scene on. Take it one beat "
-        f"further on {char}'s own initiative: do, say or notice something new that follows "
-        f"from {char}'s last message. Do not repeat or restate it, do not answer for {user}, "
-        f"and do not wrap the scene up. Write {char}'s next beat only.")
-
-
-# ---------------------------------------------------------------------------
-# Narrator events and drafts of {{user}}'s reply (roleplay only)
-#
-# Both are their own short prompts rather than build_messages() variants: the narrator is
-# not {{char}} and the draft is written as {{user}}, so neither may carry {{char}}'s
-# system prompt, relationship framing or boundary note. The scene goes in as a labelled
-# transcript in one user turn, so the model writes the requested piece instead of
-# continuing the chat as {{char}}.
-# ---------------------------------------------------------------------------
-NARRATION_LABEL = "[Narrator] "
-SCENE_TURNS = 16                 # recent messages the narrator / draft prompt sees
-
-NARRATOR_SYSTEM = (
-    "You are the game master of an ongoing roleplay between {{char}} and {{user}}: you run the "
-    "world and play every other person in it, but never {{char}} or {{user}}. Write ONE short "
-    "beat that happens in the scene right now and gives both of them something to react to — "
-    "something in the surroundings, a sound, a change in light or weather, someone arriving, "
-    "an object, news, an interruption.\n"
-    "The other people in the scene — a barkeep, a guard, a stranger, a friend from the story — "
-    "are yours to voice, and a good beat usually has one of them say something: a line or two "
-    "in quotation marks, in their own voice (their manner, their way of talking, what they "
-    "would know). They may speak to {{char}} or {{user}}, but leave the answer to them. For "
-    "example:\n"
-    "A dockhand shoulders through the door, dripping. \"Tide's turned early,\" he mutters to "
-    "no one in particular. \"Harbourmaster's closing the outer moorings.\"\n"
-    "Keep it neutral: it takes no side, resolves nothing, and does not push the scene toward "
-    "romance, intimacy or violence. Third person, present tense, two to five sentences. "
-    "Never write a word {{char}} or {{user}} says, nor their actions, thoughts, feelings or "
-    "decisions. Stay consistent with the setting, the people already in it and what has "
-    "happened. Do not recap, and never mention being a game master, a narrator or an AI."
-)
-
-# The same game master with nobody else to play: "Allow side characters" off.
-NARRATOR_SYSTEM_ALONE = (
-    "You are the narrator of an ongoing roleplay between {{char}} and {{user}}. Only the two "
-    "of them are in this scene, and it stays that way. Write ONE short beat that happens in "
-    "the scene right now and gives both of them something to react to — something in the "
-    "surroundings, a sound, a change in light or weather, an object, the time passing.\n"
-    "Do not bring in, describe or voice anyone else: no barkeep, guard, stranger, passer-by, "
-    "messenger or crowd, and no voices from off-stage. No one speaks in your beat, so write "
-    "no dialogue and no quotation marks.\n"
-    "Keep it neutral: it takes no side, resolves nothing, and does not push the scene toward "
-    "romance, intimacy or violence. Third person, present tense, two to five sentences. "
-    "Never write a word {{char}} or {{user}} says, nor their actions, thoughts, feelings or "
-    "decisions. Stay consistent with the setting and what has happened. Do not recap, and "
-    "never mention being a narrator or an AI."
-)
-
-DRAFT_SYSTEM = (
-    "You write {{user}}'s next message in an ongoing roleplay with {{char}}. Write ONLY "
-    "{{user}}'s single next reply, in {{user}}'s own voice — what {{user}} says, and briefly "
-    "what {{user}} does — reacting to the latest moment. Never write anything {{char}} says, "
-    "does, thinks or feels, and do not narrate the world. Write it the way {{user}}'s own "
-    "earlier messages are written — same person, tense and style (first person if there are "
-    "none) — and include something {{user}} says out loud. Keep it short: one to three "
-    "sentences. No preamble, no name label, no quotation marks around the whole reply."
-)
+        f"Respond to exactly that, in the context of the conversation so far. Do not "
+        f"repeat an earlier reply of yours or bring up topics {user} did not raise, and "
+        f"do not announce the date or time unless asked — even if earlier replies did. "
+        f"If it is a short answer like \"yes\" or \"go on\", act on what was just "
+        f"being discussed.")
 
 
 def speaker(m, char: str, user: str) -> str:
-    return char if m.role == "char" else "Narrator" if m.role == "narrator" else user
-
-
-def shown(m) -> str:
-    """The text on screen: a reply's selected swipe, else the content."""
-    return m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
-
-
-def scene_transcript(session: ChatSession, char: str, user: str, turns: int = SCENE_TURNS) -> str:
-    msgs = [m for m in session.messages[session.memory.last_summarized_index:] if m.role != "system"]
-    return "\n\n".join(f"{speaker(m, char, user)}: {substitute_macros(shown(m), char, user)}"
-                        for m in msgs[-turns:])
-
-
-def _scene_context(card: CharacterCard, persona: Persona, session: ChatSession,
-                   stage_rank: int = 0) -> str:
-    char, user = card.name or "Companion", persona.name or "User"
-    parts = []
-    block = _char_block(card, char, user)
-    if block:
-        parts.append(f"About {char}:\n{block}")
-    # The card's lorebook entries the recent scene triggers, gated by relationship stage
-    # exactly as in her own prompt. This is where a card keeps its side characters and
-    # places, so it is what lets the narrator voice them as written rather than invent.
-    scan = card.character_book.scan_depth if card.character_book else 4
-    recent = "\n".join(m.content for m in session.messages[-scan:]) if session.messages else ""
-    before, after = select_lorebook(card.character_book, recent, stage_rank)
-    if before or after:
-        parts.append("World notes:\n" + "\n".join(substitute_macros(b, char, user)
-                                                    for b in before + after))
-    bits = [b for b in (getattr(persona, "title", ""), persona.description,
-                        getattr(persona, "background", "")) if b and b.strip()]
-    if bits:
-        parts.append(f"About {user}: " + substitute_macros(". ".join(bits), char, user))
-    if session.memory.summary:
-        parts.append("Story so far:\n" + substitute_macros(session.memory.summary, char, user))
-    scene = scene_transcript(session, char, user)
-    parts.append("The scene, most recent last:\n" + (scene or "(nothing has happened yet)"))
-    return "\n\n".join(parts)
-
-
-def build_narrator_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                            direction: str = "", stage_rank: int = 0) -> List[Dict]:
-    char, user = card.name or "Companion", persona.name or "User"
-    what = (f"Write the next beat, with this happening, in your own words: {direction.strip()}. "
-            if direction.strip() else "Write the next beat now. ")
-    # Restated last, where it counts: with the scene transcript just above, the model
-    # slid into writing the next lines for {{char}} — speech, gestures, shivers — and
-    # ran for paragraphs. The system rules alone, many hundred tokens back, didn't hold.
-    ask = (what + f"One paragraph, two to five sentences: what happens and what is seen or "
-           f"heard. Write nothing that {char} or {user} says, does, thinks or feels — they "
-           f"react next, not you. ")
-    if session.allow_side_characters:
-        ask += (f"Everyone else is yours to play: if someone other than {char} and {user} is "
-                f"in the scene, end with a line they say out loud, in quotation marks, in "
-                f"their own voice.")
-        system = NARRATOR_SYSTEM
-    else:
-        ask += (f"Nobody but {char} and {user} is here: bring in no one else, and write no "
-                f"dialogue.")
-        system = NARRATOR_SYSTEM_ALONE
-    return [
-        {"role": "system", "content": substitute_macros(system, char, user)},
-        {"role": "user", "content": _scene_context(card, persona, session, stage_rank)
-         + f"\n\n[{ask}]"},
-    ]
-
-
-def build_draft_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                         direction: str = "", stage_rank: int = 0) -> List[Dict]:
-    char, user = card.name or "Companion", persona.name or "User"
-    ask = (f"Write {user}'s next message. {user} wants to: {direction.strip()}"
-           if direction.strip() else f"Write {user}'s next message.")
-    return [
-        {"role": "system", "content": substitute_macros(DRAFT_SYSTEM, char, user)},
-        {"role": "user", "content": _scene_context(card, persona, session, stage_rank)
-         + f"\n\n[{ask}]"},
-    ]
-
-
-def clean_piece(text: str, names: List[str]) -> str:
-    """Drop a leading speaker label ("Narrator:", "Brian:") and wrapping quotes."""
-    t = (text or "").strip()
-    for n in names:
-        # "Narrator: …", or inside the italics the whole piece is wrapped in: "*Narrator: …*"
-        m = re.match(r"^(\*?)\s*" + re.escape(n) + r"\s*:\s*", t, re.I) if n else None
-        if m:
-            t = m.group(1) + t[m.end():]
-            break
-    if len(t) > 1 and t[0] == t[-1] == '"' and t.count('"') == 2:
-        t = t[1:-1].strip()
-    return t
-
-
-NARRATION_MAX_PARAGRAPHS = 3
-# Her or {{user}} doing something: the beat the narrator must leave to them.
-_ACTS = (r"says|said|asks|replies|answers|laughs|chuckles|mutters|murmurs|whispers|nods|"
-         r"smiles|grins|sighs|shrugs|leans|looks|glances|turns|reaches|takes|raises|frowns|"
-         r"winks|blushes|feels|thinks|wonders|decides")
-
-
-def trim_narration(text: str, char: str, user: str) -> str:
-    """Keep the narration's own paragraphs; drop from the first one that is theirs.
-
-    The narrator writes past a blank line now — a side character's line usually
-    opens a paragraph of its own, and stopping at the first blank line cut 7 of 8
-    of them off (measured). What used to follow a blank line was the narrator
-    carrying on as {{char}} or {{user}}, so a later paragraph that starts with
-    either name or has one of them speaking or acting ends the narration there.
-    The first paragraph always stays, as it did under the old stop.
-    """
-    paras = [p.strip() for p in re.split(r"\n\s*\n", (text or "").strip()) if p.strip()]
-    names = "|".join(re.escape(n) for n in (char, user) if n)
-    if not paras:
-        return ""
-    keep = [paras[0]]
-    for p in paras[1:NARRATION_MAX_PARAGRAPHS]:
-        if names and (re.match(rf"^[*\"“\s]*({names})\b", p)
-                      or re.search(rf"\b({names})\s+({_ACTS})\b", p)):
-            break
-        keep.append(p)
-    return "\n\n".join(keep)
-
-
-_QUOTED = re.compile(r'["\u201c][^"\u201c\u201d]{2,}["\u201d]')
-# A sentence ends at . ! ? or …, or just after a closing quote that follows one.
-_SENTENCE = re.compile(r"(?:(?<=[.!?…])|(?<=[.!?…][\"\u201d'\u2019]))\s+(?=[A-Z*\"\u201c])")
-
-
-def strip_dialogue(text: str) -> str:
-    """Drop the sentences that carry quoted speech: the narration when side characters
-    are off. The prompt says "no dialogue"; this holds when it doesn't (a rule in a
-    prompt is a request, and the narrator has broken this one before — see trim_narration).
-    Whole sentences go, never half of one; what's left may be empty, which the caller
-    treats as a failed narration."""
-    out = []
-    for para in re.split(r"\n\s*\n", (text or "").strip()):
-        keep = [x for x in _SENTENCE.split(para.strip()) if x and not _QUOTED.search(x)]
-        if keep:
-            out.append(" ".join(keep))
-    return "\n\n".join(out)
+    return char if m.role == "char" else user
 
 
 # Orpheus voices perform these instead of reading them (services/orpheus.py). Offered
@@ -586,24 +281,20 @@ def strip_dialogue(text: str) -> str:
 VOICE_TAGS = ("laugh", "chuckle", "sigh", "gasp", "groan")
 
 
-def voice_tag_note(card, assistant: bool) -> str:
+def voice_tag_note(card) -> str:
     """Tell an Orpheus-voiced card it may write sound tags. Shown by example, like the
     expression beats: a small model copies a demonstrated shape far more reliably than
     it follows a described one. Trailing, after ASSISTANT_FORMAT_NOTE, because that note
     forbids stage directions and the later instruction is the one that wins."""
     if not str(getattr(card, "tts_voice", "") or "").startswith("orpheus:"):
         return ""
-    where = ("where the sound happens, usually at the very start of the reply" if assistant else
-             "INSIDE the quoted dialogue where the sound happens — only quoted speech is voiced")
-    eg = ("<chuckle> That is exactly what I said. You just did not believe me."
-          if assistant else
-          '"<chuckle> That is exactly what I said. You just did not believe me."')
     return (
         "Voice tags: your replies are spoken by a voice that can really laugh, chuckle, "
         "sigh, gasp and groan. React with one when the moment calls for it — something "
         "funny or absurd: <laugh> or <chuckle>; a setback or something tiresome: <sigh> or "
-        "<groan>; a real surprise: <gasp>. Write the tag " + where + ".\n"
-        "Example: " + eg + "\n"
+        "<groan>; a real surprise: <gasp>. Write the tag where the sound happens, usually "
+        "at the very start of the reply.\n"
+        "Example: <chuckle> That is exactly what I said. You just did not believe me.\n"
         "At most one per reply; plain questions and requests need none. Use only these five "
         "tags, written exactly so. They are the one allowed exception to having no stage "
         "directions; never describe a sound in words instead (no \"haha\", no *laughs*). "
@@ -612,18 +303,15 @@ def voice_tag_note(card, assistant: bool) -> str:
 
 
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
-                   relationship_note: str = "", stage_rank: int = 99,
-                   boundary_note: str = "", longterm_note: str = "",
+                   longterm_note: str = "",
                    expr_labels: List[str] | None = None,
                    context_tokens: int = 0, trimmed: list | None = None,
-                   retake_of: List[str] | None = None,
-                   direction: str = "") -> List[Dict]:
+                   retake_of: List[str] | None = None) -> List[Dict]:
     """The chat prompt. With `context_tokens`, the oldest history turns are dropped
     until the whole prompt plus the reply fits that window (services/context.py);
     the count dropped is appended to `trimmed` when one is passed."""
-    char_name = card.name or "Companion"
+    char_name = card.name or "Assistant"
     user_name = persona.name or "User"
-    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
 
     def sub(t: str) -> str:
         return substitute_macros(t, char_name, user_name)
@@ -631,16 +319,14 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # Scan recent turns for lorebook triggers
     scan_depth = card.character_book.scan_depth if card.character_book else 4
     recent = "\n".join(m.content for m in session.messages[-scan_depth:]) if session.messages else ""
-    lb_before, lb_after = select_lorebook(card.character_book, recent, stage_rank)
+    lb_before, lb_after = select_lorebook(card.character_book, recent)
 
     # --- system message ---
-    sys_parts: list[str] = [sub(card.system_prompt) if card.system_prompt else sub(default_system_for(card))]
+    sys_parts: list[str] = [sub(card.system_prompt or DEFAULT_ASSISTANT)]
     persona_bits = [b for b in (getattr(persona, "title", ""), persona.description,
                                 getattr(persona, "background", "")) if b and b.strip()]
     if persona_bits:
         sys_parts.append(f"About {user_name}: " + sub(". ".join(persona_bits)))
-    if relationship_note:
-        sys_parts.append(relationship_note)
     if lb_before:
         sys_parts.append("\n".join(sub(b) for b in lb_before))
     char_def = _char_block(card, char_name, user_name)
@@ -651,58 +337,36 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     if card.mes_example:
         sys_parts.append("Example dialogue:\n" + sub(card.mes_example))
 
-    # memory, widest scope first: pinned facts (this chat, always-on) -> cross-session
-    # history for this pairing -> this chat's rolling summary. Session-scoped material
-    # sits closest to the history it precedes; `longterm_note` arrives pre-rendered with
-    # real names (same convention as relationship_note) so it isn't re-substituted here.
+    # memory, widest scope first: pinned facts (this chat, always-on) -> the pairing's
+    # assistant memory. `longterm_note` arrives pre-rendered with real names, so it
+    # isn't re-substituted here. `session.memory.summary` is never injected: nothing
+    # writes it in this app, and a session copied over from the roleplay app may carry
+    # a narrative one, which is exactly the "worked example of narrating" the assistant
+    # pipeline exists to keep out (assistant_memory.fold clears it).
     mem = session.memory
     if mem.pinned:
         sys_parts.append("Important facts:\n" + "\n".join(f"- {sub(p)}" for p in mem.pinned))
     if longterm_note:
         sys_parts.append(longterm_note)
-    if mem.summary and not assistant:
-        # Roleplay only. "Story so far" is scene framing, and an assistant has no
-        # story — but the stronger reason is that `memory.summarize()` is the sole
-        # writer of this field and, since the pipelines split, never runs for an
-        # assistant. So a non-empty summary on an assistant session is roleplay-era
-        # residue from before its card was switched: third-person narration, frozen,
-        # because nothing will ever rewrite it. Injecting it under a friendlier
-        # header still put a worked example of narrating above an assistant's
-        # history, which is the exact leak the split exists to stop. Measured on a
-        # live 51-turn session: 1851 chars of it, opening with a hardcoded date.
-        # `assistant_memory.fold()` clears the stored copy once that material is
-        # safely in directives/facts/notes; this skips it in the meantime.
-        # Framed as finished events: the model is to build on this, not retell it.
-        # The messages after the system block continue from its "Where things
-        # stand" line (see memory.summarize).
-        sys_parts.append(
-            "Story so far (already happened — never retell it; the messages below "
-            "continue from where it leaves off):\n" + sub(mem.summary))
 
-    # Assistant cards get the DATE here, not the time. It changes once a day, so it
-    # costs one cache miss a day instead of one a minute. The minute-accurate time
-    # used to trail every prompt, and sitting last it was the loudest thing in the
-    # prompt: replies volunteered the clock unasked ("Mirror." got an answer about
-    # being synchronised to 11:57 AM; the time was written into the middle of a
-    # generated system prompt). The exact time now trails only when asked for.
-    if assistant:
-        today = datetime.now().astimezone()
-        sys_parts.append(
-            f"Today is {today.strftime('%A, %B')} {today.day}, {today.year}. You are not "
-            f"told the time of day, so never state or guess one. Mention the date only "
-            f"when {user_name} asks for it.")
+    # The DATE here, not the time. It changes once a day, so it costs one cache miss a
+    # day instead of one a minute. The minute-accurate time used to trail every prompt,
+    # and sitting last it was the loudest thing in the prompt: replies volunteered the
+    # clock unasked. The exact time now trails only when asked for.
+    today = datetime.now().astimezone()
+    sys_parts.append(
+        f"Today is {today.strftime('%A, %B')} {today.day}, {today.year}. You are not "
+        f"told the time of day, so never state or guess one. Mention the date only "
+        f"when {user_name} asks for it.")
 
     messages: List[Dict] = [{"role": "system", "content": "\n\n".join(p for p in sys_parts if p.strip())}]
 
-    # --- chat history (skip messages already folded into the summary) ---
+    # --- chat history (skip messages already folded into memory) ---
+    # "narrator" messages exist only in sessions copied from the roleplay app; they are
+    # scene events with no place in an assistant conversation, so they are left out.
     history: List[Dict] = []
     for m in session.messages[mem.last_summarized_index:]:
-        if m.role == "system":
-            continue
-        if m.role == "narrator":
-            # An event in the scene, from neither of them. As a user turn the model read
-            # it as something {{user}} said or did; as a labelled system turn it's the world.
-            history.append({"role": "system", "content": NARRATION_LABEL + sub(m.content)})
+        if m.role not in ("char", "user"):
             continue
         role = "assistant" if m.role == "char" else "user"
         content = m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
@@ -714,57 +378,40 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         after.append({"role": "system", "content": sub(card.post_history_instructions)})
 
     # --- ONE trailing note: everything that must sit after the history ---
-    # These used to be up to four separate system turns after {{user}}'s message
-    # (time, expression rules, format reminder, boundary note), so the last thing
-    # the model read before replying was a wall of rules rather than what was just
-    # said — and it answered the rules: drifting off topic, re-describing the scene.
-    # Merged into one message that ENDS by pointing back at the latest message.
-    # The order inside is the old order, so the measured placements still hold:
-    # expression beats trail (see expression_note), and the boundary note stays
-    # after any UJB and as late as possible (see PROMPT_BUDGET.md).
+    # These used to be separate system turns after {{user}}'s message (time, expression
+    # rules, format reminder), so the last thing the model read before replying was a
+    # wall of rules rather than what was just said — and it answered the rules. Merged
+    # into one message that ENDS by pointing back at the latest message.
     last_user = next((m.content for m in reversed(session.messages)
                       if m.role == "user" and m.content and m.content.strip()), "")
     tail: list[str] = []
-    if assistant and _ASKS_TIME.search(last_user):
+    if _ASKS_TIME.search(last_user):
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "12"
         tail.append(
             f"Current date and time: {now.strftime('%A, %B')} {now.day}, {now.year}, "
             f"{hour}:{now.strftime('%M %p')} {now.strftime('%Z')}. "
             f"This is authoritative — use it, never guess.")
-    expr_hint = expression_note(expr_labels or [], assistant=assistant)
+    expr_hint = expression_note(expr_labels or [])
     if expr_hint:
         tail.append(expr_hint)
-    if assistant:
-        tail.append(ASSISTANT_FORMAT_NOTE.format(char=char_name, user=user_name))
-    voice_hint = voice_tag_note(card, assistant)
+    tail.append(ASSISTANT_FORMAT_NOTE.format(char=char_name, user=user_name))
+    voice_hint = voice_tag_note(card)
     if voice_hint:
         tail.append(voice_hint)
     if retake_of:
         # "Another take": the take being replaced is no longer in the history, so the
         # model had nothing to differ from and wrote much the same reply again. Quoting
-        # it also lets the DRY sampler penalise reusing its wording. Before the boundary
-        # note, which stays as late as possible.
+        # it also lets the DRY sampler penalise reusing its wording.
         tail.append(retake_note(retake_of, char_name, user_name))
-    if direction and direction.strip():
-        # The user's note for Continue / Another take. Before the boundary note: it
-        # steers what happens, and the boundary still has the last word on what she'll do.
-        tail.append(direction_note(sub(direction), char_name, user_name, retake=bool(retake_of)))
-    if boundary_note:
-        tail.append(sub(boundary_note))
-    latest = next((m for m in reversed(session.messages) if m.role != "system"), None)
-    if not assistant and latest is not None and latest.role in ("narrator", "char"):
-        # A turn {{user}} didn't take: reacting to a narrated event, or Continue.
-        tail.append(roleplay_turn_note(latest, char_name, user_name, sub))
-    elif last_user:
-        tail.append(focus_note(sub(last_user), char_name, user_name, assistant))
-    if tail:
-        after.append({"role": "system", "content": "\n\n".join(tail)})
+    if last_user:
+        tail.append(focus_note(sub(last_user), char_name, user_name))
+    after.append({"role": "system", "content": "\n\n".join(tail)})
 
     # --- fit the window: drop the oldest verbatim turns, never the system block ---
     # Overflow is otherwise silent and cuts from the FRONT (PROMPT_BUDGET.md), which
-    # deletes the persona, relationship and memory first. Dropping old turns instead
-    # loses only what the summary is about to absorb anyway.
+    # deletes the persona and memory first. Dropping old turns instead loses only what
+    # the memory fold is about to absorb anyway.
     if context_tokens:
         history, dropped = context.fit_history(
             messages + after, history, context_tokens,

@@ -39,8 +39,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 async def reply_to(kob, card, persona, settings, text: str, max_tokens: int) -> str:
     """Build the prompt exactly as chat() does for an assistant, then generate.
 
-    No relationship note and no boundary note: those are gated off for assistant
-    cards, and passing them here would measure a configuration nobody runs."""
+    The same build_messages call chat() makes, minus memory and the context window."""
     s = ChatSession(character_id=card.id, persona_id=persona.id)
     s.messages = [ChatMessage(role="user", content=text)]
     msgs = prompt_builder.build_messages(
@@ -76,8 +75,7 @@ async def main() -> int:
     root = glob.glob("/app/data/u/*")[0] if os.path.isdir("/app/data") else glob.glob("data/u/*")[0]
     card = next(CharacterCard.model_validate_json(open(p).read())
                 for p in glob.glob(f"{root}/characters/*.json")
-                if json.load(open(p)).get("chat_mode") == "assistant"
-                and json.load(open(p)).get("expressions"))
+                if json.load(open(p)).get("expressions"))
     persona = Persona.model_validate_json(
         open(glob.glob(f"{root}/personas/*.json")[0]).read())
     settings = next((AppSettings.model_validate_json(open(p).read())

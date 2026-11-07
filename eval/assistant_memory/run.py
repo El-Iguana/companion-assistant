@@ -110,8 +110,7 @@ async def main() -> int:
 
     root = glob.glob("/app/data/u/*")[0] if os.path.isdir("/app/data") else glob.glob("data/u/*")[0]
     card = next(CharacterCard.model_validate_json(open(p).read())
-                for p in glob.glob(f"{root}/characters/*.json")
-                if json.load(open(p)).get("chat_mode") == "assistant")
+                for p in sorted(glob.glob(f"{root}/characters/*.json")))
     persona = Persona.model_validate_json(
         open(glob.glob(f"{root}/personas/*.json")[0]).read())
     kob = KoboldClient(os.environ.get("KOBOLD_URL", "http://koboldcpp:5001"))

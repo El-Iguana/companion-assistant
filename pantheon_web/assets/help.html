@@ -5,78 +5,81 @@
 {% raw %}
 
           <section>
+            <h2>Cantinero <span class="muted">— El Iguana&rsquo;s bartender, at your service.</span></h2>
+            <p>Your assistants are <strong>the staff</strong>: each card is a bartender working a shift.
+              Whoever you talked to last is <strong>on shift</strong> (the desktop can pin one in
+              Settings → Voice). <strong>Mira</strong> is the first one on shift in a new library — wake
+              word “Mira”, the bundled sample avatar. Edit her, hire more with <strong>Hire</strong>, or let
+              her go; she is not re-added.</p>
+            <p>Talk with the speaker and the microphone buttons in a chat: push-to-talk (hold) or
+              hands-free (toggle), with the bartender’s wake word and sleep phrase. Each one remembers
+              <strong>standing orders</strong> (instructions it follows), facts about you, and where things
+              stand — open the chat’s ⋮ → Memory to review or correct them.</p>
+            <p><strong>The Menu</strong> is what the staff can do beyond conversation: a skill is
+              <em>on the menu</em>, and enabling one for a bartender is <em>adding it to the menu</em>. Coming
+              first: the house clock and machine status, and the DJ — find and play music and video
+              through Orpheus. Neither is on the menu yet.</p>
+          </section>
+
+          <section>
             <h2>Custom system prompts — curating the experience</h2>
             <p>The <strong>System prompt</strong> is the “director’s note” at the very top of what the
-              model sees. It sets the frame — tone, format, pacing, boundaries — that everything else
-              operates inside. It is <em>not</em> the whole character: identity and lore are injected
-              separately, so you don’t need to restate them here.</p>
+              model sees. It sets the frame — tone, format, pacing — that everything else operates inside.
+              It is <em>not</em> the whole bartender: identity and lore are injected separately, so you
+              don’t need to restate them here.</p>
 
             <h3>How the prompt is assembled</h3>
             <ol>
-              <li><strong>System prompt</strong> (yours, or the <code>Chat mode</code> default)</li>
+              <li><strong>System prompt</strong> (yours, or the built-in assistant prompt)</li>
               <li><code>About {{user}}</code> — the persona</li>
-              <li>the <strong>relationship</strong> descriptor (stage, intimacy, mood)</li>
-              <li>lorebook entries → the <strong>character</strong> block (description, personality, scenario)
-                → example dialogue</li>
-              <li>memory (pinned facts + running summary)</li>
+              <li>lorebook entries → the <strong>character</strong> block (description, personality,
+                background) → example dialogue</li>
+              <li>memory (pinned facts, standing orders, facts, where things stand) and today’s date</li>
               <li>…the chat history…</li>
               <li><strong>Post-history instructions</strong> — a second system message <em>after</em> the history</li>
+              <li>the reply-format reminder, then your latest message quoted back</li>
             </ol>
 
             <h3>Two slots, different jobs</h3>
             <ul>
               <li><strong>System prompt (top):</strong> the frame. Read first, but a long chat can drift from it.</li>
               <li><strong>Post-history instructions (bottom):</strong> strongest adherence. Put the one or two
-                hard rules the model keeps forgetting here (e.g. “Never write {{user}}’s dialogue”).</li>
+                hard rules the model keeps forgetting here (e.g. “Always answer in British English”).</li>
             </ul>
 
             <h3>What you can curate</h3>
             <ul>
-              <li><strong>Prose &amp; POV</strong> — “third-person past-tense literary prose” vs “casual texting, no narration”.</li>
-              <li><strong>Length / pacing</strong> — “reply in 2–4 sentences”, “a single line of dialogue”.</li>
-              <li><strong>Dialogue vs action balance</strong> — “mostly spoken dialogue, minimal action”.</li>
-              <li><strong>Tone</strong> — wry, tender, ominous, comedic, clinical.</li>
-              <li><strong>Anti-patterns</strong> — “don’t repeat earlier phrasing”, “don’t end by asking what I want to do”.</li>
-              <li><strong>World on/off</strong> — a custom prompt replaces the <code>Chat mode</code> default, so add
-                “no invented setting/scene” yourself if you want assistant behaviour with a custom prompt.</li>
+              <li><strong>Length / pacing</strong> — “reply in 2–4 sentences”, “lead with the answer”.</li>
+              <li><strong>Tone</strong> — wry, warm, clipped, formal, playful.</li>
+              <li><strong>Address</strong> — “call me Captain”. (Or just say it in a chat: it becomes a standing order.)</li>
+              <li><strong>Anti-patterns</strong> — “don’t repeat earlier phrasing”, “don’t end by offering more help”.</li>
             </ul>
 
-            <h3>App trick: formatting drives the voice</h3>
-            <p>Text-to-speech here <strong>speaks only words in "double quotes"</strong> and strips
-              <code>*asterisk actions*</code>. So a formatting rule is also a voice control:</p>
-            <div class="help-example">
-              <div class="help-example-head"><strong>Voice-clean formatting</strong>
-                <button class="btn-mini help-copy">Copy</button></div>
-              <pre>Always put spoken words in "double quotes" and physical actions in *asterisks*. Keep narration brief.</pre>
-            </div>
+            <h3>Everything is spoken</h3>
+            <p>Every word of a reply is read aloud, so the built-in prompt asks for plain spoken prose:
+              no markdown, tables or lists, numbers as words. Anything that slips through is cleaned before
+              it is spoken, but a custom prompt should keep the rule.</p>
 
             <h3>Gotcha</h3>
-            <p>Your custom prompt <strong>fully replaces</strong> the built-in default — which is where the
-              guardrails live (one reply, stay in character, don’t speak for {{user}}, no repetition, never
-              mention being an AI). If you write a bare prompt, <strong>bake those in</strong> or keep them in
-              Post-history instructions.</p>
+            <p>Your custom prompt <strong>fully replaces</strong> the built-in one — which is where the
+              guardrails live (one reply, no invented scene, speak for the ear, don’t speak for {{user}},
+              no repetition, never mention being an AI). If you write a bare prompt, <strong>bake those
+              in</strong> or keep them in Post-history instructions.</p>
 
             <h3>Examples — copy &amp; paste into a card’s System prompt</h3>
 
             <div class="help-example">
-              <div class="help-example-head"><strong>Witty assistant (Jarvis-style, no scene)</strong>
+              <div class="help-example-head"><strong>Witty assistant (Jarvis-style)</strong>
                 <button class="btn-mini help-copy">Copy</button></div>
-              <pre>You are {{char}}, in direct conversation with {{user}} — no scene or setting to narrate; never invent surroundings or events. Voice: dry, precise, quietly witty, unflappably competent. Reply in 1–4 sentences, mostly plain speech. Put any spoken words in "quotes". Write only {{char}}'s next reply; never speak or act for {{user}}; don't repeat earlier phrasing; stay in character and never mention being an AI.</pre>
+              <pre>You are {{char}}, in direct conversation with {{user}} — no scene or setting to narrate; never invent surroundings or events. Voice: dry, precise, quietly witty, unflappably competent. Everything you say is spoken aloud: plain sentences, no markdown or lists, numbers as words. Reply in 1–4 sentences and lead with the answer. Write only {{char}}'s next reply; never speak or act for {{user}}; don't repeat earlier phrasing; stay in character and never mention being an AI.</pre>
             </div>
 
             <div class="help-example">
-              <div class="help-example-head"><strong>Literary roleplay narrator</strong>
+              <div class="help-example-head"><strong>Warm bartender</strong>
                 <button class="btn-mini help-copy">Copy</button></div>
-              <pre>You are {{char}} in an ongoing story with {{user}}. Write in immersive third-person present tense: vivid but economical prose, "dialogue in quotes", *actions in asterisks*. Advance the moment by ONE concrete beat, 3–6 sentences, then stop. Never narrate, speak, or decide for {{user}}. No repetition; end mid-scene, not on a question.</pre>
+              <pre>You are {{char}}, the bartender {{user}} talks to at the end of the day. Friendly, unhurried, a little teasing; you remember what {{user}} tells you. No scene or setting — just what you say out loud, in plain spoken sentences. 1–3 sentences. Never speak for {{user}}; stay in character.</pre>
             </div>
 
-            <div class="help-example">
-              <div class="help-example-head"><strong>Casual texting companion</strong>
-                <button class="btn-mini help-copy">Copy</button></div>
-              <pre>You are {{char}} texting {{user}}. Casual, warm, lowercase, no narration or *actions* — just what you'd actually type. 1–3 short lines. Put everything in "quotes" so it's all spoken. Never text as {{user}}; stay in character.</pre>
-            </div>
-
-            <p class="muted">Both fields live in the character editor (System prompt / Post-history
-              instructions) and are per-character. Prefer the built-in <code>Chat mode</code> toggle for a
-              quick roleplay↔assistant switch without writing a prompt.</p>
+            <p class="muted">Both fields live in the Staff studio (System prompt / Post-history
+              instructions) and are per-bartender.</p>
           </section>

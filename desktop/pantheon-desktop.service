@@ -9,14 +9,14 @@
 #
 # Installed by `stack install desktop` (path rendered from @ECO@).
 [Unit]
-Description=Pantheon desktop avatar
-# She is a window onto the companion container; without it there is nothing to show.
+Description=Cantinero desktop avatar
+# She is a window onto the companion-assistant container; without it there is nothing to show.
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@ECO@/companion/desktop/pantheon-desktop.py
+ExecStart=@ECO@/companion-assistant/desktop/pantheon-desktop.py
 Restart=on-failure
 RestartSec=3
 # The renderer is a continuous WebGL loop sharing the GPU with KoboldCPP and

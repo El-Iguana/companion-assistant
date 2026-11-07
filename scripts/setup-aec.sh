@@ -67,9 +67,9 @@ context.modules = [
       library.name = aec/libspa-aec-webrtc
       capture.props   = { node.name = "effect_input.pantheon-aec",  node.passive = true }
       source.props    = { node.name = "aec_source",
-                          node.description = "Echo-Cancelled Mic (Pantheon)" }
+                          node.description = "Echo-Cancelled Mic (Cantinero)" }
       sink.props      = { node.name = "aec_sink",
-                          node.description = "Echo-Cancelled Out (Pantheon)" }
+                          node.description = "Echo-Cancelled Out (Cantinero)" }
       playback.props  = { node.name = "effect_output.pantheon-aec", node.passive = true }
     }
   }

@@ -1,4 +1,4 @@
-"""Pantheon's sign-in page: pytincture's login form, relabelled and restyled.
+"""Cantinero's sign-in page: pytincture's login form, relabelled and restyled.
 
 pytincture renders the form itself. Two things have to change, one functional and one
 cosmetic:
@@ -46,15 +46,15 @@ _HEAD = b"""<style>
   .submit-button:hover{filter:brightness(1.05);}
   .error,.login-error,.alert{color:#f0a3a3 !important;}
 </style>
-<title>Pantheon</title>
+<title>Cantinero</title>
 </head>"""
 
 _REWRITES: tuple[tuple[bytes, bytes], ...] = (
     (b'type="email" name="email"', b'type="text" name="email" autocomplete="username" autofocus'),
     (b'placeholder="Email"', b'placeholder="Username"'),
     (b'value="Login with Email"', b'value="Sign in"'),
-    (b"<h2>Welcome</h2>", b'<div class="su-mark">P</div><h2>Pantheon</h2>'),
-    (b"<p>Please log in to continue</p>", b'<p class="su-tag">characters who remember you</p>'),
+    (b"<h2>Welcome</h2>", b'<div class="su-mark">C</div><h2>Cantinero</h2>'),
+    (b"<p>Please log in to continue</p>", b'<p class="su-tag">Pull up a stool. What&rsquo;ll it be?</p>'),
     # Last, so these rules override the page's own stylesheet.
     (b"</head>", _HEAD),
 )
