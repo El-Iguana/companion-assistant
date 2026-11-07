@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Pantheon administration from the command line.
+Cantinero administration from the command line.
 
-    python3 manage.py probe host.docker.internal 5001   # can Pantheon reach it?
+    python3 manage.py probe host.docker.internal 5001   # can Cantinero reach it?
     python3 manage.py backends               # check KOBOLD_URL and COMFYUI_URL
     python3 manage.py users                  # list accounts
     python3 manage.py reset-password ADMIN   # prompts for the new password
@@ -49,7 +49,7 @@ def probe(host: str, port: int) -> int:
         if "refused" in str(exc).lower():
             print("  Something answers at that address but nothing listens on the port —\n"
                   "  often a backend listening on 127.0.0.1 only. See INSTALL.md,\n"
-                  "  \"Pantheon cannot reach KoboldCPP\".")
+                  "  \"Cantinero cannot reach KoboldCPP\".")
         return 1
     print(f"{host} ({', '.join(addresses)}) port {port}: reachable")
     return 0

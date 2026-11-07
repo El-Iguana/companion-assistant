@@ -29,23 +29,22 @@ from bff.chat import Chat
 from ui.chat import ChatView
 from ui.chats import ChatsView
 from ui.discover import DiscoverView
-from ui.people import PersonasView, PresetsView
+from ui.people import PersonasView
 from ui.settings import HelpView, SettingsView
 from ui.studio import StudioView
 
 APP_ENTRYPOINT = "Pantheon"
 
 TILES = [  # (route, label, icon)
-    ("discover", "Discover", "mdi-compass-outline"),
-    ("create", "Create", "mdi-plus"),
+    ("discover", "Staff", "mdi-glass-cocktail"),
+    ("create", "Hire", "mdi-account-plus-outline"),
     ("chats", "Chats", "mdi-forum-outline"),
     ("personas", "Personas", "mdi-account-outline"),
-    ("presets", "Presets", "mdi-tune-variant"),
     ("settings", "Settings", "mdi-cog-outline"),
 ]
 SCREENS = {
     "discover": DiscoverView, "create": StudioView, "chats": ChatsView,
-    "personas": PersonasView, "presets": PresetsView, "settings": SettingsView,
+    "personas": PersonasView, "settings": SettingsView,
     "chat": ChatView,
     "character": DiscoverView,      # Discover with a profile open: #/character/<id>
     "help": HelpView,
@@ -99,7 +98,7 @@ class Pantheon(MainWindow):
         self._load_css()
         self.set_theme("dark")
         self.apply_theme(_local_get(THEME_KEY) or "bone")
-        js.document.title = "Pantheon"
+        js.document.title = "Cantinero"
 
         self.attach_html("app", self._skeleton())
         root = by_id("pt-app")
@@ -141,12 +140,12 @@ class Pantheon(MainWindow):
         return (
             '<div class="pt-app" id="pt-app">'
             '<aside class="pt-side" id="pt-side">'
-            '<a class="pt-brand" href="#/discover"><span class="pt-logo">P</span>'
-            '<span><b>Pantheon</b><small>characters who remember you</small></span></a>'
+            '<a class="pt-brand" href="#/discover"><span class="pt-logo">C</span>'
+            '<span><b>Cantinero</b><small>Pull up a stool. What&rsquo;ll it be?</small></span></a>'
             f'<nav class="pt-nav">{tiles}</nav>'
             '<div class="pt-side-scroll">'
             '<h4>Recent chats</h4><div id="pt-recent"></div>'
-            '<h4>Your characters</h4><div id="pt-mine"></div>'
+            '<h4>Staff</h4><div id="pt-mine"></div>'
             '</div>'
             '<div class="pt-side-foot">'
             '<button class="pt-btn pt-persona-btn" id="pt-persona" title="Who you are in chats">'
@@ -163,13 +162,13 @@ class Pantheon(MainWindow):
             '<header class="pt-top">'
             '<button class="pt-ibtn pt-burger" id="pt-burger" title="Menu"><i class="mdi mdi-menu"></i></button>'
             '<label class="pt-search"><i class="mdi mdi-magnify"></i>'
-            '<input id="pt-q" type="search" autocomplete="off" placeholder="Search characters, tags…"></label>'
+            '<input id="pt-q" type="search" autocomplete="off" placeholder="Search the staff, tags…"></label>'
             '<span class="pt-spacer"></span>'
             '<span class="pt-status" id="pt-status" title="Backends">'
             '<span class="pt-dot" id="pt-dot-k"></span><span class="pt-dot" id="pt-dot-c"></span>'
             '<span class="pt-status-txt" id="pt-status-txt">checking…</span></span>'
             '<a class="pt-btn primary" href="#/create"><i class="mdi mdi-plus"></i>'
-            '<span class="pt-create-txt">Create</span></a>'
+            '<span class="pt-create-txt">Hire</span></a>'
             '</header>'
             '<div class="pt-view" id="pt-view"></div>'
             '</main>'
@@ -260,11 +259,10 @@ class Pantheon(MainWindow):
             f"ComfyUI: {'up' if c.get('online') else 'offline'}")
 
     # --- memory sweep --------------------------------------------------------------
-    def schedule_sweep(self, session_id: str, scenario: bool = False) -> None:
-        """Arm (or re-arm) the idle fold of one chat into long-term memory. Scenario
-        chats are never swept, as on the classic page. Timers are per chat, so
-        moving on to another chat does not cancel the first one's fold."""
-        if scenario or not session_id:
+    def schedule_sweep(self, session_id: str) -> None:
+        """Arm (or re-arm) the idle fold of one chat into long-term memory. Timers are
+        per chat, so moving on to another chat does not cancel the first one's fold."""
+        if not session_id:
             return
         old = self.sweeps.pop(session_id, None)
         if old is not None:
@@ -283,14 +281,14 @@ class Pantheon(MainWindow):
         s = self.shell
         recent = s.get("recent") or []
         by_id("pt-recent").innerHTML = "".join(self._chat_row(c) for c in recent) or (
-            '<div class="pt-empty-side">No chats yet — start one from Discover.</div>')
+            '<div class="pt-empty-side">No chats yet — pick someone from the Staff.</div>')
         chars = s.get("characters") or []
         by_id("pt-mine").innerHTML = "".join(
             f'<a class="pt-citem" href="#/character/{esc(c["id"])}" data-char="{esc(c["id"])}">'
             + avatar_html(c["name"], portrait_url(c["id"], c.get("updated_at", "")) if c.get("has_portrait") else "", 34)
             + f'<span class="pt-citem-txt"><span class="pt-citem-name">{esc(c["name"])}</span>'
-            f'<span class="pt-citem-sub">{esc(c.get("tagline") or "")}</span></span></a>'
-            for c in chars) or '<div class="pt-empty-side">No characters yet — make one with Create.</div>'
+            f'<span class="pt-citem-sub">{"On shift" if c["id"] == s.get("on_shift") else esc(c.get("tagline") or "")}</span></span></a>'
+            for c in chars) or '<div class="pt-empty-side">No staff yet — hire your first bartender.</div>'
         p = s.get("persona") or {}
         by_id("pt-persona-ava").innerHTML = avatar_html(
             p.get("name", "?"), persona_url(p["id"]) if p.get("has_portrait") else "", 28)

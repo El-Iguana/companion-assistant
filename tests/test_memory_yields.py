@@ -1,7 +1,7 @@
 """Background memory work yields to a reply (main._yield_memory_jobs).
 
-KoboldCPP does one generation at a time. The memory job (summary pass, long-term
-fold, fact extraction) runs right after `done`, so a message sent soon after waited
+KoboldCPP does one generation at a time. The memory job (the assistant memory fold:
+notes, instructions, facts) runs right after `done`, so a message sent soon after waited
 behind it: measured, the next reply's first token at 52 s instead of 2-3 s. A reply
 now cancels a running job by its genkey; the job stores nothing and runs again after
 a later turn. A job that has already yielded MEMORY_MAX_YIELDS times in a row finishes.
@@ -18,17 +18,18 @@ from test_chat_stream import _events, _jobs, cur, model, session  # noqa: F401 â
 
 
 def _wire(monkeypatch, gate: asyncio.Event, aborted: list):
-    """A summary pass that makes one (slow, gated) model call through the job's client."""
+    """A memory fold that makes one (slow, gated) model call through the job's client."""
     stored = []
 
-    async def summarize(kobold, session, card, persona, **k):
+    async def fold(kobold, mem, session, card, persona, upto=None, **k):
         try:                                      # best-effort, like the real one
-            text, _ = await kobold.generate_answer_full("summarize", {"max_length": 400})
+            text, _ = await kobold.generate_answer_full("fold", {"max_length": 400})
         except Exception:
-            return
-        session.memory.summary = text
-        session.memory.last_summarized_index = len(session.messages) - 1
+            return False
+        mem.notes = [text]
+        mem.swept_sessions[session.id] = upto or len(session.messages)
         stored.append(text)
+        return True
 
     async def slow_answer(prompt, params):
         assert params.get("genkey", "").startswith("pantheon-mem-")
@@ -41,7 +42,7 @@ def _wire(monkeypatch, gate: asyncio.Event, aborted: list):
     async def abort(genkey):
         aborted.append(genkey)
 
-    monkeypatch.setattr(main.memory, "summarize", summarize)
+    monkeypatch.setattr(main.assistant_memory, "fold", fold)
     monkeypatch.setattr(main.kobold, "generate_answer_full", slow_answer)
     monkeypatch.setattr(main.kobold, "chat_generate_stream", tokens)
     monkeypatch.setattr(main.kobold, "abort", abort)
@@ -72,7 +73,7 @@ def test_a_reply_cancels_the_running_memory_job(cur, session, model, monkeypatch
     asyncio.run(go())
     assert stored == ["S"]                            # only the job after the second turn stored
     saved = main._load(cur.sessions, session.id, ChatSession)
-    assert saved.memory.summary == "S"
+    assert saved.memory.last_summarized_index > 0
     assert main._memory_yields.get(session.id) is None   # reset by the job that finished
 
 
@@ -91,7 +92,7 @@ def test_a_job_that_yielded_enough_is_left_to_finish(cur, session, model, monkey
         await _jobs()
 
     asyncio.run(go())
-    assert main._load(cur.sessions, session.id, ChatSession).memory.summary == "S"
+    assert main._load(cur.sessions, session.id, ChatSession).memory.last_summarized_index > 0
 
 
 def test_a_job_cancelled_before_its_call_doesnt_start_it(cur, session, model, monkeypatch):
@@ -122,7 +123,7 @@ def test_best_effort_code_cant_swallow_the_yield(cur, session, monkeypatch):
         k.cancelled = True                       # a reply arrived
         try:
             await k.generate_answer("summarize", {})
-        except Exception:                        # what memory.summarize does
+        except Exception:                        # what assistant_memory.fold does
             pass
         carried_on.append("fold")                # the next step must not run
 

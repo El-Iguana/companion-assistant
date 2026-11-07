@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
-# Pantheon — Podman run script
+# Pantheon assistant — Podman run script
 # ============================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE="localhost/companion:latest"
-CONTAINER="companion"
+IMAGE="localhost/companion-assistant:latest"
+CONTAINER="companion-assistant"
 NETWORK="ai-net"
 # Loopback only: the login (pytincture over plain HTTP) refuses anything else. Container and
 # host use the same number because it is also the page's origin.
-PORT="7861"
+PORT="7867"
 
 REBUILD=0
 while [[ $# -gt 0 ]]; do
@@ -46,7 +46,7 @@ if podman container exists "$CONTAINER"; then
   podman rm -f "$CONTAINER"
 fi
 
-mkdir -p "$SCRIPT_DIR"/data/{characters,personas,sessions,relationships,presets,expressions,settings,vrm}
+mkdir -p "$SCRIPT_DIR"/data/{auth,u,vrm}
 
 # Both backend URLs have to move together. They used to not: only KOBOLD_URL was set
 # here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite
@@ -67,7 +67,7 @@ else
 fi
 
 # First-run admin password. Forwarded only if you set it; otherwise the app mints a
-# random one and prints it (podman logs companion) + writes data/auth/INITIAL_PASSWORD.
+# random one and prints it (podman logs companion-assistant) + writes data/auth/INITIAL_PASSWORD.
 SEED_ARG=()
 if [[ -n "${COMPANION_ADMIN_PASSWORD:-}" ]]; then
   SEED_ARG=(-e "COMPANION_ADMIN_PASSWORD=${COMPANION_ADMIN_PASSWORD}")
@@ -108,7 +108,7 @@ podman run -d \
   "$IMAGE"
 
 echo ""
-echo "✓  Pantheon is running."
+echo "✓  Cantinero is running."
 echo "   Open: http://127.0.0.1:${PORT}/   (other devices: http://$(hostname -s).local:${PORT}/)"
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

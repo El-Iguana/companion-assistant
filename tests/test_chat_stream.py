@@ -1,7 +1,7 @@
 """The chat stream and the memory step after it (main.chat, main._memory_job).
 
-A turn saves and sends ``done`` as soon as the reply is complete. The memory summary and
-long-term fold run afterwards in a background job, so they can overlap the next turn, an
+A turn saves and sends ``done`` as soon as the reply is complete. The assistant memory
+fold runs afterwards in a background job, so they can overlap the next turn, an
 edit or a truncate — these tests pin down that none of those loses data. The stream also
 keeps itself alive through silence: pytincture closes a BFF stream after 30 s without an
 item, which once cancelled turns before they were saved (replies streamed in full, then
@@ -36,7 +36,10 @@ def cur():
     u = User(username=f"t{os.urandom(4).hex()}", role="user", salt=salt,
              password_hash=auth.hash_password("x", salt))
     main._save_user(u)
-    return main._ctx_for(u)
+    c = main._ctx_for(u)
+    # Fold early so a short test chat crosses the threshold: 6 un-folded, keep 2 verbatim.
+    main._save_settings(c, main.AppSettings(summarize_after=6, keep_recent=2))
+    return c
 
 
 @pytest.fixture()
@@ -44,14 +47,14 @@ def session(cur):
     card = CharacterCard(name="Iris")
     main._save(card, cur.cards)
     s = ChatSession(character_id=card.id, persona_id=main._default_persona(cur).id)
-    s.messages = [ChatMessage(role="char", content="hello"), ChatMessage(role="user", content="m1"),
-                  ChatMessage(role="char", content="m2")]
+    s.messages = [ChatMessage(role="char", content="hello")] + [
+        ChatMessage(role="user" if i % 2 else "char", content=f"m{i}") for i in range(1, 8)]
     main._save(s, cur.sessions)
     return s
 
 
 class Gate:
-    """Holds the fake summary step open until the test releases it."""
+    """Holds the fake memory fold open until the test releases it."""
     def __init__(self):
         self.started = asyncio.Event()
         self.release = asyncio.Event()
@@ -59,8 +62,8 @@ class Gate:
 
 @pytest.fixture()
 def model(monkeypatch):
-    """Instant tokens; a summary step that folds everything but the last message, and
-    waits on a Gate when one is set."""
+    """Instant tokens; a memory fold that always succeeds, and waits on a Gate when one
+    is set. main then moves the chat's fold index to len(messages) - keep_recent."""
     state = {"gate": None, "token_delay": 0.0}
 
     async def tokens(messages, params):
@@ -68,20 +71,17 @@ def model(monkeypatch):
         for t in ("Hello", " there", "."):
             yield t
 
-    async def summarize(kobold, session, card, persona, **k):
+    async def fold(kobold, mem, session, card, persona, upto=None, **k):
         gate = state["gate"]
         if gate:
             gate.started.set()
             await gate.release.wait()
-        session.memory.summary = "S"
-        session.memory.last_summarized_index = len(session.messages) - 1
-
-    async def no_fold(*a, **k):
-        return False
+        mem.notes = ["folded"]
+        mem.swept_sessions[session.id] = upto or len(session.messages)
+        return True
 
     monkeypatch.setattr(main.kobold, "chat_generate_stream", tokens)
-    monkeypatch.setattr(main.memory, "summarize", summarize)
-    monkeypatch.setattr(main.memory, "fold_into_longterm", no_fold)
+    monkeypatch.setattr(main.assistant_memory, "fold", fold)
     monkeypatch.setattr(main.expressions, "classify", _neutral)   # no model in tests
     monkeypatch.setattr(main, "STREAM_KEEPALIVE_S", 0.05)
     return state
@@ -120,24 +120,24 @@ def _reload(cur, s) -> ChatSession:
 def test_done_arrives_before_the_memory_step_and_the_reply_is_saved(cur, session, model):
     async def go():
         model["gate"] = gate = Gate()
-        evs = await _turn(cur, session)            # returns while the summary is held open
+        evs = await _turn(cur, session)            # returns while the fold is held open
         assert evs[-1].get("done")
         saved = _reload(cur, session)
         assert saved.messages[-1].content == "Hello there."
-        assert saved.memory.summary == ""          # memory hasn't run yet
+        assert saved.memory.last_summarized_index == 0   # memory hasn't run yet
         await gate.started.wait()
         gate.release.set()
         await _jobs()
 
     asyncio.run(go())
-    assert _reload(cur, session).memory.summary == "S"
+    assert _reload(cur, session).memory.last_summarized_index == 10 - 2
 
 
 def test_next_turn_during_the_memory_step_loses_nothing(cur, session, model):
     async def go():
         model["gate"] = gate = Gate()
         await _turn(cur, session, "first")
-        await gate.started.wait()                  # job 1 is mid-summary
+        await gate.started.wait()                  # job 1 is mid-fold
         model["gate"] = None
         await _turn(cur, session, "second")        # the next turn saves meanwhile
         gate.release.set()
@@ -146,22 +146,22 @@ def test_next_turn_during_the_memory_step_loses_nothing(cur, session, model):
     asyncio.run(go())
     s = _reload(cur, session)
     assert [m.content for m in s.messages if m.role == "user"][-2:] == ["first", "second"]
-    assert s.memory.summary == "S"
-    assert s.memory.last_summarized_index == len(s.messages) - 1   # job 2 re-ran on the fresh copy
+    assert len(s.messages) == 12
+    assert s.memory.last_summarized_index == 10 - 2      # job 1's fold landed on the fresh copy
 
 
-def test_stale_turn_save_does_not_roll_back_a_newer_summary(cur, session):
+def test_stale_turn_save_does_not_roll_back_a_newer_fold(cur, session):
     stale = _reload(cur, session)
     fresh = _reload(cur, session)
-    fresh.memory.summary, fresh.memory.last_summarized_index = "S", 2
+    fresh.memory.last_summarized_index = 2
     main._save(fresh, cur.sessions)
     stale.messages.append(ChatMessage(role="user", content="late"))
     main._save_turn(cur, stale)
     s = _reload(cur, session)
-    assert s.messages[-1].content == "late" and s.memory.summary == "S"
+    assert s.messages[-1].content == "late" and s.memory.last_summarized_index == 2
 
 
-def test_editing_a_folded_turn_during_the_memory_step_drops_the_stale_summary(cur, session, model):
+def test_editing_a_folded_turn_during_the_memory_step_drops_the_stale_fold(cur, session, model):
     async def go():
         model["gate"] = gate = Gate()
         await _turn(cur, session)
@@ -173,7 +173,7 @@ def test_editing_a_folded_turn_during_the_memory_step_drops_the_stale_summary(cu
 
     asyncio.run(go())
     s = _reload(cur, session)
-    assert s.messages[1].content == "changed" and s.memory.summary == ""
+    assert s.messages[1].content == "changed" and s.memory.last_summarized_index == 0
 
 
 def test_silence_before_the_first_token_sends_keepalives(cur, session, model):
@@ -198,14 +198,14 @@ def test_client_leaving_mid_stream_does_not_save(cur, session, model):
         await asyncio.sleep(0.5)
 
     asyncio.run(go())
-    assert _reload(cur, session).messages[-1].content == "m2"
+    assert _reload(cur, session).messages[-1].content == "m7"
 
 
 def test_a_memory_edit_saved_while_a_reply_streams_is_kept(cur, session, model, monkeypatch):
     """A turn never changes memory; the Memory modal and the memory job do. The turn
     used to write back the memory it loaded before the reply, losing an edit saved
-    while the reply streamed (it only adopted the stored memory when the summary
-    index had moved)."""
+    while the reply streamed (it only adopted the stored memory when the fold index
+    had moved)."""
     hold = asyncio.Event()
     streaming = asyncio.Event()
 
@@ -214,17 +214,16 @@ def test_a_memory_edit_saved_while_a_reply_streams_is_kept(cur, session, model, 
         await hold.wait()
         yield "Hello."
 
-    async def no_summary(*a, **k):      # the job folds into the stored summary; not under test
-        return None
+    async def no_fold(*a, **k):          # the job's fold; not under test
+        return False
 
     monkeypatch.setattr(main.kobold, "chat_generate_stream", slow_tokens)
-    monkeypatch.setattr(main.memory, "summarize", no_summary)
+    monkeypatch.setattr(main.assistant_memory, "fold", no_fold)
 
     async def go():
         turn = asyncio.create_task(_turn(cur, session))
         await streaming.wait()
-        await main.set_memory(session.id, {"pinned": ["Afraid of deep water"],
-                                           "summary": "Edited by hand."}, cur=cur)
+        await main.set_memory(session.id, {"pinned": ["Afraid of deep water"]}, cur=cur)
         hold.set()
         await turn
         await _jobs()
@@ -232,5 +231,4 @@ def test_a_memory_edit_saved_while_a_reply_streams_is_kept(cur, session, model, 
     asyncio.run(go())
     saved = _reload(cur, session)
     assert saved.memory.pinned == ["Afraid of deep water"]
-    assert saved.memory.summary == "Edited by hand."
     assert saved.messages[-1].content == "Hello."

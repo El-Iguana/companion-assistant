@@ -53,8 +53,8 @@ COPY --from=muninn-git /src /
 # ── Pantheon ─────────────────────────────────────────────────────────────────
 FROM ${PYTHON_IMAGE}
 
-LABEL org.opencontainers.image.title="Pantheon"
-LABEL org.opencontainers.image.description="Character-card AI companion (FastAPI + KoboldCPP)"
+LABEL org.opencontainers.image.title="Cantinero"
+LABEL org.opencontainers.image.description="El Iguana's bartender — at your service. A character-card voice assistant (FastAPI + KoboldCPP)."
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl libglib2.0-0 libgomp1 espeak-ng libsndfile1 \
@@ -89,18 +89,6 @@ RUN mkdir -p /app/models/snac && \
 ENV PIPER_DIR=/app/models/piper
 RUN mkdir -p ${PIPER_DIR}
 
-# Bake the embedding model for semantic recall (MEMORY_PLAN Phase 4).
-# int8-quantized BGE-small-en-v1.5, 33 MB, CPU-only via the onnxruntime already
-# here for rembg — deliberately NOT the 127 MB fp32 build: both scored 5/5 top-1
-# on the same retrieval probe with cosine scores within 0.02, so fp32 bought
-# nothing but image size. No VRAM is used; the GPU stays for KoboldCPP/ComfyUI.
-ENV EMBED_DIR=/app/models/embed
-ENV EMBED_MODEL=${EMBED_DIR}/model.onnx
-ENV EMBED_TOKENIZER=${EMBED_DIR}/tokenizer.json
-RUN mkdir -p ${EMBED_DIR} && \
-    curl -fsSL -o "$EMBED_MODEL" https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx && \
-    curl -fsSL -o "$EMBED_TOKENIZER" https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json
-
 # Bake the faster-whisper STT model (CPU int8) into the image.
 ENV WHISPER_MODEL=base.en
 ENV WHISPER_CACHE=/app/models/whisper
@@ -116,9 +104,11 @@ COPY static/ ./static/
 # The page (pytincture): browser code + BFF classes, and its server-side helpers.
 COPY pantheon_web/ ./pantheon_web/
 COPY appcode/ ./appcode/
+# The example assistant (Mira) every new library starts with; main._seed_library.
+COPY seed/ ./seed/
 COPY --from=wapyt-wheels /wheels/browser/wapyt-99.99.99-py3-none-any.whl ./appcode/
 
-RUN mkdir -p /app/data/characters /app/data/personas /app/data/sessions /app/data/expressions /app/data/settings
+RUN mkdir -p /app/data/auth /app/data/u /app/data/vrm
 
 # The redistributable default avatar. A new, empty named volume is filled from
 # the image the first time it is mounted, so compose installs start with it; a
@@ -132,9 +122,9 @@ ENV KOBOLD_URL=http://koboldcpp:5001
 # and compose publish it on 127.0.0.1 only, because the login is loopback-only.
 # PANTHEON_PORT must equal the published host port: it is also the page's origin.
 ENV PANTHEON_BIND=0.0.0.0 \
-    PANTHEON_PORT=7861
+    PANTHEON_PORT=7867
 
-EXPOSE 7861
+EXPOSE 7867
 
 # HEALTHCHECK is a docker-format field with no OCI slot, so podman drops it unless the build
 # passes --format docker (run-podman.sh does). Without that flag this block is silently inert.

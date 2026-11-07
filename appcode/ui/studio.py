@@ -5,7 +5,6 @@ A full page: the form on the left in sections, a phone-shaped live preview on th
 Everything the classic card editor did is here:
 
 * fields, greetings (a repeater, not one-per-line), starters, lorebook entries;
-* relationship context (power / social sliders — roleplay cards only);
 * expression sprites (generate a set as a background job, per-sprite regenerate and
   delete, at in-chat portrait framing) and the 3D avatar (VRM import with its audit);
 * voice (Kokoro/Piper, pace, test) and the hands-free phrases;
@@ -29,20 +28,11 @@ from bff.studio import Studio
 from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, csrf_token, esc,
                        failed, portrait_url, spawn, toast)
 
-STAGES = ["", "Acquaintance", "Friend", "Close", "Romantic", "Intimate"]
 STYLES = ["anime", "none", "photorealistic", "fantasy_art", "cinematic", "dark_fantasy"]
-PRONOUNS = [("", "she / her (default)"), ("he/him", "he / him"), ("they/them", "they / them"), ("it/its", "it / its")]
 SECTIONS = [("basics", "Basics"), ("persona", "Personality"), ("greet", "Greetings"),
-            ("context", "Relationship"), ("lore", "Lorebook"), ("look", "Expressions"),
+            ("lore", "Lorebook"), ("look", "Expressions"),
             ("avatar", "3D avatar"), ("voice", "Voice"), ("advanced", "Advanced")]
 JOB_POLL_MS = 2000
-
-
-def _power_label(v: float) -> str:
-    v = int(v)
-    if v == 0:
-        return "equal footing"
-    return f"{abs(v)} → {'they' if v > 0 else 'you'} hold power"
 
 
 def _draft_key(card_id: str) -> str:
@@ -100,7 +90,7 @@ class StudioView:
             return
         if failed(r, "open the studio"):
             self.root.innerHTML = ('<div class="pt-page"><div class="pt-empty">That character could not be '
-                                   'opened. <a href="#/discover">Back to Discover</a></div></div>')
+                                   'opened. <a href="#/discover">Back to the staff</a></div></div>')
             return
         self.data = r
         book = r["card"].get("character_book") or {}
@@ -114,7 +104,7 @@ class StudioView:
     def render(self) -> None:
         c = self.data["card"]
         new = self.data["is_new"]
-        title = "New <em>character</em>" if new else f"Edit <em>{esc(c['name'])}</em>"
+        title = "Hire a <em>bartender</em>" if new else f"Edit <em>{esc(c['name'])}</em>"
         head_btns = []
         if new:
             head_btns.append('<label class="pt-btn"><i class="mdi mdi-file-import-outline"></i>Import card'
@@ -125,7 +115,7 @@ class StudioView:
         nav = "".join(f'<a class="pt-pill" href="#sec-{k}" data-jump="{k}">{label}</a>' for k, label in SECTIONS)
         self.root.innerHTML = (
             '<div class="pt-page pt-studio">'
-            '<div class="pt-studio-head"><div><div class="pt-kicker">Character studio</div>'
+            '<div class="pt-studio-head"><div><div class="pt-kicker">Staff studio</div>'
             f'<h1 class="pt-h1">{title}</h1></div>'
             f'<div class="pt-studio-headbtns">{"".join(head_btns)}</div></div>'
             '<div id="st-draft"></div>'
@@ -136,8 +126,8 @@ class StudioView:
             '</div>'
             '<div class="pt-studio-bar"><span class="pt-dim" id="st-status"></span><span class="pt-flex"></span>'
             '<button class="pt-btn ghost" data-act="cancel">Cancel</button>'
-            + ('<button class="pt-btn" data-act="save">Create</button>'
-               '<button class="pt-btn primary" data-act="save-chat"><i class="mdi mdi-message-plus-outline"></i>Create &amp; chat</button>'
+            + ('<button class="pt-btn" data-act="save">Hire</button>'
+               '<button class="pt-btn primary" data-act="save-chat"><i class="mdi mdi-message-plus-outline"></i>Hire &amp; chat</button>'
                if new else
                '<button class="pt-btn primary" data-act="save"><i class="mdi mdi-content-save-outline"></i>Save</button>')
             + '</div></div>')
@@ -147,7 +137,6 @@ class StudioView:
         self.listeners.on(form, "change", self._on_change)
         if by_id("st-import"):
             self.listeners.on(by_id("st-import"), "change", lambda _e: spawn(self._import(), "import"))
-        self._sync_mode()
         self._sync_avatar_mode()
         self._render_vrm_info()
         self._sync_profile()
@@ -200,24 +189,16 @@ class StudioView:
             + self._inp("Tagline", "creator_notes", c.get("creator_notes"),
                         "One line under their name on cards and the profile (the card's creator notes).",
                         "Noir detective who reads you instantly")
-            + self._inp("Tags", "tags", ", ".join(c.get("tags") or []), "Comma separated — they become Discover's filters.")
-            + '<div class="pt-row2">'
-            + self._sel("Chat mode", "chat_mode",
-                        [("roleplay", "Roleplay — scene & world"), ("assistant", "Assistant — personality, no scene")],
-                        c.get("chat_mode") or "roleplay",
-                        "Assistant mode keeps them out of invented scenes; ignored if you set a custom system prompt.")
-            + self._sel("Pronouns", "pronouns",
-                        PRONOUNS + ([(c["pronouns"], c["pronouns"])] if c.get("pronouns") and c["pronouns"] not in dict(PRONOUNS) else []),
-                        c.get("pronouns") or "",
-                        "How the app writes <i>about</i> them (relationship and boundary text).")
-            + '</div></section>')
+            + self._inp("Tags", "tags", ", ".join(c.get("tags") or []), "Comma separated — they become the Staff page's filters.")
+            + '</section>')
         # --- personality
         sec.append(
             '<section class="pt-sec" id="sec-persona"><h2>Personality <small>use {{char}} and {{user}}</small></h2>'
             + self._area("Description", "description", c.get("description"), 6,
                          "The persistent definition: who they are, history, manner.")
             + self._area("Personality", "personality", c.get("personality"), 2, ph="warm, observant, dry humour")
-            + self._area("Scenario", "scenario", c.get("scenario"), 2, "The current situation or setting.")
+            + self._area("Background", "scenario", c.get("scenario"), 2,
+                         "Context they should know (the card's scenario field). Not a scene to act out.")
             + self._area("Example dialogue", "mes_example", c.get("mes_example"), 4, "&lt;START&gt; blocks, as in SillyTavern.")
             + '</section>')
         # --- greetings + starters
@@ -230,20 +211,6 @@ class StudioView:
             f'<div class="pt-rep" id="st-starters">{"".join(self._starter_row(s) for s in c.get("starters") or [])}</div>'
             '<button class="pt-btn small" data-act="add-starter"><i class="mdi mdi-plus"></i>Add a starter</button>'
             '</section>')
-        # --- relationship context
-        power = float(c.get("power_dynamic") or 0)
-        social = float(c.get("social_acceptance") if c.get("social_acceptance") is not None else 50)
-        sec.append(
-            '<section class="pt-sec" id="sec-context"><h2>Relationship context <small>roleplay only</small></h2>'
-            '<p class="pt-dim" id="st-context-off" hidden>Assistant-mode characters are outside the relationship system.</p>'
-            '<div id="st-context-on">'
-            '<label class="pt-field"><span>Power dynamic · <b id="st-power-val">' + esc(_power_label(power)) + '</b></span>'
-            f'<input type="range" data-f="power_dynamic" min="-100" max="100" step="5" value="{power:g}">'
-            '<small>◀ you hold power · centre = equal footing · they hold power ▶. Either way slows intimacy and adds caution — never compliance.</small></label>'
-            '<label class="pt-field"><span>Social acceptance · <b id="st-social-val">' + f"{social:g}" + '</b></span>'
-            f'<input type="range" data-f="social_acceptance" min="0" max="100" step="5" value="{social:g}">'
-            '<small>0 = taboo or stigmatised · 100 = fully accepted.</small></label>'
-            '</div></section>')
         # --- lorebook
         sec.append(
             '<section class="pt-sec" id="sec-lore"><h2>Lorebook <small>injected when a key appears in the chat</small></h2>'
@@ -295,7 +262,7 @@ class StudioView:
         sec.append(
             '<section class="pt-sec" id="sec-advanced"><h2>Advanced</h2>'
             + self._area("System prompt", "system_prompt", c.get("system_prompt"), 3,
-                         "Replaces the built-in roleplay/assistant prompt entirely.")
+                         "Replaces the built-in assistant prompt entirely (including its spoken-reply rules).")
             + self._area("Post-history instructions", "post_history_instructions",
                          c.get("post_history_instructions"), 2, "Injected after the chat history.")
             + '<div class="pt-row2">'
@@ -319,9 +286,6 @@ class StudioView:
 
     @staticmethod
     def _lore_row(e: dict, i: int) -> str:
-        stage = e.get("min_stage") or ""
-        stages = "".join(f'<option value="{s}"{" selected" if s == stage else ""}>{s + "+" if s else "Any stage"}</option>'
-                         for s in STAGES)
         pos = e.get("position") or "before_char"
         return (
             f'<div class="pt-rep-row" data-rep="lore" data-idx="{i}">'
@@ -330,7 +294,6 @@ class StudioView:
             f'<label class="pt-check"><input type="checkbox" data-lore="constant"{" checked" if e.get("constant") else ""}>Always</label>'
             f'<select data-lore="position"><option value="before_char"{" selected" if pos == "before_char" else ""}>Before</option>'
             f'<option value="after_char"{" selected" if pos == "after_char" else ""}>After</option></select>'
-            f'<select data-lore="min_stage" title="Unlock at or above this relationship stage">{stages}</select>'
             '<button class="pt-mbtn" data-rm="1" title="Remove entry"><i class="mdi mdi-close"></i></button></div>'
             f'<textarea rows="2" data-lore="content" placeholder="Text injected when a key matches…">{esc(e.get("content") or "")}</textarea>'
             '</div>')
@@ -642,13 +605,6 @@ class StudioView:
         if body:
             body.hidden = self._avatar_mode() != "vrm"
 
-    def _sync_mode(self) -> None:
-        mode = self._field("chat_mode") or "roleplay"
-        on, off = by_id("st-context-on"), by_id("st-context-off")
-        if on:
-            on.hidden = mode == "assistant"
-            off.hidden = mode != "assistant"
-
     def _render_vrm_info(self) -> None:
         box = by_id("st-vrm-info")
         if not box:
@@ -765,7 +721,7 @@ class StudioView:
         for el in self.root.querySelectorAll("[data-f]"):
             fields[attr(el, "data-f")] = str(el.value)
         fields["tags"] = [t.strip() for t in fields.get("tags", "").split(",") if t.strip()]
-        for k in ("power_dynamic", "social_acceptance", "tts_speed"):
+        for k in ("tts_speed",):
             if k in fields:
                 fields[k] = float(fields[k] or 0)
         greets = [str(t.value) for t in self.root.querySelectorAll("[data-greet]")]
@@ -784,7 +740,7 @@ class StudioView:
             entry["content"] = str(get("content").value)
             entry["constant"] = bool(get("constant").checked)
             entry["position"] = str(get("position").value)
-            entry["min_stage"] = str(get("min_stage").value)
+            entry.pop("min_stage", None)
             entry.setdefault("enabled", True)
             lore.append(entry)
         return {"fields": fields, "starters": starters, "lore": lore}
@@ -894,11 +850,7 @@ class StudioView:
     def _on_input(self, ev) -> None:
         t = ev.target
         f = attr(t, "data-f")
-        if f == "power_dynamic":
-            by_id("st-power-val").textContent = _power_label(float(t.value))
-        elif f == "social_acceptance":
-            by_id("st-social-val").textContent = str(t.value)
-        elif f == "tts_speed":
+        if f == "tts_speed":
             by_id("st-speed-val").textContent = f"{float(t.value):.2f}"
         elif t.id == "st-denoise":
             by_id("st-denoise-val").textContent = f"{float(t.value):.2f}"
@@ -919,8 +871,6 @@ class StudioView:
         elif attr(t, "name") == "st-avatar":
             self._sync_avatar_mode()
             self._mark_dirty()
-        elif attr(t, "data-f") == "chat_mode":
-            self._sync_mode()
         elif attr(t, "data-f") == "vrm":
             self._render_vrm_info()
         elif attr(t, "name") in ("st-spr-src", "st-spr-method"):
@@ -1115,8 +1065,8 @@ class StudioView:
 
     async def _delete(self) -> None:
         name = self.data["card"].get("name") or "this character"
-        if not await message.confirm(f"Delete {name}? Their relationships and memories are deleted too. Chats "
-                                     "with them stay on disk but no longer appear.", title="Delete character",
+        if not await message.confirm(f"Delete {name}? Their memory is deleted too. Chats "
+                                     "with them stay on disk but no longer appear.", title="Remove from the staff",
                                      ok_text="Delete", danger=True):
             return
         r = await Library().delete_card(self.card_id)

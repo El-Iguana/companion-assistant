@@ -1,6 +1,6 @@
 """Smoke test for the pytincture page: every screen, zero console errors, screenshots.
 
-    PANTHEON_URL=http://127.0.0.1:7861 PANTHEON_USER=… PANTHEON_PASS=… \\
+    PANTHEON_URL=http://127.0.0.1:7867 PANTHEON_USER=… PANTHEON_PASS=… \\
     CHROME=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome \\
       uv run --with playwright python tests/smoke_web.py [shots_dir]
 
@@ -17,12 +17,12 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("PANTHEON_URL", "http://127.0.0.1:7861").rstrip("/")
+URL = os.environ.get("PANTHEON_URL", "http://127.0.0.1:7867").rstrip("/")
 USER = os.environ["PANTHEON_USER"]
 PASS = os.environ["PANTHEON_PASS"]
 CHROME = os.path.expanduser(os.environ.get("CHROME", ""))
 SHOTS = Path(sys.argv[1] if len(sys.argv) > 1 else "tests/shots")
-ROUTES = ["discover", "create", "chats", "personas", "presets", "settings"]
+ROUTES = ["discover", "create", "chats", "personas", "settings"]
 
 
 def _idle(page, timeout=180_000):
@@ -387,7 +387,7 @@ def _confirm(page, label):
 
 
 def phase5_steps(page) -> None:
-    """Personas, presets, settings, password, users, guide, chat memory + context."""
+    """Personas, settings, password, users, guide, chat memory."""
     # personas: create, use, delete
     page.evaluate("location.hash = '#/personas'")
     page.wait_for_selector("[data-new]", timeout=20_000)
@@ -409,24 +409,6 @@ def phase5_steps(page) -> None:
     _confirm(page, "Delete")
     page.wait_for_function(f"document.querySelectorAll('.pt-pcard').length && "
                            f"[...document.querySelectorAll('.pt-pcard')].filter(c => c.innerText.includes('Smoke Persona')).length === {n - 1}",
-                           timeout=10_000)
-
-    # presets: create with a slider, then delete
-    page.evaluate("location.hash = '#/presets'")
-    page.wait_for_selector("[data-new]", timeout=20_000)
-    page.click("[data-new]")
-    page.fill("#pr-name", "Smoke Preset")
-    page.fill("#pr-note", "The test begins.")
-    page.eval_on_selector('[data-key="trust"]', "el => { el.value = 40; el.dispatchEvent(new Event('input', {bubbles: true})); }")
-    page.screenshot(path=str(SHOTS / "preset-editor.png"))
-    page.click("[data-save]")
-    page.wait_for_selector(".pt-crow:has-text('Smoke Preset')", timeout=10_000)
-    assert "trust 40" in page.locator(".pt-crow:has-text('Smoke Preset')").last.inner_text()
-    n = page.locator(".pt-crow:has-text('Smoke Preset')").count()
-    page.locator(".pt-crow:has-text('Smoke Preset')").first.click()
-    page.click(".pt-modal [data-delete]")
-    _confirm(page, "Delete")
-    page.wait_for_function(f"[...document.querySelectorAll('.pt-crow')].filter(c => c.innerText.includes('Smoke Preset')).length === {n - 1}",
                            timeout=10_000)
 
     # settings: change, save, reload, restore
@@ -475,10 +457,10 @@ def phase5_steps(page) -> None:
     page.wait_for_function("document.querySelector('#help-body').textContent.includes('{{char}}')", timeout=15_000)
     page.screenshot(path=str(SHOTS / "help.png"))
 
-    # chat memory + relationship context, in the first roleplay chat in the list
+    # chat memory, in a chat with the seeded example assistant
     page.evaluate("location.hash = '#/chats'")
-    page.wait_for_selector(".pt-crow:not(:has(.pt-tag))", timeout=20_000)
-    page.locator(".pt-crow:has-text('Iris')").first.click()
+    page.wait_for_selector(".pt-crow:has-text('Mira')", timeout=20_000)
+    page.locator(".pt-crow:has-text('Mira')").first.click()
     page.wait_for_selector("#ch-msgs .pt-msg", timeout=20_000)
     page.click('[data-menu="head"]')
     page.click(".wapyt-cmenu-item:has-text('Memory')")
@@ -497,19 +479,10 @@ def phase5_steps(page) -> None:
     vals = page.eval_on_selector_all('[data-row] input', "els => els.map(e => e.value)")
     assert "Smoke pinned fact" in vals and "Smoke long-term fact" in vals, vals
     page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
     page.click('[data-menu="head"]')
-    page.click(".wapyt-cmenu-item:has-text('Relationship context')")
-    page.wait_for_selector("#cx-power", timeout=10_000)
-    page.eval_on_selector("#cx-power", "el => { el.value = 30; el.dispatchEvent(new Event('input', {bubbles: true})); }")
-    page.screenshot(path=str(SHOTS / "context.png"))
-    page.click("[data-save]")
-    page.wait_for_timeout(1000)
-    page.click('[data-menu="head"]')
-    page.click(".wapyt-cmenu-item:has-text('Relationship context')")
-    page.wait_for_selector("#cx-power", timeout=10_000)
-    assert page.input_value("#cx-power") == "30"
-    page.click("[data-clear]")
-    page.wait_for_timeout(800)
+    assert page.locator(".wapyt-cmenu-item:has-text('Relationship')").count() == 0
+    page.keyboard.press("Escape")
 
 
 def main() -> int:
@@ -565,7 +538,7 @@ def run_steps(browser, page, errors: list) -> None:
             assert page.locator(f".pt-tile.on[data-tile={route}]").count() == 1, route
             page.screenshot(path=str(SHOTS / f"{route}.png"))
 
-        # --- Phase 2: Discover, profile, scenario, start chat -------------------
+        # --- Phase 2: Discover, profile, start chat ------------------------------
         page.evaluate("location.hash = '#/discover'")
         page.wait_for_selector(".pt-card", timeout=15_000)
         page.screenshot(path=str(SHOTS / "discover-grid.png"), full_page=True)
@@ -586,13 +559,7 @@ def run_steps(browser, page, errors: list) -> None:
             before = page.inner_text(".pt-greet")
             page.click("[data-greet='1']")
             assert page.inner_text(".pt-greet") != before, "greeting picker should switch text"
-        if page.locator("[data-act=scenario]").count():
-            page.click("[data-act=scenario]")
-            page.wait_for_selector("#sc-preset", timeout=5_000)
-            page.wait_for_timeout(500)                      # let the fade-in finish
-            page.screenshot(path=str(SHOTS / "scenario.png"))
-            page.click(".pt-narrow [data-close]")
-            page.wait_for_timeout(300)
+        assert page.locator("[data-act=scenario]").count() == 0, "no scenario wizard here"
         page.keyboard.press("Escape")
         page.wait_for_timeout(400)
         assert page.locator(".pt-prof").count() == 0, "Esc should close the profile"

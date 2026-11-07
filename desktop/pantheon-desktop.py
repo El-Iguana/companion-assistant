@@ -3,7 +3,7 @@
 
 A borderless, transparent GTK4 window holding a WebKit view of the app's
 /desktop page. It contains no application logic at all -- the container on
-:7861 stays the brain, and this is a picture frame.
+:7867 stays the brain, and this is a picture frame.
 
 Why GTK4 + WebKitGTK rather than Electron: both are already on this host, and
 WebKitGTK was measured to do everything the avatar needs -- WebGL 2.0,
@@ -48,7 +48,7 @@ from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
-DEFAULT_URL = "http://127.0.0.1:7861/desktop"
+DEFAULT_URL = "http://127.0.0.1:7867/desktop"
 # The HUD lives in a strip along the bottom. Only that strip accepts clicks;
 # everything above it passes through to whatever is on the desktop behind her.
 HUD_STRIP_PX = 56
@@ -82,7 +82,7 @@ class DesktopShell(Gtk.Application):
         self.win = Gtk.ApplicationWindow(application=self)
         self.win.set_default_size(self.w, self.h)
         self.win.set_decorated(False)
-        self.win.set_title("Pantheon")
+        self.win.set_title("Cantinero")
         # Matched by the KWin rule; keep in step with kwinrule/pantheon.kwinrule.
         self.win.set_name("pantheon-desktop")
 
@@ -287,7 +287,7 @@ class DesktopShell(Gtk.Application):
             MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
             MenuItem(5, "Quit", lambda _i: self.quit()),
         ]
-        self.tray = Tray(APP_ID, "Pantheon", self.icon_name, items,
+        self.tray = Tray(APP_ID, "Cantinero", self.icon_name, items,
                          on_activate=self._menu_toggle_visible)
         if not self.tray.start():
             self.tray = None
@@ -435,7 +435,7 @@ class DesktopShell(Gtk.Application):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Pantheon desktop shell")
+    ap = argparse.ArgumentParser(description="Cantinero desktop shell")
     ap.add_argument("--url", default=os.environ.get("PANTHEON_URL", DEFAULT_URL))
     ap.add_argument("--width", type=int, default=420)
     ap.add_argument("--height", type=int, default=620)

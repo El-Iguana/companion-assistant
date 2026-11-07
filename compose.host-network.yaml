@@ -1,4 +1,4 @@
-# Pantheon on the host's network — Linux only (Docker Engine or Podman). Use
+# Cantinero on the host's network — Linux only (Docker Engine or Podman). Use
 # it INSTEAD of compose.yaml, on its own:
 #
 #   docker compose -f compose.host-network.yaml up -d
@@ -9,19 +9,19 @@
 # only services listening beyond loopback (INSTALL.md, section 4a). Here
 # 127.0.0.1 inside the container *is* this computer.
 #
-# Pantheon then binds 127.0.0.1 itself (its login is loopback-only). Docker
+# Cantinero then binds 127.0.0.1 itself (its login is loopback-only). Docker
 # Desktop (Windows, macOS) and Podman machines run containers in a VM, where
 # host networking means the VM's network: use compose.yaml there.
 
-name: pantheon
+name: companion-assistant
 
 services:
-  pantheon:
-    image: localhost/companion:latest
+  companion-assistant:
+    image: localhost/companion-assistant:latest
     build:
       context: .
       dockerfile: Containerfile
-    container_name: pantheon
+    container_name: companion-assistant
     restart: unless-stopped
     network_mode: host
     environment:
@@ -32,18 +32,18 @@ services:
       # With host networking these ARE the host's addresses, so loopback, not the
       # image's 0.0.0.0 (that one is for published bridge ports).
       PANTHEON_BIND: 127.0.0.1
-      PANTHEON_PORT: ${PANTHEON_PORT:-7861}
+      PANTHEON_PORT: ${PANTHEON_PORT:-7867}
     command: ["python3", "service.py"]
     volumes:
-      - pantheon-data:/app/data
+      - companion-assistant-data:/app/data
       - ${PIPER_VOICES_DIR:-./voices}:/app/models/piper:ro,z
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:${PANTHEON_PORT:-7861}/api/health"]
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:${PANTHEON_PORT:-7867}/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 30s
       retries: 3
 
 volumes:
-  pantheon-data:
-    name: pantheon-data
+  companion-assistant-data:
+    name: companion-assistant-data

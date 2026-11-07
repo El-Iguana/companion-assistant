@@ -93,7 +93,7 @@
 
   // ---- TTS --------------------------------------------------------------------
   let audioCtx = null, ttsSource = null, ttsLevel = 0, ttsHangoverUntil = 0, mouthRAF = null;
-  let ttsRun = 0, speechQueue = [], speechConsuming = false, speechFedLen = 0, anyQuote = false;
+  let ttsRun = 0, speechQueue = [], speechConsuming = false, speechFedLen = 0;
   let firstPiece = true;            // the next segment opens a reply (see enqueueSpeech)
   const liveStreams = new Set();    // AbortControllers of streamed sentences in flight
   let genQueue = [], genBusy = false; // Orpheus sentences waiting to be generated, in order
@@ -116,7 +116,7 @@
 
   function stopSpeaking() {
     ttsRun++;                                   // invalidate any in-flight queue
-    speechQueue = []; speechConsuming = false; speechFedLen = 0; anyQuote = false;
+    speechQueue = []; speechConsuming = false; speechFedLen = 0;
     // Beats belong to the reply that was speaking. Called at the top of every reply too,
     // so this is also the per-reply reset: a repeated label still re-applies next time.
     exprPending = null; exprLive = null;
@@ -430,26 +430,10 @@
     if (speechQueue.some(i => i.run === ttsRun)) consumeSpeech();
   }
 
-  // Roleplay speaks only the QUOTED dialogue (narration and *actions* skipped); a reply
-  // with no quotes at all is spoken whole. Assistant cards have no scene, so quotes there
-  // mark a term or a citation — they speak everything instead.
+  // Assistants speak everything: quotes in a reply mark a term or a citation, not dialogue.
   function feedSpeech(fullText, final) {
     if (!speakingOn()) return;
-    if ((card && card.mode) === "assistant") return feedSpeechWhole(fullText, final);
-    const norm = fullText.replace(/[“”]/g, '"');
-    while (true) {
-      const open = norm.indexOf('"', speechFedLen);
-      if (open < 0) break;
-      const close = norm.indexOf('"', open + 1);
-      if (close < 0) break;                     // still open — wait for more tokens
-      const line = norm.slice(open + 1, close).trim();
-      if (line) { enqueueSpeech(line); anyQuote = true; }
-      speechFedLen = close + 1;
-    }
-    if (final) {
-      if (!anyQuote) enqueueSpeech(cleanForTTS(fullText));
-      speechFedLen = fullText.length;
-    }
+    feedSpeechWhole(fullText, final);
   }
 
   // A sentence at a time, so playback starts while the reply streams. The terminator must

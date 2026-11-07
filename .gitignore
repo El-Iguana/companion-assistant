@@ -43,6 +43,3 @@ voices/*
 appcode/wapyt-*.whl
 
 # Eval results and raw model outputs stay on the machine that ran them
-eval/companion_memory/RESULTS.md
-eval/companion_memory/baseline/
-eval/repetition/RESULTS.md

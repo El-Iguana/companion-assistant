@@ -1,7 +1,8 @@
-"""Pantheon — FastAPI app.
+"""Pantheon assistant — FastAPI app.
 
-A character-card AI companion. Talks to KoboldCPP (text) and optionally ComfyUI
-(portraits/expressions) on the shared `ai-net` Podman network.
+A character-card voice assistant (split from El-Iguana/companion, the roleplay app,
+on 2026-11-07). Talks to KoboldCPP (text) and optionally ComfyUI (portraits/
+expressions) on the shared `ai-net` Podman network.
 
 No database: cards, personas, and sessions are JSON files under data/. Multi-user:
 each account has its own isolated library under data/u/<user_id>/… ; auth is a
@@ -27,13 +28,11 @@ from fastapi.responses import (
 )
 
 from models.schema import (
-    CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest, Relationship, RelationshipPreset,
-    SceneRequest, SessionOptions,
-    AppSettings, AssistantMemory, CharacterMemory, MemoryFact, User,
+    CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest,
+    AppSettings, AssistantMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient, ExprEvent
 from services.comfyui import ComfyUIClient
-from muninn import episodic, relationship
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -44,8 +43,7 @@ DATA = Path(os.environ.get("PANTHEON_DATA_DIR") or (BASE / "data"))
 AUTH = DATA / "auth"
 USERS = AUTH / "users"
 UROOT = DATA / "u"                       # per-user library roots: data/u/<uid>/<subdir>/
-SUBDIRS = ("characters", "personas", "sessions", "relationships", "presets", "settings",
-           "memories", "assistant")
+SUBDIRS = ("characters", "personas", "sessions", "settings", "assistant")
 # Old flat single-user dirs — migrated into the first admin on first run.
 LEGACY = {name: DATA / name for name in SUBDIRS}
 for d in (AUTH, USERS, UROOT):
@@ -60,7 +58,7 @@ comfy = ComfyUIClient(COMFYUI_URL)
 # serves the page, whose BFF classes (appcode/bff/) and plain routes (pantheon_web/) call
 # these handlers directly with the signed-in user's Ctx. The decorators remain as the
 # handlers' contract and for the unit tests; the classic page and its cookie login are gone.
-app = FastAPI(title="Pantheon")
+app = FastAPI(title="Cantinero")
 
 
 # --------------------------------------------------------------------------
@@ -127,10 +125,7 @@ class Ctx:
     cards: Path
     personas: Path
     sessions: Path
-    relationships: Path
-    presets: Path
     settings: Path
-    memories: Path
     assistant: Path
 
 
@@ -144,8 +139,7 @@ def _user_root(uid: str) -> Path:
 def _ctx_for(user: User) -> Ctx:
     r = _user_root(user.id)
     return Ctx(user, r / "characters", r / "personas", r / "sessions",
-               r / "relationships", r / "presets", r / "settings", r / "memories",
-               r / "assistant")
+               r / "settings", r / "assistant")
 
 
 async def current_user(request: Request) -> User:
@@ -167,11 +161,36 @@ async def get_ctx(user: User = Depends(current_user)) -> Ctx:
     return _ctx_for(user)
 
 
+SEED = BASE / "seed"                      # example characters every new library starts with
+
+
+def _seed_library(root: Path) -> int:
+    """Put the example characters (seed/characters/*.json — Mira) into a NEW library.
+
+    Called only where a library is created: the first-run ADMIN and create_user. Never
+    on later loads, so a user who deletes Mira does not get her back. A card already in
+    the library under the same id is left alone. Returns how many were added."""
+    added = 0
+    for f in sorted((SEED / "characters").glob("*.json")):
+        try:
+            card = CharacterCard.model_validate_json(f.read_text())
+        except Exception as e:  # noqa: BLE001 — a broken seed must not block sign-up
+            print(f"[seed] skipped {f.name}: {e}", flush=True)
+            continue
+        target = root / "characters" / f"{card.id}.json"
+        if target.exists():
+            continue
+        card.created_at = card.updated_at = datetime.now().isoformat()
+        _save(card, root / "characters")
+        added += 1
+    return added
+
+
 def _seed_password() -> tuple[str, bool]:
     """The first-run admin password: given, or minted. Never a constant.
 
     A literal here would be the known default admin credential of every install of
-    a shared repo — and the container publishes 7861 on all interfaces, so that is
+    a shared repo — and the container publishes 7867 on all interfaces, so that is
     not only a local concern. Returns (password, generated).
     """
     given = os.environ.get("COMPANION_ADMIN_PASSWORD", "").strip()
@@ -216,6 +235,7 @@ def _seed_and_migrate() -> None:
     if generated:
         _announce_seed_password(password)
     root = _user_root(admin.id)
+    _seed_library(root)
     for name, src in LEGACY.items():
         if not src.exists():
             continue
@@ -232,7 +252,7 @@ _seed_and_migrate()
 
 
 # --------------------------------------------------------------------------
-# Per-user settings / relationship / persona helpers (take the request Ctx)
+# Per-user settings / memory / persona helpers (take the request Ctx)
 # --------------------------------------------------------------------------
 def _load_settings(cur: Ctx) -> AppSettings:
     p = cur.settings / "app.json"
@@ -253,50 +273,6 @@ async def _context_tokens(st: AppSettings) -> int:
     return context.effective(st.context_limit, await kobold.context_limit())
 
 
-def _load_relationship(cur: Ctx, character_id: str, persona_id: str) -> Relationship:
-    p = cur.relationships / f"{character_id}__{persona_id}.json"
-    if p.exists():
-        return Relationship.model_validate_json(p.read_text())
-    return Relationship(character_id=character_id, persona_id=persona_id)
-
-
-def _save_relationship(cur: Ctx, rel: Relationship) -> None:
-    (cur.relationships / f"{rel.character_id}__{rel.persona_id}.json").write_text(
-        rel.model_dump_json(indent=2))
-
-
-def _load_character_memory(cur: Ctx, character_id: str, persona_id: str) -> CharacterMemory:
-    """Cross-session memory for a pairing. Scoped and named exactly like the
-    relationship pair above — same {cid}__{pid}.json convention on purpose."""
-    p = cur.memories / f"{character_id}__{persona_id}.json"
-    if p.exists():
-        try:
-            return CharacterMemory.model_validate_json(p.read_text())
-        except Exception:
-            pass          # unreadable/older shape -> start fresh rather than 500 a chat turn
-    return CharacterMemory(character_id=character_id, persona_id=persona_id)
-
-
-def _memory_index_path(cur: Ctx, character_id: str, persona_id: str):
-    """Vector index for a pairing (Phase 4). Sits beside the CharacterMemory
-    JSON with a non-.json suffix on purpose, so any future `glob("*.json")` over
-    this directory can't mistake it for a model file."""
-    return cur.memories / f"{character_id}__{persona_id}.vec.npz"
-
-
-def _story_index_path(cur: Ctx, character_id: str, persona_id: str):
-    """The pairing's story index: episodes and world details (services/memory.py,
-    "Story memory"). Its own file so its relevance gate is its own."""
-    return cur.memories / f"{character_id}__{persona_id}.story.vec.npz"
-
-
-def _scene_index_paths(cur: Ctx, session_id: str):
-    """A scenario chat's own (turn index, story index): it keeps no pairing memory,
-    since its premise is an alternate one, so it remembers only itself."""
-    return (cur.memories / f"scene-{session_id}.vec.npz",
-            cur.memories / f"scene-{session_id}.story.vec.npz")
-
-
 def _forget_files(paths) -> None:
     for f in paths:
         try:
@@ -306,30 +282,21 @@ def _forget_files(paths) -> None:
 
 
 def _forget_pairings(cur: Ctx, character_id: str = "", persona_id: str = "") -> int:
-    """Delete everything kept per (character, persona) pairing for a deleted character
-    or persona: long-term memory, its recall and story indexes, assistant memory and the
-    relationship. Deleting a character used to leave all of it on disk."""
+    """Delete the assistant memory kept per (character, persona) pairing for a deleted
+    character or persona. Deleting a character used to leave it on disk."""
     if not (character_id or persona_id):
         return 0
     # The id becomes a glob: never let one carry a wildcard ("*" would match everyone).
     if not all(re.fullmatch(r"[A-Za-z0-9_-]+", x) for x in (character_id, persona_id) if x):
         return 0
     pattern = f"{character_id}__*" if character_id else f"*__{persona_id}.*"
-    gone = [f for d in (cur.memories, cur.assistant, cur.relationships) for f in d.glob(pattern)
-            if f.is_file() and "__" in f.name]
+    gone = [f for f in cur.assistant.glob(pattern) if f.is_file() and "__" in f.name]
     _forget_files(gone)
     return len(gone)
 
 
-def _save_character_memory(cur: Ctx, mem: CharacterMemory) -> None:
-    (cur.memories / f"{mem.character_id}__{mem.persona_id}.json").write_text(
-        mem.model_dump_json(indent=2))
-
-
 def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str) -> AssistantMemory:
-    """Assistant memory for a pairing. Same {cid}__{pid} convention as the others,
-    a different directory — an assistant's store must not be reachable by anything
-    reading the companion one, which is the whole reason the pipeline is split."""
+    """Assistant memory for a pairing: data/u/<uid>/assistant/{cid}__{pid}.json."""
     p = cur.assistant / f"{character_id}__{persona_id}.json"
     if p.exists():
         try:
@@ -344,26 +311,19 @@ def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
         mem.model_dump_json(indent=2))
 
 
-def _store_fold(cur: Ctx, before, after) -> None:
-    """Save a long-term fold without losing an edit made while it ran.
+def _store_fold(cur: Ctx, before: AssistantMemory, after: AssistantMemory) -> None:
+    """Save a fold without losing an edit made while it ran.
 
     A fold loads the pairing's memory, spends up to a minute on model calls, then
     used to save it whole, so anything edited in the Memory modal meanwhile was
     overwritten. Now only what the fold changed is applied to what is stored now:
-    the entries it added or evicted (by id), the summary or task notes only if nobody
-    edited them, and its swept-session marks. `before` is a copy taken just before
-    the fold, `after` the folded memory; both CharacterMemory or both AssistantMemory.
+    the entries it added or evicted (by id), the task notes only if nobody edited
+    them, and its swept-session marks. `before` is a copy taken just before the fold.
     """
-    assistant = isinstance(after, AssistantMemory)
-    load = _load_assistant_memory if assistant else _load_character_memory
-    save = _save_assistant_memory if assistant else _save_character_memory
-    fresh = load(cur, after.character_id, after.persona_id)
-    for field in (("notes",) if assistant else ("summary",)):
-        if getattr(fresh, field) == getattr(before, field):
-            setattr(fresh, field, getattr(after, field))
-    if not assistant and after.reviewed_summary != before.reviewed_summary:
-        fresh.reviewed_summary = after.reviewed_summary
-    for field in (("directives", "facts") if assistant else ("facts",)):
+    fresh = _load_assistant_memory(cur, after.character_id, after.persona_id)
+    if fresh.notes == before.notes:
+        fresh.notes = after.notes
+    for field in ("directives", "facts"):
         had = {x.id for x in getattr(before, field)}
         has = {x.id for x in getattr(after, field)}
         added = [x for x in getattr(after, field) if x.id not in had]
@@ -371,7 +331,7 @@ def _store_fold(cur: Ctx, before, after) -> None:
     for sid, idx in after.swept_sessions.items():
         fresh.swept_sessions[sid] = max(fresh.swept_sessions.get(sid, 0), idx)
     fresh.updated_at = after.updated_at
-    save(cur, fresh)
+    _save_assistant_memory(cur, fresh)
 
 
 def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
@@ -384,23 +344,16 @@ def _forget_swept_session(cur: Ctx, session: ChatSession) -> None:
     mid-conversation, permanently skipping everything before that point.
     Deleting a session leaves the mark behind forever instead.
 
-    What was already folded into `summary` stays — long-term memory is durable
-    across chats by design, and clearing one chat is not a request to forget it.
+    What was already folded into directives, facts and notes stays — memory is
+    durable across chats by design, and clearing one chat is not a request to forget it.
     """
-    if session.relationship is not None or not session.character_id:
-        return                    # scenario sessions are never swept (see chat())
-    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
-    card = _load(cur.cards, session.character_id, CharacterCard)
-    if card and getattr(card, "chat_mode", "roleplay") == "assistant":
-        am = _load_assistant_memory(cur, session.character_id, persona.id)
-        if am.swept_sessions.pop(session.id, None) is not None:
-            am.updated_at = datetime.now().isoformat()
-            _save_assistant_memory(cur, am)
+    if not session.character_id:
         return
-    mem = _load_character_memory(cur, session.character_id, persona.id)
-    if mem.swept_sessions.pop(session.id, None) is not None:
-        mem.updated_at = datetime.now().isoformat()
-        _save_character_memory(cur, mem)
+    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
+    am = _load_assistant_memory(cur, session.character_id, persona.id)
+    if am.swept_sessions.pop(session.id, None) is not None:
+        am.updated_at = datetime.now().isoformat()
+        _save_assistant_memory(cur, am)
 
 
 def _clear_other_default_personas(cur: Ctx, keep_id: str) -> None:
@@ -465,7 +418,7 @@ async def create_user(body: dict, _: User = Depends(require_admin)):
     salt = auth.new_salt()
     u = User(username=name, role=role, salt=salt, password_hash=auth.hash_password(pw, salt))
     _save_user(u)
-    _user_root(u.id)            # create their empty private library
+    _seed_library(_user_root(u.id))   # their private library, with the example assistant
     return _safe_user(u)
 
 
@@ -497,21 +450,17 @@ async def reset_password(uid: str, body: dict, _: User = Depends(require_admin))
     return {"ok": True}
 
 
-COPY_KINDS = ("character", "persona", "preset")
+COPY_KINDS = ("character", "persona")
 
 
 @app.post("/api/users/{uid}/copy")
 async def copy_to_user(uid: str, body: dict, admin: User = Depends(require_admin)):
-    """Copy characters, personas and presets from the admin's library into another user's.
+    """Copy characters and personas from the admin's library into another user's.
 
-    ``body.items`` is ``[{"kind": "character"|"persona"|"preset", "id": …}]``. Each copy is
+    ``body.items`` is ``[{"kind": "character"|"persona", "id": …}]``. Each copy is
     a clone under a new id, so it carries everything stored on the record: portrait,
     sprites, voice and speed, wake word, VRM assignment and its still. VRM files are
     shared by every user in ``data/vrm/``, so the model needs no copying.
-
-    A preset's character/persona pairing points at ids in the admin's library. When the
-    paired item is copied in the same call, the pairing follows the new copy; otherwise
-    it is cleared, since the old id means nothing in the other library.
     Copied personas are never the target's default, so their active persona stays put.
     """
     target = _user_by_id(uid)
@@ -524,8 +473,7 @@ async def copy_to_user(uid: str, body: dict, admin: User = Depends(require_admin
         raise HTTPException(400, "nothing selected")
     src, dst = _ctx_for(admin), _ctx_for(target)
     folders = {"character": (src.cards, dst.cards, CharacterCard),
-               "persona": (src.personas, dst.personas, Persona),
-               "preset": (src.presets, dst.presets, RelationshipPreset)}
+               "persona": (src.personas, dst.personas, Persona)}
 
     # Load everything first so a bad id fails the call before anything is written.
     loaded = []
@@ -538,26 +486,16 @@ async def copy_to_user(uid: str, body: dict, admin: User = Depends(require_admin
             raise HTTPException(404, f"{kind} not found: {id_}")
         loaded.append((kind, obj))
 
-    new_ids: dict[tuple[str, str], str] = {}
     copies = []
     for kind, obj in loaded:
         data = obj.model_dump(exclude={"id", "created_at", "updated_at"})
         if kind == "persona":
             data["is_default"] = False
-        copy = folders[kind][2](**data)
-        new_ids[(kind, obj.id)] = copy.id
-        copies.append((kind, copy))
+        copies.append((kind, folders[kind][2](**data)))
 
     out = []
     for kind, copy in copies:
         note = ""
-        if kind == "preset":
-            for field, k in (("character_id", "character"), ("persona_id", "persona")):
-                old = getattr(copy, field)
-                if old:
-                    setattr(copy, field, new_ids.get((k, old), ""))
-                    if not getattr(copy, field):
-                        note = "pairing cleared (paired item not copied)"
         if kind == "character" and copy.vrm and not (_vrm_dir() / Path(copy.vrm).name).is_file():
             note = f"VRM model {copy.vrm} is missing"
         _save(copy, folders[kind][1])
@@ -706,7 +644,7 @@ async def delete_card(card_id: str, cur: Ctx = Depends(get_ctx)):
     p = cur.cards / f"{card_id}.json"
     if p.exists():
         p.unlink()
-    # Its memories, indexes and relationships go with it: nothing else can reach them.
+    # Its assistant memory goes with it: nothing else can reach it.
     return {"ok": True, "forgot": _forget_pairings(cur, character_id=card_id)}
 
 
@@ -831,9 +769,22 @@ async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)
     return Response(content=base64.b64decode(b64), media_type="image/png")
 
 
+BASELINE_VRM = BASE / "data" / "vrm" / "baseline.vrm"   # pixiv sample, redistributable; Mira's
+
+
 def _vrm_dir() -> Path:
+    """data/vrm/, holding at least the bundled baseline model the seeded Mira uses.
+
+    The image and the repo both ship it in data/vrm/, but a library elsewhere (a dev or
+    test PANTHEON_DATA_DIR, a bind mount made before it existed) starts without it, and
+    Mira's avatar then 404s. Copied in once; deleting it later is the user's choice."""
     d = DATA / "vrm"
     d.mkdir(parents=True, exist_ok=True)
+    marker = d / ".baseline-seeded"
+    if not marker.exists():
+        if not (d / BASELINE_VRM.name).exists() and BASELINE_VRM.is_file():
+            shutil.copyfile(BASELINE_VRM, d / BASELINE_VRM.name)
+        marker.touch()
     return d
 
 
@@ -929,8 +880,8 @@ async def get_avatar(card_id: str, cur: Ctx = Depends(get_ctx)):
     if not card.vrm:
         raise HTTPException(404, "card is on the sprite tier")
     # Filename only — never let a card walk out of the models dir.
-    path = (DATA / "vrm" / Path(card.vrm).name).resolve()
-    if not str(path).startswith(str((DATA / "vrm").resolve())) or not path.is_file():
+    path = (_vrm_dir() / Path(card.vrm).name).resolve()
+    if not str(path).startswith(str(_vrm_dir().resolve())) or not path.is_file():
         raise HTTPException(404, "model file missing")
     # Same URL, different bytes whenever the card is pointed at another model,
     # so it must not be cached by the view that loads it.
@@ -1025,72 +976,6 @@ async def delete_persona(persona_id: str, cur: Ctx = Depends(get_ctx)):
 
 
 # --------------------------------------------------------------------------
-# Relationship
-# --------------------------------------------------------------------------
-@app.get("/api/relationship")
-async def get_relationship(character_id: str, persona_id: str, cur: Ctx = Depends(get_ctx)):
-    rel = _load_relationship(cur, character_id, persona_id)
-    card = _load(cur.cards, character_id, CharacterCard)
-    s = relationship.summary(rel)
-    s["power_dynamic"] = rel.power_dynamic if rel.power_dynamic is not None else (card.power_dynamic if card else 0.0)
-    s["social_acceptance"] = rel.social_acceptance if rel.social_acceptance is not None else (card.social_acceptance if card else 50.0)
-    s["context_overridden"] = rel.power_dynamic is not None or rel.social_acceptance is not None
-    return s
-
-
-@app.put("/api/relationship")
-async def set_relationship(body: dict, cur: Ctx = Depends(get_ctx)):
-    """Per-relationship override of context (power_dynamic / social_acceptance). Null clears -> card default."""
-    cid, pid = body.get("character_id"), body.get("persona_id")
-    if not cid or not pid:
-        raise HTTPException(400, "character_id and persona_id required")
-    rel = _load_relationship(cur, cid, pid)
-    if "power_dynamic" in body:
-        rel.power_dynamic = body["power_dynamic"]
-    if "social_acceptance" in body:
-        rel.social_acceptance = body["social_acceptance"]
-    _save_relationship(cur, rel)
-    return relationship.summary(rel)
-
-
-# --------------------------------------------------------------------------
-# Relationship presets (reusable scenario seeds)
-# --------------------------------------------------------------------------
-@app.get("/api/presets")
-async def list_presets(cur: Ctx = Depends(get_ctx)):
-    return [p.model_dump() for p in _list(cur.presets, RelationshipPreset)]
-
-
-@app.post("/api/presets")
-async def create_preset(preset: RelationshipPreset, cur: Ctx = Depends(get_ctx)):
-    _save(preset, cur.presets)
-    return preset.model_dump()
-
-
-@app.get("/api/presets/{preset_id}")
-async def get_preset(preset_id: str, cur: Ctx = Depends(get_ctx)):
-    p = _load(cur.presets, preset_id, RelationshipPreset)
-    if not p:
-        raise HTTPException(404, "preset not found")
-    return p.model_dump()
-
-
-@app.put("/api/presets/{preset_id}")
-async def update_preset(preset_id: str, preset: RelationshipPreset, cur: Ctx = Depends(get_ctx)):
-    preset.id = preset_id
-    _save(preset, cur.presets)
-    return preset.model_dump()
-
-
-@app.delete("/api/presets/{preset_id}")
-async def delete_preset(preset_id: str, cur: Ctx = Depends(get_ctx)):
-    p = cur.presets / f"{preset_id}.json"
-    if p.exists():
-        p.unlink()
-    return {"ok": True}
-
-
-# --------------------------------------------------------------------------
 # Sessions
 # --------------------------------------------------------------------------
 @app.get("/api/sessions")
@@ -1113,15 +998,6 @@ async def create_session(body: dict, cur: Ctx = Depends(get_ctx)):
         title=card.name, character_id=card.id, persona_id=persona.id,
     )
 
-    # Scenario preset: seed a session-scoped relationship + optional opening note.
-    scenario_note = ""
-    preset_id = body.get("preset_id")
-    if preset_id and body.get("mode") == "scenario":
-        preset = _load(cur.presets, preset_id, RelationshipPreset)
-        if preset:
-            session.relationship = relationship.from_preset(preset, card.id, persona.id)
-            scenario_note = preset.scenario_note or ""
-
     # Seed the opening greeting (macros substituted for display).
     greeting_idx = int(body.get("greeting_index", 0))
     greetings = [card.first_mes] + list(card.alternate_greetings)
@@ -1131,9 +1007,7 @@ async def create_session(body: dict, cur: Ctx = Depends(get_ctx)):
         # so a card that ships without a first_mes still opens the chat.
         greeting = next((g for g in greetings if g and g.strip()), "")
     if not (greeting and greeting.strip()):
-        greeting = f"*{card.name} looks up as you arrive, ready to talk.*"
-    if scenario_note:
-        greeting = f"*{scenario_note}*\n\n{greeting}"
+        greeting = "Hello, {{user}}. What can I do for you?"
     session.messages.append(ChatMessage(
         role="char",
         content=prompt_builder.substitute_macros(greeting, card.name, persona.name),
@@ -1147,10 +1021,7 @@ async def get_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
-    d = s.model_dump()
-    if s.relationship is not None:                 # scenario session -> its own summary
-        d["relationship_summary"] = relationship.summary(s.relationship)
-    return d
+    return s.model_dump()
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -1158,7 +1029,6 @@ async def delete_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     s = _load(cur.sessions, session_id, ChatSession)
     if s:
         _forget_swept_session(cur, s)
-    _forget_files(_scene_index_paths(cur, session_id))
     p = cur.sessions / f"{session_id}.json"
     if p.exists():
         p.unlink()
@@ -1206,7 +1076,7 @@ async def get_memory(session_id: str, cur: Ctx = Depends(get_ctx)):
 
 @app.put("/api/sessions/{session_id}/memory")
 async def set_memory(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
-    """Edit the session's pinned facts and/or rolling summary (user-curated)."""
+    """Edit the session's pinned facts (user-curated)."""
     s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
@@ -1215,71 +1085,8 @@ async def set_memory(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
         if not isinstance(raw, list):
             raise HTTPException(400, "pinned must be a list of strings")
         s.memory.pinned = [str(x).strip() for x in raw if str(x).strip()]
-    if "summary" in body:
-        s.memory.summary = str(body.get("summary") or "").strip()
     _save(s, cur.sessions)
     return s.memory.model_dump()
-
-
-@app.get("/api/memories")
-async def get_character_memory(character_id: str, persona_id: str, cur: Ctx = Depends(get_ctx)):
-    """Cross-session memory for one (character, persona) pairing. Same query-param
-    shape as GET /api/relationship, which is scoped identically."""
-    return _load_character_memory(cur, character_id, persona_id).model_dump()
-
-
-@app.put("/api/memories")
-async def put_character_memory(body: dict, cur: Ctx = Depends(get_ctx)):
-    """Edit remembered facts and/or the cross-session history (user-curated).
-
-    Facts round-trip by id so an existing one keeps its `origin` and `created_at`
-    — otherwise every save through the modal would silently relabel auto-written
-    facts as user-written and destroy the audit trail the origin tag exists for.
-    """
-    cid = str(body.get("character_id") or "")
-    pid = str(body.get("persona_id") or "")
-    if not cid or not pid:
-        raise HTTPException(400, "character_id and persona_id are required")
-
-    mem = _load_character_memory(cur, cid, pid)
-    if "facts" in body:
-        raw = body.get("facts") or []
-        if not isinstance(raw, list):
-            raise HTTPException(400, "facts must be a list")
-        known = {f.id: f for f in mem.facts}
-        facts: list[MemoryFact] = []
-        for item in raw:
-            if isinstance(item, str):
-                item = {"text": item}
-            if not isinstance(item, dict):
-                continue
-            # Clamped like an extracted fact: unbounded text here would eat the
-            # whole injection budget and push every other fact out of the block.
-            text = str(item.get("text") or "").strip()[:memory.LONGTERM_FACT_MAX_CHARS]
-            if not text:
-                continue
-            prev = known.get(str(item.get("id") or ""))
-            if prev:
-                prev.text = text
-                facts.append(prev)
-            else:
-                facts.append(MemoryFact(text=text, origin="user"))
-        # Newest-wins if the user blows past the cap — the store must stay bounded.
-        mem.facts = facts[-memory.LONGTERM_MAX_FACTS:]
-    if "summary" in body:
-        mem.summary = str(body.get("summary") or "").strip()
-    if "moments" in body:
-        # Review only: the modal can remove a moment, not write one.
-        keep = {str(m.get("id") if isinstance(m, dict) else m) for m in body.get("moments") or []}
-        mem.moments = [m for m in mem.moments if m.id in keep]
-    mem.updated_at = datetime.now().isoformat()
-    _save_character_memory(cur, mem)
-    # Re-index facts wholesale rather than diffing: they are editable and
-    # deletable, so replace-by-kind is both simpler and correct.
-    await asyncio.to_thread(
-        memory.index_add, _memory_index_path(cur, cid, pid),
-        [{"text": f.text, "kind": "fact"} for f in mem.facts], "fact")
-    return mem.model_dump()
 
 
 @app.get("/api/assistant-memory")
@@ -1347,8 +1154,6 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
     session = _load(cur.sessions, session_id, ChatSession)
     if not session:
         raise HTTPException(404, "session not found")
-    if session.relationship is not None:
-        return {"ok": True, "swept": False, "reason": "scenario session"}
     card = _load(cur.cards, session.character_id, CharacterCard)
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
     if not card:
@@ -1356,41 +1161,22 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
 
     st = _load_settings(cur)
     window = await _context_tokens(st)
-    if getattr(card, "chat_mode", "roleplay") == "assistant":
-        am = _load_assistant_memory(cur, session.character_id, persona.id)
-        am0 = am.model_copy(deep=True)
-        changed = await assistant_memory.fold(
-            kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
-            extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new,
-            context_tokens=window)
-        if changed:
-            _store_fold(cur, am0, am)
-            # Onto a fresh read: the session loaded before the fold would roll back a
-            # message sent while it ran. Only the index moves, and only forward.
-            live = _load(cur.sessions, session.id, ChatSession)
-            mark = am.swept_sessions.get(session.id, 0)
-            if live and mark > live.memory.last_summarized_index:
-                live.memory.last_summarized_index = mark
-                _save(live, cur.sessions)
-        return {"ok": True, "swept": changed, "pipeline": "assistant"}
-
-    mem = _load_character_memory(cur, session.character_id, persona.id)
-    mem0 = mem.model_copy(deep=True)
-    changed = await memory.fold_into_longterm(
-        kobold, mem, session, card, persona, max_tokens=st.summary_max_tokens,
-        index_path=_memory_index_path(cur, session.character_id, persona.id),
-        extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-        context_tokens=window, consolidate=st.longterm_consolidate,
-        story_path=_story_index_path(cur, session.character_id, persona.id) if st.story_memory else None)
-    # Consolidation review: once per state of the memory, so a chat that goes idle
-    # again with nothing new costs no model call.
-    reviewed = False
-    if st.longterm_consolidate and mem.summary and mem.summary != mem.reviewed_summary:
-        reviewed = await memory.review_longterm(kobold, mem, card, persona)
-        mem.reviewed_summary = mem.summary
-    if changed or mem.reviewed_summary != mem0.reviewed_summary:
-        _store_fold(cur, mem0, mem)
-    return {"ok": True, "swept": changed, "reviewed": reviewed}
+    am = _load_assistant_memory(cur, session.character_id, persona.id)
+    am0 = am.model_copy(deep=True)
+    changed = await assistant_memory.fold(
+        kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
+        extract_items=st.auto_facts_enabled, max_new=st.auto_facts_max_new,
+        context_tokens=window)
+    if changed:
+        _store_fold(cur, am0, am)
+        # Onto a fresh read: the session loaded before the fold would roll back a
+        # message sent while it ran. Only the index moves, and only forward.
+        live = _load(cur.sessions, session.id, ChatSession)
+        mark = am.swept_sessions.get(session.id, 0)
+        if live and mark > live.memory.last_summarized_index:
+            live.memory.last_summarized_index = mark
+            _save(live, cur.sessions)
+    return {"ok": True, "swept": changed}
 
 
 @app.delete("/api/sessions/{session_id}/messages")
@@ -1403,8 +1189,7 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
     s.memory.summary = ""
     s.memory.last_summarized_index = 0
     _save(s, cur.sessions)
-    _forget_files(_scene_index_paths(cur, session_id))     # a scenario's own memory starts over too
-    # The pairing's long-term store tracks this chat by position too; resetting
+    # The pairing's memory store tracks this chat by position too; resetting
     # the session's own indices without that one leaves folding stuck.
     _forget_swept_session(cur, s)
     return {"ok": True}
@@ -1418,9 +1203,8 @@ async def clear_messages(session_id: str, cur: Ctx = Depends(get_ctx)):
 # summary skips/duplicates a turn and folding into long-term memory goes wrong (the same
 # failure `_forget_swept_session` documents for clearing).
 #
-# None of these touch mood or the relationship: those move on generation only, exactly
-# as a re-roll leaves them alone. Text already folded into a summary or into long-term
-# memory stays there — editing a line is not a request to rewrite what was remembered.
+# None of these touch mood: it moves on generation only, exactly as a re-roll leaves it
+# alone. Text already folded into memory stays there — editing a line is not a request to rewrite what was remembered.
 
 def _find_message(s: ChatSession, message_id: str) -> int:
     for i, m in enumerate(s.messages):
@@ -1432,19 +1216,16 @@ def _find_message(s: ChatSession, message_id: str) -> int:
 def _shift_swept(cur: Ctx, s: ChatSession, removed_from: int, count: int) -> None:
     """`count` messages starting at index `removed_from` were removed: pull the
     pairing's fold mark back so it still points at the same next-unfolded message."""
-    if count <= 0 or s.relationship is not None or not s.character_id:
+    if count <= 0 or not s.character_id:
         return
     persona = _load(cur.personas, s.persona_id, Persona) or _default_persona(cur)
-    card = _load(cur.cards, s.character_id, CharacterCard)
-    assistant = bool(card) and getattr(card, "chat_mode", "roleplay") == "assistant"
-    store = (_load_assistant_memory(cur, s.character_id, persona.id) if assistant
-             else _load_character_memory(cur, s.character_id, persona.id))
+    store = _load_assistant_memory(cur, s.character_id, persona.id)
     mark = store.swept_sessions.get(s.id)
     if mark is None or mark <= removed_from:
         return
     store.swept_sessions[s.id] = max(removed_from, mark - count)
     store.updated_at = datetime.now().isoformat()
-    (_save_assistant_memory if assistant else _save_character_memory)(cur, store)
+    _save_assistant_memory(cur, store)
 
 
 @app.put("/api/sessions/{session_id}/messages/{message_id}")
@@ -1487,9 +1268,8 @@ async def delete_message(session_id: str, message_id: str, cur: Ctx = Depends(ge
 async def truncate_after(session_id: str, message_id: str, cur: Ctx = Depends(get_ctx)):
     """Drop every message AFTER this one ("Save & resend": edit, truncate, regenerate).
 
-    A cut below what the rolling summary already covers resets the summary, as
-    clearing a chat does: the summary would otherwise describe turns that no longer
-    exist, and they would be injected as "the story so far"."""
+    A cut below what memory has already folded resets the chat's fold index, as
+    clearing a chat does."""
     s = _load(cur.sessions, session_id, ChatSession)
     if not s:
         raise HTTPException(404, "session not found")
@@ -1501,7 +1281,6 @@ async def truncate_after(session_id: str, message_id: str, cur: Ctx = Depends(ge
     if keep < s.memory.last_summarized_index:
         s.memory.summary = ""
         s.memory.last_summarized_index = 0
-        _forget_files(_scene_index_paths(cur, session_id))     # it described turns now gone
     s.updated_at = datetime.now().isoformat()
     _save(s, cur.sessions)
     _shift_swept(cur, s, keep, removed)
@@ -1528,7 +1307,7 @@ _memory_tasks: set[asyncio.Task] = set()      # strong refs: the loop keeps only
 
 
 def _save_turn(cur: Ctx, session: ChatSession) -> None:
-    """Save a finished turn without rolling back memory or options written while it ran.
+    """Save a finished turn without rolling back memory written while it ran.
 
     A turn never changes `memory`: the memory job writes the summary, and the Memory
     modal writes pinned facts and the summary. So the stored memory always wins. This
@@ -1537,8 +1316,6 @@ def _save_turn(cur: Ctx, session: ChatSession) -> None:
     fresh = _load(cur.sessions, session.id, ChatSession)
     if fresh:
         session.memory = fresh.memory
-        # Nor does it change the chat's options: a box ticked while a reply streamed stays ticked.
-        session.allow_side_characters = fresh.allow_side_characters
     _save(session, cur.sessions)
 
 
@@ -1655,7 +1432,11 @@ def _apply_memory(cur: Ctx, worked: ChatSession, basis: tuple) -> bool:
 
 
 async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
-    """The memory maintenance a turn used to run before `done` (thresholds user-tunable)."""
+    """The memory maintenance a turn used to run before `done` (thresholds user-tunable).
+
+    The verbatim window still has to advance or the prompt grows without bound, but
+    nothing narrative comes out of it: the fold writes directives, facts and task notes
+    (services/assistant_memory.py) and moves the chat's fold index."""
     session = _load(cur.sessions, session_id, ChatSession)
     if not session:
         return
@@ -1663,63 +1444,23 @@ async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
     if not card:
         return
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
-    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
-    scenario = session.relationship is not None
     basis = _memory_basis(session)
     st = _load_settings(cur)
     window = await _context_tokens(st)
-    if assistant:
-        # The window still has to advance or the prompt grows without bound, but
-        # nothing narrative comes out of it: the fold writes directives, facts and task
-        # notes, and leaves session.memory.summary empty — clearing a roleplay-era one
-        # if the card was switched, since nothing rewrites that field for an assistant
-        # and a stale narrative would sit in every prompt forever.
-        keep = min(st.keep_recent, st.summarize_after - 1)
-        fold_end = len(session.messages) - keep
-        if (memory.needs_summary(session, st.summarize_after)
-                and fold_end > session.memory.last_summarized_index and not scenario):
-            am = _load_assistant_memory(cur, session.character_id, persona.id)
-            am0 = am.model_copy(deep=True)
-            if await assistant_memory.fold(
-                    kobold, am, session, card, persona, upto=fold_end,
-                    max_tokens=st.summary_max_tokens,
-                    extract_items=st.auto_facts_enabled,
-                    max_new=st.auto_facts_max_new, context_tokens=window):
-                _store_fold(cur, am0, am)
-                session.memory.last_summarized_index = fold_end
-    else:
-        folded_from = session.memory.last_summarized_index
-        await memory.summarize(kobold, session, card, persona,
-                               summarize_after=st.summarize_after,
-                               keep_recent=st.keep_recent,
-                               max_tokens=st.summary_max_tokens,
-                               context_tokens=window)
-        # Threshold trigger: fold forward exactly what summarize() just folded out of
-        # the verbatim window, so nothing leaves the live prompt without being recorded
-        # durably first. Loaded here, right before the fold — a concurrent sweep may
-        # have advanced it, and writing back a stale copy would lose that.
-        if not scenario:
-            cm = _load_character_memory(cur, session.character_id, persona.id)
-            cm0 = cm.model_copy(deep=True)
-            if await memory.fold_into_longterm(
-                    kobold, cm, session, card, persona,
-                    upto=session.memory.last_summarized_index,
-                    max_tokens=st.summary_max_tokens,
-                    index_path=_memory_index_path(cur, session.character_id, persona.id),
-                    extract_facts=st.auto_facts_enabled, max_new_facts=st.auto_facts_max_new,
-                    context_tokens=window, consolidate=st.longterm_consolidate,
-                    story_path=(_story_index_path(cur, session.character_id, persona.id)
-                                if st.story_memory else None)):
-                _store_fold(cur, cm0, cm)
-    applied = _apply_memory(cur, session, basis)
-    if applied and scenario and not assistant and st.story_memory:
-        # A scenario chat's own memory, of exactly what the summary just folded out of
-        # the live prompt. Only once that fold is stored: one that a concurrent edit
-        # rejected runs again, and indexing now would index those turns twice.
-        turns, story = _scene_index_paths(cur, session.id)
-        await memory.record_scene(kobold, session, card, persona, folded_from,
-                                  session.memory.last_summarized_index, turns, story,
-                                  context_tokens=window)
+    keep = min(st.keep_recent, st.summarize_after - 1)
+    fold_end = len(session.messages) - keep
+    if (memory.needs_summary(session, st.summarize_after)
+            and fold_end > session.memory.last_summarized_index):
+        am = _load_assistant_memory(cur, session.character_id, persona.id)
+        am0 = am.model_copy(deep=True)
+        if await assistant_memory.fold(
+                kobold, am, session, card, persona, upto=fold_end,
+                max_tokens=st.summary_max_tokens,
+                extract_items=st.auto_facts_enabled,
+                max_new=st.auto_facts_max_new, context_tokens=window):
+            _store_fold(cur, am0, am)
+            session.memory.last_summarized_index = fold_end
+    _apply_memory(cur, session, basis)
 
 
 def _sse(obj: dict) -> str:
@@ -1740,8 +1481,6 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
     if not card:
         raise HTTPException(400, "session has no character")
-    if req.continue_turn and card.chat_mode == "assistant":
-        raise HTTPException(400, "Continue is for roleplay chats")
 
     await _yield_memory_jobs()            # nothing in the background delays a reply
 
@@ -1755,115 +1494,23 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         _pending_swipes, _pending_exprs = prev_swipes, prev_exprs
     else:
         _pending_swipes, _pending_exprs = [], []
-        if not req.continue_turn:          # Continue: she goes on without a new user message
-            session.messages.append(ChatMessage(role="user", content=req.input_text))
+        session.messages.append(ChatMessage(role="user", content=req.input_text))
 
-    scenario = session.relationship is not None
-    rel = session.relationship if scenario else _load_relationship(cur, session.character_id, persona.id)
-    power = rel.power_dynamic if rel.power_dynamic is not None else card.power_dynamic
-    social = rel.social_acceptance if rel.social_acceptance is not None else card.social_acceptance
-    # Assistant-mode characters get NO relationship framing. The descriptor and the
-    # boundary note are scene-and-feelings text — affection, attraction, emotional
-    # openness, physical consent — and injecting them beneath a system prompt that
-    # says "there is no physical setting or scene" is what had assistants replying
-    # with narrated thoughts, gestures and self-description. The boundary note was
-    # the worst of it: it lands LAST, the slot small models weight most heavily, and
-    # its own wording says "move the scene forward". Gated exactly the way the
-    # date/time line is gated the other way in build_messages().
-    assistant = getattr(card, "chat_mode", "roleplay") == "assistant"
-    # The descriptor and boundary note are written ABOUT the character, so they need
-    # the card's pronouns; blank keeps the she/her these strings used to hardcode.
-    pronouns = relationship.Pronouns.parse(getattr(card, "pronouns", ""))
-    rel_note = "" if assistant else relationship.descriptor(
-        rel, card.name, persona.name, power, social, pronouns=pronouns)
-    if not req.regenerate and session.pending_milestone:
-        # Consumed either way. An assistant has no milestone to announce, and leaving
-        # it pending would let it pile up and then fire at whatever moment the card
-        # was next switched to roleplay.
-        if not assistant:
-            rel_note += " MILESTONE MOMENT — " + session.pending_milestone
-        session.pending_milestone = ""
-    # Cross-session memory is skipped for scenario sessions, exactly like `rel` above:
-    # a scenario is a deliberate alternate premise seeded from a preset, so the main
-    # timeline's remembered history would contradict the state it was just given.
-    # Two pipelines, chosen once. An assistant never touches services/memory.py:
-    # no narrative summary, no companion facts, no semantic recall over roleplay
-    # turns — see services/assistant_memory.py for why that is a module and not a
-    # branch.
-    char_mem = None if (scenario or assistant) else _load_character_memory(
-        cur, session.character_id, persona.id)
-    asst_mem = _load_assistant_memory(cur, session.character_id, persona.id) \
-        if (assistant and not scenario) else None
+    asst_mem = _load_assistant_memory(cur, session.character_id, persona.id)
+    lt_note = assistant_memory.block(asst_mem, card.name, persona.name)
     settings = _load_settings(cur)
-
-    # Semantic recall (Phase 4): the long-term summary is lossy by design, so pull
-    # back the specifics that relate to what was just said. Retrieval SHARES
-    # longterm_block's character budget rather than adding to it — turning recall
-    # on must not silently double the memory footprint of every prompt.
-    # Searched BEFORE the long-term block is rendered so that block can make room:
-    # it fills the whole budget once facts accumulate, which used to starve recall
-    # to nothing exactly when the pairing had enough history to need it.
-    # Offloaded to a thread: onnxruntime is sync and would block the event loop,
-    # stalling every other session's stream for the duration.
-    hits = []
-    scene_hits = []
-    last_user = next((m.content for m in reversed(session.messages)
-                      if m.role == "user" and m.content), "")
-    if char_mem is not None and settings.recall_enabled and last_user:
-        hits = await asyncio.to_thread(
-            memory.index_search,
-            _memory_index_path(cur, session.character_id, persona.id),
-            last_user, settings.recall_top_k)
-        if settings.story_memory:
-            # Episodes and world details: their own index, their own gate.
-            hits += await asyncio.to_thread(
-                memory.search_story,
-                _story_index_path(cur, session.character_id, persona.id), last_user)
-    elif (scenario and not assistant and settings.recall_enabled and settings.story_memory
-          and last_user):
-        # A scenario chat has no pairing memory; it recalls from its own past instead.
-        turns_ix, story_ix = _scene_index_paths(cur, session.id)
-        scene_hits = (await asyncio.to_thread(memory.index_search, turns_ix, last_user,
-                                              settings.recall_top_k)
-                      + await asyncio.to_thread(memory.search_story, story_ix, last_user))
-
-    lt_budget = memory.LONGTERM_BUDGET_CHARS - (memory.RECALL_RESERVE_CHARS if hits else 0)
-    lt_note = memory.longterm_block(char_mem, card.name, persona.name, lt_budget) if char_mem else ""
-    recall_note = memory.recall_block(
-        hits, memory.LONGTERM_BUDGET_CHARS - len(lt_note), lt_note) if hits else ""
-    if scene_hits:
-        recall_note = memory.recall_block(scene_hits, memory.SCENE_RECALL_CHARS)
-    if asst_mem is not None:
-        lt_note = assistant_memory.block(asst_mem, card.name, persona.name)
-    if hits and not recall_note and char_mem is not None:
-        # Every hit was already in the long-term block — give the space back
-        # rather than shrinking her memory for a block that isn't there.
-        lt_note = memory.longterm_block(char_mem, card.name, persona.name)
-
-    # Why she feels this way: the latest moment that moved the relationship.
-    if char_mem is not None and char_mem.moments and rel_note:
-        moment = episodic.render(episodic.PersonMemory(moments=char_mem.moments[-1:]),
-                                 card.name, persona.name)
-        if moment:
-            rel_note += " " + moment
 
     window = await _context_tokens(settings)
     trimmed: list = []
     messages = prompt_builder.build_messages(
-        card, persona, session, relationship_note=rel_note,
-        stage_rank=relationship._stage_rank(rel),
-        boundary_note="" if assistant else relationship.boundary_note(
-            rel, card.name, persona.name, pronouns=pronouns),
-        longterm_note="\n\n".join(p for p in (lt_note, recall_note) if p),
+        card, persona, session, longterm_note=lt_note,
         # Only ask for beats we can actually render a sprite for.
         expr_labels=sorted(card.expressions.keys()) if card.expressions else [],
         context_tokens=window, trimmed=trimmed,
         # Another take: quote what is being replaced, so the new one differs from it.
-        retake_of=_pending_swipes if req.regenerate else None,
-        # The user's note for Continue / Another take: steers this reply only.
-        direction=req.direction)
+        retake_of=_pending_swipes if req.regenerate else None)
     if trimmed and trimmed[0]:
-        # Not an error: the summary absorbs these turns on its next fold. Logged
+        # Not an error: memory absorbs these turns on its next fold. Logged
         # because a session that trims every turn wants a lower "Summarize after".
         print(f"[context] dropped {trimmed[0]} oldest turn(s) of session {session.id[:8]} "
               f"to fit {window} tokens", flush=True)
@@ -1904,12 +1551,11 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # A label the model emitted without its brackets never reached the tag
         # parser, so scrub it here before it is stored and re-spoken on reload.
         reply = expressions.strip_bare_labels(acc.strip(), card.expressions.keys())
-        if assistant:
-            # Questions are for clarification only; a courtesy question tacked onto
-            # a finished answer is the assistant making conversation, which is not
-            # the job. See prompt_builder for why this is code and not just a rule.
-            reply = prompt_builder.strip_initiative_question(reply)
-            reply = prompt_builder.strip_closing_offer(reply)
+        # Questions are for clarification only; a courtesy question tacked onto a
+        # finished answer is the assistant making conversation, which is not the job.
+        # See prompt_builder for why this is code and not just a rule.
+        reply = prompt_builder.strip_initiative_question(reply)
+        reply = prompt_builder.strip_closing_offer(reply)
         swipes = (_pending_swipes + [reply]) if _pending_swipes else [reply]
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
                           swipe_index=len(swipes) - 1)
@@ -1930,75 +1576,15 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                     new_expr = "neutral"
         msg.expression = new_expr or None
 
-        # The feeling that drives mood and the relationship. With sprites it's the sprite
-        # label; without, it used to be nothing at all — the classifier only ran to pick a
-        # sprite, so a roleplay card without sprites never moved off Stranger however long
-        # the chat (Hermione: 49 replies, every axis still 0). Read it from the full set
-        # instead; the stored message keeps no expression, as there is no sprite to show.
-        # Not on a re-roll: nothing below uses it there.
-        feel = new_expr
-        if not feel and not assistant and not req.regenerate:
-            try:
-                feel = await expressions.classify(kobold, reply, labels=expressions.FULL_EMOTIONS)
-            except Exception:
-                feel = "neutral"
-
         # Update the running valence/mood (inertia): neutral holds; a clear emotion
-        # advances the mood and nudges valence via EMA. Foundation for a relationship score.
-        if feel and feel != "neutral":
+        # advances the mood and nudges valence via EMA. Driven by the sprite label, so a
+        # card without sprites keeps a neutral mood (no extra classify round-trip).
+        feel = new_expr
+        if feel and feel != "neutral" and not req.regenerate:
             a = 0.35
             v = expressions.valence_of(feel)
             session.mood.valence = round(max(-1.0, min(1.0, session.mood.valence * (1 - a) + v * a)), 3)
             session.mood.mood = feel
-
-        # Advance the persistent relationship (skip on re-rolls to avoid double-counting).
-        # Assistant-mode cards are skipped entirely: none of this reaches their prompt
-        # any more, so advancing it only accrued affection and attraction numbers for a
-        # character that has no relationship arc, and paid for a classify_activity()
-        # round-trip per reply to do it. Their stored file is left as it is rather than
-        # reset — inert while the card is an assistant, intact if it is ever switched back.
-        milestone_toasts = []
-        if not req.regenerate and not assistant:
-            before = episodic.axes(rel)
-            relationship.update(rel, feel, power, social)
-            # Escalation: once physical intimacy has begun and she's positively engaged, actually
-            # doing acts nudges willingness toward the next rung (social acceptance modulates the pace).
-            if relationship.physical_tier(rel)[0] >= 1 and expressions.valence_of(feel) >= 0:
-                try:
-                    act = await relationship.classify_activity(kobold, reply)
-                except Exception:
-                    act = 0
-                relationship.escalate(rel, act, social)
-            fired = []
-            for m in relationship.newly_reached(rel):
-                rel.milestones.append(m["id"])
-                fired.append(m["id"])
-                milestone_toasts.append(m["toast"].replace("{char}", card.name).replace("{user}", persona.name))
-                beat = m["beat"].replace("{char}", card.name).replace("{user}", persona.name)
-                session.pending_milestone = (session.pending_milestone + " " + beat).strip()
-            if not scenario:
-                # A reply that moved the relationship sharply, or crossed a milestone, is
-                # kept as a moment: the "why" behind the numbers (muninn.episodic). Onto
-                # a fresh read of the pairing's memory, so it can't roll back a fold or
-                # an edit made meanwhile.
-                said = next((m.content for m in reversed(session.messages)
-                             if m.role == "user" and m.content), "") if not req.continue_turn else ""
-                held = episodic.PersonMemory(moments=list(char_mem.moments) if char_mem else [])
-                if episodic.record_moment(held, before, rel, emotion=feel or "", said=said,
-                                          reply=reply, name=card.name, at=len(session.messages),
-                                          milestone=",".join(fired)):
-                    had = {x.id for x in (char_mem.moments if char_mem else [])}
-                    kept = {x.id for x in held.moments}
-                    cm = _load_character_memory(cur, card.id, persona.id)
-                    # Apply only this turn's change: the new moment, and any it evicted
-                    # at the cap. One removed in the Memory modal meanwhile stays gone.
-                    cm.moments = [x for x in cm.moments if x.id not in had - kept] \
-                        + [x for x in held.moments if x.id not in had]
-                    _save_character_memory(cur, cm)
-            if scenario:
-                session.relationship = rel      # persisted with the session
-            else:
-                _save_relationship(cur, rel)
 
         # Keep per-swipe emotions aligned with swipes (older swipes cached from before).
         exprs = list(_pending_exprs)
@@ -2015,21 +1601,15 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # them kept her "thinking" for 30 s+ after the text was on screen.
         _save_turn(cur, session)
         _spawn_memory_job(cur, session.id)
-        done_evt = {"done": True, "message_id": msg.id, "expression": msg.expression,
-                    "mood": session.mood.mood, "valence": session.mood.valence,
-                    # Omitted for assistants — a strip that never moves again is worse
-                    # than no strip. The frontend hides it when the key is absent.
-                    **({} if assistant else {"relationship": relationship.summary(rel)})}
-        if milestone_toasts:
-            done_evt["milestones"] = milestone_toasts
-        yield _sse(done_evt)
+        yield _sse({"done": True, "message_id": msg.id, "expression": msg.expression,
+                    "mood": session.mood.mood, "valence": session.mood.valence})
 
     return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
 
 
 async def _keepalive(turn):
     """``turn()`` with a keep-alive. After the last token, a chat turn still runs model calls
-    (expression, relationship activity) and sends nothing until ``done``, and a long prompt
+    (expression) and sends nothing until ``done``, and a long prompt
     can sit silent before the first token. In a long chat that took over 30 s, pytincture's
     BFF_STREAM_IDLE_TIMEOUT_SECONDS closed the stream, which cancelled the turn before it
     was saved — the reply had streamed in full and then vanished on reload. A ``ping``
@@ -2063,139 +1643,6 @@ async def _keepalive(turn):
 
 
 # --------------------------------------------------------------------------
-# Narrator events and drafts of {{user}}'s reply — roleplay chats only.
-# The narrator writes a neutral scene event into the chat (role "narrator"); she can
-# then react to it (chat with continue_turn) or {{user}} answers. The draft writes
-# {{user}}'s next message for the composer — streamed, never saved. Neither touches
-# mood, the relationship or expressions.
-# --------------------------------------------------------------------------
-def _scene_parts(req: SceneRequest, cur: Ctx):
-    session = _load(cur.sessions, req.session_id, ChatSession)
-    if not session:
-        raise HTTPException(404, "session not found")
-    card = _load(cur.cards, session.character_id, CharacterCard)
-    if not card:
-        raise HTTPException(400, "session has no character")
-    if card.chat_mode == "assistant":
-        raise HTTPException(400, "the narrator is for roleplay chats")
-    persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
-    return session, card, persona
-
-
-def _scene_stage(cur: Ctx, session: ChatSession, persona: Persona) -> int:
-    """Relationship stage for lorebook gating, chosen the way chat() chooses it."""
-    rel = session.relationship if session.relationship is not None else \
-        _load_relationship(cur, session.character_id, persona.id)
-    return relationship._stage_rank(rel)
-
-
-def _no_think(cur: Ctx, messages: list) -> None:
-    """Same Qwen3 switch as chat(): /no_think on the last user turn when thinking is off."""
-    if _load_settings(cur).disable_thinking:
-        messages[-1]["content"] += " /no_think"
-
-
-def _scene_params(session: ChatSession, max_tokens: int, stop: list[str]) -> dict:
-    params = prompt_builder.kobold_params(session)
-    params["max_tokens"] = min(params.get("max_tokens") or max_tokens, max_tokens)
-    params["stop"] = list(params.get("stop") or []) + stop
-    return params
-
-
-async def _stream_text(messages: list, params: dict, acc: list):
-    """Tokens as SSE; the text collects in acc[0]. Expression beats are dropped."""
-    acc.append("")
-    async for tok in kobold.chat_generate_stream(messages, params):
-        if isinstance(tok, ExprEvent):
-            continue
-        acc[0] += tok
-        yield _sse({"token": tok})
-
-
-@app.put("/api/sessions/{session_id}/options")
-async def set_session_options(session_id: str, opts: SessionOptions, cur: Ctx = Depends(get_ctx)):
-    """Per-chat options (today: whether the narrator may bring in side characters).
-    Written onto a fresh read, so nothing else in the session is touched."""
-    session = _load(cur.sessions, session_id, ChatSession)
-    if not session:
-        raise HTTPException(404, "session not found")
-    if opts.allow_side_characters is not None:
-        session.allow_side_characters = bool(opts.allow_side_characters)
-    _save(session, cur.sessions)
-    return {"ok": True, "allow_side_characters": session.allow_side_characters}
-
-
-@app.post("/api/narrate")
-async def narrate(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
-    session, card, persona = _scene_parts(req, cur)
-    replace_id = ""
-    if req.replace and session.messages and session.messages[-1].role == "narrator":
-        replace_id = session.messages[-1].id
-        session.messages.pop()                       # re-roll: the narration it replaces
-    messages = prompt_builder.build_narrator_messages(
-        card, persona, session, req.direction, _scene_stage(cur, session, persona))
-    _no_think(cur, messages)
-    # No blank-line stop: a side character's line usually opens its own paragraph, and
-    # that stop cut 7 of 8 of them off. trim_narration() below drops a later paragraph
-    # that slides into writing her or {{user}} instead, which is what the stop was for.
-    params = _scene_params(session, 220, [f"\n{card.name}:", f"\n{persona.name}:"])
-
-    async def _turn():
-        acc: list = []
-        try:
-            async for ev in _stream_text(messages, params, acc):
-                yield ev
-        except Exception as e:
-            yield _sse({"error": str(e)})
-            return
-        text = prompt_builder.trim_narration(
-            prompt_builder.clean_piece(acc[0], ["Narrator", "Narration", "Game Master", "GM"]),
-            card.name, persona.name)
-        if not session.allow_side_characters:
-            text = prompt_builder.strip_dialogue(text)
-        if not text:
-            yield _sse({"error": "the narrator came up empty — try again"})
-            return
-        msg = ChatMessage(role="narrator", content=text)
-        live = _load(cur.sessions, session.id, ChatSession)     # fresh: never write an old copy
-        if live is None:
-            yield _sse({"error": "that chat no longer exists"})
-            return
-        if replace_id and live.messages and live.messages[-1].id == replace_id:
-            live.messages.pop()
-        live.messages.append(msg)
-        _save_turn(cur, live)
-        _spawn_memory_job(cur, live.id)
-        yield _sse({"done": True, "message_id": msg.id})
-
-    return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
-
-
-@app.post("/api/draft")
-async def draft_reply(req: SceneRequest, cur: Ctx = Depends(get_ctx)):
-    """{{user}}'s next message, written for the composer. Nothing is saved."""
-    session, card, persona = _scene_parts(req, cur)
-    messages = prompt_builder.build_draft_messages(
-        card, persona, session, req.direction, _scene_stage(cur, session, persona))
-    _no_think(cur, messages)
-    # One paragraph: past a blank line the model moved on to her side of the scene
-    # ("*Hermione examines the letter…*") — the speaker stops alone didn't catch that.
-    params = _scene_params(session, 200, [f"\n{card.name}:", "\nNarrator:", "\n\n"])
-
-    async def _turn():
-        acc: list = []
-        try:
-            async for ev in _stream_text(messages, params, acc):
-                yield ev
-        except Exception as e:
-            yield _sse({"error": str(e)})
-            return
-        yield _sse({"done": True, "text": prompt_builder.clean_piece(acc[0], [persona.name])})
-
-    return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
-
-
-# --------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=7861)
+    uvicorn.run("main:app", host="0.0.0.0", port=7867)

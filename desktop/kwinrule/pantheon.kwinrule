@@ -3,7 +3,7 @@ count=1
 rules=pantheon-desktop
 
 [pantheon-desktop]
-Description=Pantheon desktop avatar
+Description=Cantinero desktop avatar
 # Match the shell's window. wmclass matching also covers the XWayland path.
 wmclass=ai.jotunheim.pantheon.desktop
 wmclasscomplete=false

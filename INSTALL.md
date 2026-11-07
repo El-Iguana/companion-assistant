@@ -1,14 +1,14 @@
-# Installing Pantheon
+# Installing Cantinero
 
-Pantheon is a self-hosted character-card AI companion. It runs as a
-container, with **Docker** or **Podman**, on Windows, macOS or Linux. Its own
-models (voice, speech recognition, memory search, background removal) are
-CPU-only and baked into the image, so **Pantheon itself needs no GPU**.
+Cantinero is a self-hosted voice assistant built on character cards — El Iguana's
+bartender, at your service. It runs as a container, with **Docker** or **Podman**,
+on Windows, macOS or Linux. Its own models (voice, speech recognition, background removal) are
+CPU-only and baked into the image, so **Cantinero itself needs no GPU**.
 
 It does not generate text or images itself. It talks to two backends, which
 you run next to it:
 
-| Backend | Needed for | Required? | Pantheon's default address |
+| Backend | Needed for | Required? | Cantinero's default address |
 |---|---|---|---|
 | **KoboldCPP** | chat | **yes** | `http://host.docker.internal:5001` |
 | **ComfyUI** | expression sprites | no | `http://host.docker.internal:8188` |
@@ -16,10 +16,10 @@ you run next to it:
 `host.docker.internal` means "this computer, seen from inside the
 container". Without ComfyUI everything except sprite generation works.
 
-- **Disk:** about 2.1 GB for Pantheon's image, plus your models (a chat model
+- **Disk:** about 2.1 GB for Cantinero's image, plus your models (a chat model
   is typically 3–10 GB). The optional KoboldCPP container is another 3 GB.
 - **Network during the build:** github.com, huggingface.co, pypi.org and
-  deb.debian.org. Afterwards Pantheon needs no internet.
+  deb.debian.org. Afterwards Cantinero needs no internet.
 - **Time:** the first build downloads about 1.5 GB and takes several minutes.
 
 Every command below is shown for Docker. **For Podman, replace `docker` with
@@ -31,13 +31,13 @@ PowerShell differs from macOS/Linux shells, both are given.
 
 1. [Choose where the backends run](#1-choose-where-the-backends-run)
 2. [Install a container engine](#2-install-a-container-engine)
-3. [Get Pantheon and configure it](#3-get-pantheon-and-configure-it)
+3. [Get Cantinero and configure it](#3-get-cantinero-and-configure-it)
 4. [Set up KoboldCPP](#4-set-up-koboldcpp): [natively](#4a-koboldcpp-natively-any-computer) · [in a container](#4b-koboldcpp-in-a-container-nvidia) · [with ai-stack](#4c-ai-stack-linux--nvidia)
 5. [Optional: ComfyUI for sprites](#5-optional-comfyui-for-expression-sprites)
-6. [Start Pantheon and sign in](#6-start-pantheon-and-sign-in)
+6. [Start Cantinero and sign in](#6-start-cantinero-and-sign-in)
 7. [Everyday tasks](#7-everyday-tasks): stop, logs, update, back up, reset a password, voices, uninstall
 8. [Without compose](#8-without-compose)
-9. [Reaching Pantheon from other devices](#9-reaching-pantheon-from-other-devices)
+9. [Reaching Cantinero from other devices](#9-reaching-cantinero-from-other-devices)
 10. [Troubleshooting](#10-troubleshooting)
 11. [What was actually tested](#11-what-was-actually-tested)
 
@@ -45,7 +45,7 @@ PowerShell differs from macOS/Linux shells, both are given.
 
 ## 1. Choose where the backends run
 
-Pantheon's container is the same everywhere. What differs is KoboldCPP (and
+Cantinero's container is the same everywhere. What differs is KoboldCPP (and
 ComfyUI), which want your GPU. Find your row:
 
 | Your computer | KoboldCPP | Section |
@@ -53,7 +53,7 @@ ComfyUI), which want your GPU. Find your row:
 | **Mac** (Apple Silicon) | the native macOS build, which uses Metal | [4a](#4a-koboldcpp-natively-any-computer) |
 | **Windows**, NVIDIA GPU | the native `koboldcpp.exe` (simplest), or a container with Docker Desktop | [4a](#4a-koboldcpp-natively-any-computer) or [4b](#4b-koboldcpp-in-a-container-nvidia) |
 | **Windows**, AMD or Intel GPU | the native build, with Vulkan | [4a](#4a-koboldcpp-natively-any-computer) |
-| **Linux**, NVIDIA GPU | a container next to Pantheon | [4b](#4b-koboldcpp-in-a-container-nvidia) |
+| **Linux**, NVIDIA GPU | a container next to Cantinero | [4b](#4b-koboldcpp-in-a-container-nvidia) |
 | **Linux** with the ai-stack launcher | ai-stack's own containers | [4c](#4c-ai-stack-linux--nvidia) |
 | **Linux**, AMD or Intel GPU | the native Linux build, with Vulkan | [4a](#4a-koboldcpp-natively-any-computer) |
 | Backends on **another computer** | whatever that computer runs | [4a](#4a-koboldcpp-natively-any-computer), last part |
@@ -66,7 +66,7 @@ than GPU passthrough.
 **How big a model?** It has to fit in your GPU's memory (VRAM), or on a Mac
 in about two thirds of your RAM. Roughly, a GGUF file of up to 70–80 % of
 your VRAM leaves room for the conversation: a 4–8B model at `Q4_K_M` to
-`Q8_0` on 8–12 GB, up to 13B at `Q4_K_M` on 12 GB. Pantheon was developed
+`Q8_0` on 8–12 GB, up to 13B at `Q4_K_M` on 12 GB. Cantinero was developed
 with Qwen3-4B-Instruct-2507 at `Q8_0` (4.3 GB). Download GGUF models from
 Hugging Face.
 
@@ -75,7 +75,7 @@ Hugging Face.
 ## 2. Install a container engine
 
 Pick **one** engine. You also need its **compose** tool, which starts
-Pantheon from `compose.yaml` with one command.
+Cantinero from `compose.yaml` with one command.
 
 ### Windows 10 (22H2 or later) and Windows 11
 
@@ -140,7 +140,7 @@ podman compose version
 
 Podman Desktop (<https://podman-desktop.io/>) is the graphical alternative.
 
-Give the VM enough memory: Pantheon's speech and voice models want about
+Give the VM enough memory: Cantinero's speech and voice models want about
 2 GB. For Docker Desktop, go to **Settings → Resources → Memory** and set at
 least 4 GB. For an existing Podman machine, stop it and run
 `podman machine set --memory 4096`.
@@ -196,33 +196,32 @@ install the NVIDIA Container Toolkit, following
 
 ---
 
-## 3. Get Pantheon and configure it
+## 3. Get Cantinero and configure it
 
-The repository is **private** (`JotunheimPress/npc_maker`), so you need a
+The repository is **private** (`El-Iguana/companion-assistant`), so you need a
 GitHub account that has been given access. Clone it with the GitHub CLI,
 which asks you to sign in once:
 
-Pantheon is built together with **Muninn**, its memory package, which is a
+Cantinero is built together with **Muninn**, its memory package, which is a
 separate private repository (`JotunheimPress/muninn`). Clone both into the same
-folder: the build looks for Muninn at `../muninn`, next to Pantheon.
+folder: the build looks for Muninn at `../muninn`, next to Cantinero.
 
 ```sh
 gh auth login
 gh repo clone JotunheimPress/muninn muninn
-gh repo clone JotunheimPress/npc_maker pantheon
-cd pantheon
+gh repo clone El-Iguana/companion-assistant
+cd companion-assistant
 ```
 
 or with an SSH key registered on your GitHub account:
 
 ```sh
 git clone git@github.com:JotunheimPress/muninn.git muninn
-git clone git@github.com:JotunheimPress/npc_maker.git pantheon
-cd pantheon
+git clone git@github.com:El-Iguana/companion-assistant.git
+cd companion-assistant
 ```
 
-(The folder is called `pantheon` here; the repository is named `npc_maker`. The
-Muninn folder must be called `muninn`.)
+(The Muninn folder must be called `muninn`.)
 
 > **Windows:** the repository forces Unix line endings (`.gitattributes`), so
 > Git's usual CRLF conversion does not touch it. Keep it that way. The
@@ -243,8 +242,8 @@ Open `.env` in a text editor. The settings you are most likely to change:
 | Setting | What it does |
 |---|---|
 | `TZ` | Your time zone, e.g. `Europe/Berlin`, `America/New_York`. Timestamps, and "what time is it?" in assistant mode, use it. Default `UTC`. |
-| `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([6](#6-start-pantheon-and-sign-in)). |
-| `PANTHEON_PORT` | The port on this computer, default `7861`. |
+| `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([6](#6-start-cantinero-and-sign-in)). |
+| `PANTHEON_PORT` | The port on this computer, default `7867`. |
 | `KOBOLD_URL`, `COMFYUI_URL` | Where the backends are, if not on this computer's usual ports. |
 
 The rest of `.env.example` is for the KoboldCPP container ([4b](#4b-koboldcpp-in-a-container-nvidia))
@@ -302,13 +301,13 @@ computer: <http://127.0.0.1:5001> shows KoboldCPP's own page.
 
 **Then:**
 
-- **Windows and macOS:** nothing to set. Pantheon's default
+- **Windows and macOS:** nothing to set. Cantinero's default
   `KOBOLD_URL=http://host.docker.internal:5001` reaches it.
 - **Linux:** a container on Docker's or Podman's default network cannot reach
   services bound to this computer's `127.0.0.1`. KoboldCPP listens on all
   addresses unless told otherwise, so the default URL works. If you started it
-  with `--host 127.0.0.1`, start Pantheon with `compose.host-network.yaml`
-  instead ([6](#6-start-pantheon-and-sign-in)).
+  with `--host 127.0.0.1`, start Cantinero with `compose.host-network.yaml`
+  instead ([6](#6-start-cantinero-and-sign-in)).
 
 **KoboldCPP on another computer** (a gaming PC, say): start it there as above,
 make sure its firewall allows port 5001, and set in `.env`:
@@ -327,7 +326,7 @@ runs the official KoboldCPP Linux build with CUDA; compose builds it from
 `backends/koboldcpp/`.
 
 1. Put one or more `.gguf` models in the `llm-models` folder inside
-   `pantheon`, or point `KOBOLD_MODELS_DIR` at an existing folder.
+   `companion-assistant`, or point `KOBOLD_MODELS_DIR` at an existing folder.
 2. In `.env`, name the model and choose the compose files. Uncomment the
    `COMPOSE_FILE` line for your engine:
 
@@ -348,8 +347,8 @@ runs the official KoboldCPP Linux build with CUDA; compose builds it from
    does not fit), `KOBOLD_CONTEXT` (default `8192`), and `KOBOLD_ARGS` for
    any other KoboldCPP flag (e.g. `--flashattention`).
 
-When you start Pantheon ([6](#6-start-pantheon-and-sign-in)), the KoboldCPP
-container starts with it, and Pantheon reaches it by the name `koboldcpp`.
+When you start Cantinero ([6](#6-start-cantinero-and-sign-in)), the KoboldCPP
+container starts with it, and Cantinero reaches it by the name `koboldcpp`.
 Loading a model takes from a few seconds to several minutes. Check that it
 found the GPU:
 
@@ -370,8 +369,8 @@ If you use the `ai-stack` launcher (also a private JotunheimPress
 repository), its KoboldCPP and ComfyUI containers already run on a network
 called `ai-net`. Either:
 
-- use `stack companion`, which runs Pantheon through `run-podman.sh` in a
-  container called `companion`, with its data in the `data/` folder. See
+- use `stack companion-assistant`, which runs Cantinero through `run-podman.sh` in a
+  container called `companion-assistant`, with its data in the `data/` folder. See
   ai-stack's own INSTALL.md; or
 - use compose, joining the same network. In `.env`:
 
@@ -381,7 +380,7 @@ called `ai-net`. Either:
   ```
 
   Start the backends first (`stack up`). This creates a container called
-  `pantheon`, with its data in the `pantheon-data` volume.
+  `companion-assistant`, with its data in the `companion-assistant-data` volume.
 
 Run one or the other, not both: they are separate installs with separate
 data. To move between them, see *Move data between installs* in
@@ -391,7 +390,7 @@ data. To move between them, see *Move data between installs* in
 
 ## 5. Optional: ComfyUI for expression sprites
 
-Pantheon draws a character's portrait and per-emotion sprites with ComfyUI.
+Cantinero draws a character's portrait and per-emotion sprites with ComfyUI.
 It uses only ComfyUI's built-in nodes, so **no custom nodes are needed**; one
 checkpoint is enough. The model family (SD 1.5, SDXL or Flux) is guessed from
 the checkpoint's file name. On a 12 GB card shared with KoboldCPP, an SD 1.5
@@ -420,13 +419,13 @@ ComfyUI listens on `127.0.0.1` by default.
   reaches it through `host.docker.internal`.
 - **Linux:** a bridged container cannot reach `127.0.0.1`. Either start
   ComfyUI with `--listen 0.0.0.0` (it is then also open to your network, so
-  firewall port 8188), or run Pantheon with `compose.host-network.yaml`.
+  firewall port 8188), or run Cantinero with `compose.host-network.yaml`.
 
 ---
 
-## 6. Start Pantheon and sign in
+## 6. Start Cantinero and sign in
 
-In the `pantheon` folder:
+In the `companion-assistant` folder:
 
 ```sh
 docker compose up -d
@@ -437,7 +436,7 @@ which takes several minutes. With `COMPOSE_FILE` set in `.env`, the same
 command starts everything you chose.
 
 **Linux, backends on `127.0.0.1` only** (see 4a and 5): use host networking
-instead. Pantheon then listens on this computer's `127.0.0.1:7861` directly:
+instead. Cantinero then listens on this computer's `127.0.0.1:7867` directly:
 
 ```sh
 docker compose -f compose.host-network.yaml up -d
@@ -449,10 +448,10 @@ the KoboldCPP container. Its default backend addresses become `http://127.0.0.1:
 `http://127.0.0.1:8188`.
 
 Check that it is up. After about half a minute, `docker compose ps` shows
-`healthy`. Then ask Pantheon whether it can reach its backends:
+`healthy`. Then ask Cantinero whether it can reach its backends:
 
 ```sh
-docker compose exec pantheon python3 manage.py backends
+docker compose exec companion-assistant python3 manage.py backends
 ```
 ```
 KoboldCPP http://host.docker.internal:5001: OK — model koboldcpp/Qwen3-4B-Instruct-2507-Q8_0
@@ -464,14 +463,14 @@ A `NOT reachable` line comes with the next command to try. See
 
 ### First sign-in
 
-Open **<http://127.0.0.1:7861>** (or the port you chose). Use `127.0.0.1`;
+Open **<http://127.0.0.1:7867>** (or the port you chose). Use `127.0.0.1`;
 `localhost` redirects there.
 
 The account is **`ADMIN`**. If you did not set `PANTHEON_ADMIN_PASSWORD`, its
 password was generated on the first start. Read it from the log:
 
 ```sh
-docker compose logs pantheon
+docker compose logs companion-assistant
 ```
 ```
 ==============================================================
@@ -483,21 +482,22 @@ docker compose logs pantheon
 It is also kept in the data volume, in case the log is gone:
 
 ```sh
-docker compose exec pantheon cat /app/data/auth/INITIAL_PASSWORD
+docker compose exec companion-assistant cat /app/data/auth/INITIAL_PASSWORD
 ```
 
 Then:
 
 1. Sign in as `ADMIN`.
 2. Change the password: **Settings → Account**.
-3. Delete the file: `docker compose exec pantheon rm /app/data/auth/INITIAL_PASSWORD`.
+3. Delete the file: `docker compose exec companion-assistant rm /app/data/auth/INITIAL_PASSWORD`.
 4. Add other people from **Settings → Users** (admins only). Each account gets
-   its own private library of characters, personas and chats.
+   its own private library of characters (the **Staff**), personas and chats.
 
 The status pill at the top right shows whether KoboldCPP is online (and which
-model it has loaded). Import a character card (PNG or JSON, SillyTavern/Chub
-format) or make one under **Create**, open it from **Discover**, start a chat,
-and send a message.
+model it has loaded). Every new library starts with **Mira**, the example
+bartender, on shift: open her from **Staff**, start a chat, and send a message
+or press the microphone. Hire more under **Hire**, or import a character card
+(PNG or JSON, SillyTavern/Chub format) there.
 
 ---
 
@@ -511,7 +511,7 @@ started. Without it, repeat the same `-f` options you started with.
 ```sh
 docker compose stop                     # stop; data is kept
 docker compose start
-docker compose logs -f pantheon         # follow the log; Ctrl+C to stop following
+docker compose logs -f companion-assistant         # follow the log; Ctrl+C to stop following
 docker compose logs -f koboldcpp        # the KoboldCPP container, if you use it
 ```
 
@@ -534,11 +534,11 @@ downloaded again if their build steps changed.
 
 **Back up**
 
-Everything lives in one volume, `pantheon-data`: accounts, characters,
-personas, chats, relationships, memories and uploaded avatars. Copy it out:
+Everything lives in one volume, `companion-assistant-data`: accounts, characters,
+personas, chats, memories and uploaded avatars. Copy it out:
 
 ```sh
-docker compose cp pantheon:/app/data ./pantheon-backup
+docker compose cp companion-assistant:/app/data ./cantinero-backup
 ```
 
 That works the same in PowerShell. Keep the copy somewhere else, and
@@ -549,7 +549,7 @@ remember it contains everyone's private chats.
 
 ```sh
 docker compose create                   # the container, not started
-docker compose cp ./pantheon-backup/. pantheon:/app/data/
+docker compose cp ./cantinero-backup/. companion-assistant:/app/data/
 docker compose up -d
 ```
 
@@ -558,15 +558,15 @@ creates a fresh `ADMIN` account, and a restore on top of it leaves two
 accounts named `ADMIN`.
 
 **Move data between installs**: to move from a `data/` folder (an older
-install, or `stack companion` / `run-podman.sh`) into compose, do the restore
-above with `./data/.` in place of `./pantheon-backup/.`. To go the other way,
-copy `pantheon:/app/data/.` into `data/` while both containers are stopped.
+install, or `stack companion-assistant` / `run-podman.sh`) into compose, do the restore
+above with `./data/.` in place of `./cantinero-backup/.`. To go the other way,
+copy `companion-assistant:/app/data/.` into `data/` while both containers are stopped.
 
 **Reset a password** (for example, the only admin's):
 
 ```sh
-docker compose exec -it pantheon python3 manage.py users
-docker compose exec -it pantheon python3 manage.py reset-password ADMIN
+docker compose exec -it companion-assistant python3 manage.py users
+docker compose exec -it companion-assistant python3 manage.py reset-password ADMIN
 ```
 
 It asks for the new password twice. `--create` makes a new administrator
@@ -575,7 +575,7 @@ scripts. Browsers already signed in stay signed in.
 
 **Piper voices.** Kokoro's 54 voices are built in. For Piper voices, put each
 voice's `.onnx` and `.onnx.json` files in the `voices` folder (or set
-`PIPER_VOICES_DIR`) and run `docker compose restart pantheon`. They appear in
+`PIPER_VOICES_DIR`) and run `docker compose restart companion-assistant`. They appear in
 the character editor as `piper:<name>`.
 
 **Uninstall**
@@ -583,10 +583,10 @@ the character editor as `piper:<name>`.
 ```sh
 docker compose down                     # remove the containers; the volume stays
 docker compose down -v                  # …and DELETE all data
-docker image rm localhost/companion:latest localhost/pantheon-koboldcpp:latest
+docker image rm localhost/companion-assistant:latest localhost/pantheon-koboldcpp:latest
 ```
 
-Then delete the `pantheon` folder. Your models are only in the folders you
+Then delete the `companion-assistant` folder. Your models are only in the folders you
 put them in.
 
 ---
@@ -597,16 +597,16 @@ The same thing with plain commands. For Podman, replace `docker` with
 `podman`.
 
 ```sh
-docker build -f Containerfile -t localhost/companion:latest .
-docker volume create pantheon-data
-docker run -d --name pantheon --restart unless-stopped \
-  -p 127.0.0.1:7861:7861 \
+docker build -f Containerfile -t localhost/companion-assistant:latest .
+docker volume create companion-assistant-data
+docker run -d --name companion-assistant --restart unless-stopped \
+  -p 127.0.0.1:7867:7867 \
   --add-host host.docker.internal:host-gateway \
   -e KOBOLD_URL=http://host.docker.internal:5001 \
   -e COMFYUI_URL=http://host.docker.internal:8188 \
   -e TZ=Europe/Berlin \
-  -v pantheon-data:/app/data \
-  localhost/companion:latest
+  -v companion-assistant-data:/app/data \
+  localhost/companion-assistant:latest
 ```
 
 - `-f Containerfile` is needed with Docker, which otherwise looks for a file
@@ -621,7 +621,7 @@ The KoboldCPP container on its own, with Podman on Linux:
 
 ```sh
 podman build -t localhost/pantheon-koboldcpp:latest backends/koboldcpp
-podman run -d --name pantheon-koboldcpp -p 127.0.0.1:5001:5001 \
+podman run -d --name companion-assistant-koboldcpp -p 127.0.0.1:5001:5001 \
   --device nvidia.com/gpu=all --security-opt label=disable \
   -e KOBOLD_MODEL=my-model.gguf -v ./llm-models:/models:ro,z \
   localhost/pantheon-koboldcpp:latest
@@ -631,24 +631,24 @@ podman run -d --name pantheon-koboldcpp -p 127.0.0.1:5001:5001 \
 options.) Published on `127.0.0.1` like this, it counts as a KoboldCPP on
 `127.0.0.1` for [4a](#4a-koboldcpp-natively-any-computer)'s Linux note.
 
-`run-podman.sh` is the Linux/Podman launcher that `stack companion` uses. It
+`run-podman.sh` is the Linux/Podman launcher that `stack companion-assistant` uses. It
 keeps the data in the `data/` folder rather than a volume, and derives `TZ`
 from the host.
 
 ---
 
-## 9. Reaching Pantheon from other devices
+## 9. Reaching Cantinero from other devices
 
-**Not yet.** Pantheon answers on this computer only, at `http://127.0.0.1:7861`
+**Not yet.** Cantinero answers on this computer only, at `http://127.0.0.1:7867`
 (`localhost` redirects there). Its sign-in runs over plain HTTP, and it allows
 that only on this computer's own address, so a phone or another PC gets an
 error page instead of the sign-in form, and a reverse proxy in front does not
-help yet: Pantheon would still refuse the proxy's host name.
+help yet: Cantinero would still refuse the proxy's host name.
 
-Support for other devices is planned: Pantheon behind HTTPS, with a host name
+Support for other devices is planned: Cantinero behind HTTPS, with a host name
 you choose. Until then, use it on the computer that runs it.
 
-Changing `PANTHEON_BIND` in `.env` no longer opens Pantheon to the network.
+Changing `PANTHEON_BIND` in `.env` no longer opens Cantinero to the network.
 Older `.env` files that set `PANTHEON_BIND=0.0.0.0` are harmless; the setting
 is ignored.
 
@@ -660,22 +660,22 @@ Start with:
 
 ```sh
 docker compose ps                                       # running? healthy?
-docker compose logs --tail 50 pantheon
-docker compose exec pantheon python3 manage.py backends
+docker compose logs --tail 50 companion-assistant
+docker compose exec companion-assistant python3 manage.py backends
 ```
 
-**The status dot says KoboldCPP is offline / Pantheon cannot reach KoboldCPP**
+**The status dot says KoboldCPP is offline / Cantinero cannot reach KoboldCPP**
 
 `manage.py backends` names the address it tried. Then:
 
 ```sh
-docker compose exec pantheon python3 manage.py probe host.docker.internal 5001
+docker compose exec companion-assistant python3 manage.py probe host.docker.internal 5001
 ```
 
 - *Connection refused*: the address is right, but nothing listens there **as
   seen from the container**. Either KoboldCPP is not running, or (on Linux)
   it listens on `127.0.0.1` only. Start it without `--host 127.0.0.1`, or use
-  `compose.host-network.yaml` ([6](#6-start-pantheon-and-sign-in)).
+  `compose.host-network.yaml` ([6](#6-start-cantinero-and-sign-in)).
 - *Name does not resolve*: with `compose.koboldcpp.yaml` the name is
   `koboldcpp`, and that container is not running (`docker compose logs
   koboldcpp`). With `compose.ai-stack.yaml`, ai-stack's backends are not
@@ -723,8 +723,9 @@ accounts yet. Use `reset-password`.
 **Times are wrong**: set `TZ` in `.env` and run `docker compose up -d`.
 
 **The port is taken** (`address already in use`): set another
-`PANTHEON_PORT` in `.env`. On the ai-stack workstation, a `companion`
-container from `stack companion` may already hold 7861.
+`PANTHEON_PORT` in `.env`. On the ai-stack workstation, a `companion-assistant`
+container from `stack companion-assistant` may already hold 7867 (the roleplay
+app, `companion`, uses 7861).
 
 **`docker build` fails with "failed to read dockerfile"**: add
 `-f Containerfile`. Compose does this for you.

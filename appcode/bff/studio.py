@@ -23,8 +23,8 @@ from pytincture.dataclass import backend_for_frontend
 EDITABLE = (
     "name", "nickname", "creator", "character_version", "creator_notes",
     "description", "personality", "scenario", "first_mes", "mes_example",
-    "alternate_greetings", "system_prompt", "post_history_instructions", "chat_mode",
-    "pronouns", "tags", "power_dynamic", "social_acceptance", "appearance",
+    "alternate_greetings", "system_prompt", "post_history_instructions",
+    "tags", "appearance",
     "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode",
     "portrait_source", "portrait_sprite",
 )

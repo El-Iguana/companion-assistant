@@ -1,12 +1,10 @@
-"""BFF: one chat — open it, stream replies, swipe, edit, delete, resend, clear, sweep, and
-(roleplay) narrator events, Continue, drafts of the user's reply, and the chat's options.
+"""BFF: one chat — open it, stream replies, swipe, edit, delete, resend, clear, sweep.
 
 Every method is a thin call into Pantheon's own handlers (``main.*``), so generation,
-swipes, mood, the relationship, memory folding and the idle sweep behave exactly as on
-the classic page.
+swipes, mood, memory folding and the idle sweep behave exactly as on the classic page.
 
 ``send`` is a ``@bff_stream`` async generator relaying ``main.chat``'s SSE: tokens, ``expr``
-beats, errors, then the ``done`` event (mood, relationship, milestones). Stopping in the
+beats, errors, then the ``done`` event (expression, mood). Stopping in the
 browser closes this generator, which closes the handler's generator, which stops
 KoboldCPP. As on the classic page, a stopped turn is not saved: ``main.chat`` stores the
 exchange only once the reply completes.
@@ -49,26 +47,13 @@ class Chat:
         if card is None:
             return {"ok": False, "error": "this chat's character was deleted", "gone": True}
         persona = main._load(cur.personas, s.persona_id, Persona) or main._default_persona(cur)
-        assistant = card.chat_mode == "assistant"
-        scenario = s.relationship is not None
-        rel = None
-        memories = 0
-        if not assistant:
-            if scenario:
-                from muninn import relationship
-
-                rel = relationship.summary(s.relationship)
-            else:
-                rel = await main.get_relationship(card.id, persona.id, cur=cur)
-                memories = len(main._load_character_memory(cur, card.id, persona.id).facts)
-        else:
-            am = main._load_assistant_memory(cur, card.id, persona.id)
-            memories = len(am.facts) + len(am.directives)
+        am = main._load_assistant_memory(cur, card.id, persona.id)
+        memories = len(am.facts) + len(am.directives)
         return {
             "ok": True,
             "session": s.model_dump(),
             "card": {
-                "id": card.id, "name": card.name, "tagline": tagline(card), "mode": card.chat_mode,
+                "id": card.id, "name": card.name, "tagline": tagline(card),
                 "has_portrait": has_portrait(card), "updated_at": card.updated_at,
                 "expressions": sorted(card.expressions.keys()),
                 "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
@@ -81,56 +66,16 @@ class Chat:
             "voice": {k: v for k, v in main._load_settings(cur).model_dump().items() if k in VOICE},
             "persona": {"id": persona.id, "name": persona.name,
                         "has_portrait": bool(persona.image)},
-            "relationship": rel,
-            "scenario": scenario,
             "memories": memories,
         }
 
     @bff_stream()
-    async def send(self, session_id: str, text: str, regenerate: bool = False, cont: bool = False,
-                   direction: str = ""):
-        """A chat turn. ``cont``: roleplay Continue — she goes on with no new message.
-        ``direction``: the user's note on how this reply (Continue, Another take) should go;
-        it steers the prompt and is never saved."""
+    async def send(self, session_id: str, text: str, regenerate: bool = False):
+        """A chat turn; ``regenerate`` re-rolls the last reply as a new swipe."""
         from models.schema import ChatRequest
 
         async for ev in self._relay("chat", lambda: ChatRequest(
-                session_id=session_id, input_text=text or "", regenerate=bool(regenerate),
-                continue_turn=bool(cont), direction=direction or "")):
-            yield ev
-
-    async def set_options(self, session_id: str, allow_side_characters: bool) -> dict:
-        """Per-chat options from the roleplay bar."""
-        import main
-        from fastapi import HTTPException
-        from models.schema import SessionOptions
-
-        cur = self._cur()
-        if cur is None:
-            return {"ok": False, "error": "not signed in", "signed_out": True}
-        try:
-            return await main.set_session_options(
-                session_id, SessionOptions(session_id=session_id,
-                                           allow_side_characters=bool(allow_side_characters)), cur=cur)
-        except HTTPException as exc:
-            return {"ok": False, "error": str(exc.detail)}
-
-    @bff_stream()
-    async def narrate(self, session_id: str, direction: str = "", replace: bool = False):
-        """A neutral narrator event, saved into the chat (roleplay only)."""
-        from models.schema import SceneRequest
-
-        async for ev in self._relay("narrate", lambda: SceneRequest(
-                session_id=session_id, direction=direction or "", replace=bool(replace))):
-            yield ev
-
-    @bff_stream()
-    async def draft(self, session_id: str, direction: str = ""):
-        """{{user}}'s next message written for the composer; not saved (roleplay only)."""
-        from models.schema import SceneRequest
-
-        async for ev in self._relay("draft_reply", lambda: SceneRequest(
-                session_id=session_id, direction=direction or "")):
+                session_id=session_id, input_text=text or "", regenerate=bool(regenerate))):
             yield ev
 
     async def _relay(self, handler: str, make_req):

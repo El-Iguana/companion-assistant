@@ -103,7 +103,7 @@
     const want = new URLSearchParams(location.search).get("card") || settings.desktop_card_id || "";
     if (want && characters.some(c => c.id === want)) return openCharacter(want);
     if (want) console.warn("[desktop] configured character not found; falling back");
-    const last = recent.find(s => !s.scenario && characters.some(c => c.id === s.character_id));
+    const last = recent.find(s => characters.some(c => c.id === s.character_id));
     if (last) return openCharacter(last.character_id);
     if (characters.length) return openCharacter(characters[0].id);
     caption("No characters yet — make one in the full window.", 0);
@@ -159,7 +159,7 @@
         }
       }
     } catch (e) {
-      if (e.name !== "AbortError") { console.warn("[desktop] chat failed:", e); caption("Could not reach her — is Pantheon running?", 8000); }
+      if (e.name !== "AbortError") { console.warn("[desktop] chat failed:", e); caption("Could not reach her — is Cantinero running?", 8000); }
     } finally {
       streaming = false; V.setStreaming(false); controller = null;
     }
@@ -167,7 +167,7 @@
       V.feed(acc, true);
       V.flushExpr();
       mood = { mood: done.mood, valence: done.valence };
-      V.mood(done.mood || "", done.valence || 0, (done.relationship && done.relationship.stage) || "");
+      V.mood(done.mood || "", done.valence || 0, "");
       sprite();
       caption(visible(acc), 9000);
       // Fold the chat into long-term memory once it goes quiet, as the main page does.
@@ -231,7 +231,7 @@
       await pickCharacter();
     } catch (e) {
       console.warn("[desktop] boot failed:", e);
-      caption("Could not load — is Pantheon running?", 0);
+      caption("Could not load — is Cantinero running?", 0);
     }
     setInterval(paint, 500);
     window.__desktopReady = true;

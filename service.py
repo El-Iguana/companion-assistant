@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Pantheon — the server.
+"""Pantheon assistant — the server.
 
-    python service.py                 # http://127.0.0.1:7861/
+    python service.py                 # http://127.0.0.1:7867/
 
-``main`` is Pantheon itself: accounts, data, the KoboldCPP/ComfyUI clients, the memory and
-relationship code, and the handlers every feature runs through. The page is a pytincture
+``main`` is Pantheon itself: accounts, data, the KoboldCPP/ComfyUI clients, the assistant
+memory, and the handlers every feature runs through. The page is a pytincture
 app built here (``appcode/``): its BFF classes call ``main``'s handlers directly with the
 signed-in user's context, and ``pantheon_web/`` adds the plain routes a JSON BFF cannot
 serve (images, uploads, audio, the VRM model, the desktop avatar's page).
 
 **Any device on the LAN, plain HTTP.** Pantheon is a local product for whoever installs it,
-so it answers on every interface at ``http://<host>:7861/``. pytincture's
+so it answers on every interface at ``http://<host>:7867/``. pytincture's
 ``allow_development_auth_origin`` mode does exactly that (origin taken from the request,
 non-``Secure`` cookies, no host list) but refuses any client that isn't loopback, so
 ``LanAsLoopback`` tells it every client is. ``localhost`` is redirected to ``127.0.0.1``.
@@ -24,7 +24,7 @@ Environment:
 
 | var | default | what |
 |---|---|---|
-| ``PANTHEON_PORT`` | 7861 | listen port, and the port in the browser's address — publish it on the same number |
+| ``PANTHEON_PORT`` | 7867 | listen port, and the port in the browser's address — publish it on the same number |
 | ``PANTHEON_BIND`` | 0.0.0.0 | listen address |
 | ``PANTHEON_DATA_DIR`` | ./data | a throwaway library for dev/test |
 """
@@ -55,7 +55,7 @@ from pantheon_web.media import router as media_router  # noqa: E402
 logging.basicConfig(level=logging.INFO)
 
 APPLICATION = "pantheon"
-PORT = int(os.environ.get("PANTHEON_PORT", "7861"))
+PORT = int(os.environ.get("PANTHEON_PORT", "7867"))
 BIND = os.environ.get("PANTHEON_BIND", "0.0.0.0")
 ORIGIN = f"http://127.0.0.1:{PORT}"   # what the startup line prints; any host name works
 
@@ -219,5 +219,5 @@ app = build_web_app()
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"Pantheon: {ORIGIN}/", flush=True)
+    print(f"Cantinero: {ORIGIN}/", flush=True)
     uvicorn.run(app, host=BIND, port=PORT, log_level="info")
