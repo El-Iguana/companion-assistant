@@ -192,7 +192,13 @@ pantheon_web/           # server-side plain modules (never shipped to the browse
                         #   login_page · media (/pmedia: images, export, import, VRM list/file/upload, tts, stt,
                         #   avatar.vrm, help.html) · desktop (/desktop + /pdesk/*) · jobs (background sprite
                         #   generation) · present (shared formatting) · assets/help.html (the in-app guide)
-static/js/voice.js      # voice island: read-aloud + lip-sync, PTT, hands-free/VAD/wake word, barge-in; loads vtuber.mjs
+static/js/voice.js      # voice island: read-aloud + lip-sync, PTT, mic capture, barge-in; loads vtuber.mjs.
+                        #   Its hands-free decisions run in Python when the page plugs in a brain (below);
+                        #   the desktop window (no Pyodide) still uses voice.js's own copy of the rules
+appcode/ui/voicecore.py # hands-free rules in plain Python (no browser imports, unit-tested, #5): energy
+                        #   segmenter + pre-roll, half duplex / strict / deferred barge-in, wake word +
+                        #   continuous conversation, self-hearing check, WAV
+appcode/ui/mic.py       # plugs voicecore into voice.js (PantheonVoice.useBrain / brainOps), page-wide
 static/js/vtuber.mjs    # 3D avatar renderer (three.js + three-vrm, vendored in static/vendor/), avatar:* events
 static/js/desktop.js · static/css/desktop.css   # the desktop avatar's page, on voice.js
 static/avatar-test.html # avatar tuning harness (reads /pmedia/vrm; sign in first)
@@ -439,6 +445,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 | `ui/common.py` | spawn, Listeners, Modal, toast/failed, csrf_token, avatar/portrait helpers |
 | `bff/*.py` | `shell`, `library`, `chat` (incl. the `@bff_stream` relay of `main.chat`), `studio`, `people`, `account`, `memory` |
 | `static/js/voice.js` | `window.PantheonVoice` + `pvoice:*` events (PYTINCTURE_PLAN.md, Phase 6) |
+| `ui/voicecore.py` · `ui/mic.py` | hands-free decisions in Python (#5): voice.js measures each 4096-sample capture block's level and calls `brain.block(rms, block, now, audible, herTurn, busy)`; the brain answers through `brainOps()` (transcribe, send, abortNow/abortAndWait, say, toast, persist, flags). Measured (Pyodide 0.29.3): 0.003 ms a block with the level from JS, 0.31 ms if Python measured it, against 85 ms between blocks. Browser-checked with a fake mic in the image: wake word sends the rest, no wake word sends nothing, speaking over a streaming reply stops it at speech onset and sends the transcript (strict) |
 | `static/js/vtuber.mjs` | `avatar:card/speak/expr/mood` in, `avatar:active/error` out |
 
 ## Feature set (all built + verified)
