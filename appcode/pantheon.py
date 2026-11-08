@@ -142,6 +142,10 @@ class Pantheon(MainWindow):
         script.id = "pt-voice"
         script.src = "/static/js/voice.js"
         js.document.head.appendChild(script)
+        # Its hands-free decisions run in Python (ui/voicecore.py, #5), plugged in on load.
+        from ui.mic import install as install_mic
+
+        install_mic()
 
     def _skeleton(self) -> str:
         tiles = "".join(

@@ -49,6 +49,11 @@
     full_duplex: false, mic_device_id: "", mic_device_label: "",
     wake_mode: "phrase", sleep_phrase: "that will be all", sleep_after_s: 180, farewell: "Goodbye." };
 
+  // The hands-free brain (#5): the main page plugs in ui/mic.py, so the decisions on each
+  // capture block (speech start/stop, barge-in, wake word, self-hearing) run in Python
+  // (ui/voicecore.py). Without one (the desktop window has no Pyodide) the JS rules below run.
+  let brain = null;
+
   // Read-aloud is a per-viewer preference, so it lives in this browser.
   let ttsEnabled = false;
   try { ttsEnabled = localStorage.getItem("pantheon.speaker") === "1"; } catch {}
@@ -843,6 +848,16 @@
     hfPcm = []; hfPre = []; hfCapturing = false;
     hfProc.onaudioprocess = (e) => {
       const block = new Float32Array(e.inputBuffer.getChannelData(0));   // copy: reused
+      if (brain) {
+        // One call a block (~12 a second): the level is measured here, the decision there.
+        let sum = 0; for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
+        const now = performance.now();
+        try {
+          brain.block(Math.sqrt(sum / block.length), block, now,
+                      !!ttsSource || now < ttsHangoverUntil, herTurn(now), !!ttsSource || streaming);
+        } catch (err) { console.error("[mic] brain:", err); }
+        return;
+      }
       if (hfCapturing) { hfPcm.push(block); return; }
       // Rolling pre-roll: the gate opens once speech is already loud, and the wake word
       // is the very first thing said — exactly the part that would be clipped.
@@ -853,12 +868,15 @@
     const mute = hfCtx.createGain(); mute.gain.value = 0;
     hfProc.connect(mute); mute.connect(hfCtx.destination);
     hfActive = true; hfSpeaking = false; hfSilenceStart = 0; hfPendingBargeIn = false;
+    configureBrain();
     // Expire on a timer, not on the next utterance: an empty room never speaks.
     if (!hfWakeTimer) hfWakeTimer = setInterval(() => {
+      if (brain) { try { brain.tick(Date.now()); } catch {} return; }
       if (awake && Date.now() > awakeUntil) setAwake(false, "idle timeout");
     }, 2000);
-    console.log("[mic] hands-free engaged; device=" + ((hfStream.getAudioTracks()[0] || {}).label || "?"));
-    hfTick();
+    console.log("[mic] hands-free engaged; device=" + ((hfStream.getAudioTracks()[0] || {}).label || "?")
+                + (brain ? " (Python brain)" : ""));
+    if (!brain) hfTick();
     repaint();
     return true;
   }
@@ -866,7 +884,7 @@
   function disengageHandsFree() {
     hfActive = false; hfSpeaking = false; hfCapturing = false; hfPendingBargeIn = false;
     if (hfWakeTimer) { clearInterval(hfWakeTimer); hfWakeTimer = null; }
-    setAwake(false, "mic off");
+    if (brain) { try { brain.reset(); } catch {} } else setAwake(false, "mic off");
     if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
     // A ScriptProcessor keeps firing until disconnected.
     if (hfProc) { hfProc.onaudioprocess = null; try { hfProc.disconnect(); } catch {} hfProc = null; }
@@ -879,7 +897,21 @@
   function persist(patch) {
     Object.assign(settings, patch);
     emit("persist", { patch });
+    configureBrain();
     repaint();
+  }
+
+  // What the brain needs to decide: the merged phrases (the card's win) and the gate.
+  function configureBrain() {
+    if (!brain) return;
+    try {
+      brain.configure(JSON.stringify({
+        wake_word: activeWakeWord(), sleep_phrase: activeSleepPhrase(), farewell: activeFarewell(),
+        wake_mode: settings.wake_mode || "phrase", sleep_after_s: settings.sleep_after_s,
+        vad_threshold: settings.vad_threshold, vad_silence_ms: settings.vad_silence_ms,
+        full_duplex: !!settings.full_duplex, sample_rate: (hfCtx && hfCtx.sampleRate) || 48000,
+      }));
+    } catch (err) { console.error("[mic] brain configure:", err); }
   }
 
   async function setHandsFree(on) {
@@ -1002,6 +1034,7 @@
       if (s) Object.assign(settings, s);
       attached = !!card;
       syncAvatar();
+      configureBrain();
       if (settings.hands_free) resumeHandsFree();
       repaint();
     },
@@ -1023,6 +1056,7 @@
         if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
         if (hfActive) { disengageHandsFree(); if (attached) resumeHandsFree(); }
       }
+      configureBrain();
       repaint();
     },
     setStreaming(on) { streaming = !!on; },
@@ -1076,6 +1110,26 @@
                                                 aec: /aec|echo|cancel/i.test(d.label || "") })));
     },
     state,
+    // The page's Python brain (ui/mic.py) and what it may do here.
+    useBrain(b) { brain = b || null; configureBrain(); },
+    hasBrain() { return !!brain; },
+    brainOps() {
+      return {
+        flags(isAwake, listening) { awake = !!isAwake; hfCapturing = !!listening; repaint(); },
+        abortNow() { if (ttsSource || streaming) abortAndWait(); },
+        abortAndWait,
+        transcribe(bytes, strict) {
+          return transcribeBlob(new Blob([bytes], { type: "audio/wav" }), !!strict);
+        },
+        active() { return hfActive; },
+        streaming() { return streaming; },
+        send(text) { sendText(String(text)); },
+        say(text) { speakLine(String(text)); },
+        toast(msg, kind) { toast(String(msg), String(kind || "info")); },
+        persist(patchJson) { persist(JSON.parse(String(patchJson))); },
+        spoken() { return JSON.stringify(spokenRecent); },
+      };
+    },
     // Test hook: what the self-hearing guard and wake-word gate would do with a transcript.
     _gate(text) { return applyWakeWord(String(text || "")); },
     _clean: cleanForTTS,

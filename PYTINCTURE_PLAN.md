@@ -13,7 +13,7 @@ wapyt** page (Python in the browser), laid out and styled after **Emberfolk**
 |---|---|
 | Structure | **In place, phased.** Same repo, image, container, port (`companion`, 7861). The new page is served beside the old one until it reaches parity; then the old one is deleted. |
 | Network | **Loopback first.** pytincture only allows login over plain HTTP on a loopback address. LAN access is a later phase behind a TLS proxy. |
-| Voice + avatar | **Kept as JavaScript islands** (`vtuber.mjs`, the mic/VAD/lip-sync loop), driven from Python through events. They run at audio and frame rate, which Pyodide's FFI handles poorly. |
+| Voice + avatar | **Kept as JavaScript islands** (`vtuber.mjs`, the mic/VAD/lip-sync loop), driven from Python through events. They run at audio and frame rate, which Pyodide's FFI handles poorly. **Revised 2026-11-08 (#5):** measured, a call per capture block costs 0.003 ms (85 ms apart), so hands-free's *decisions* moved to Python (`ui/voicecore.py`); capture, playback and lip-sync stay JS. |
 | Ember surfaces | Discover gallery home · suggestion chips · theme swatches · recent-chats rail. Plus what is assumed: Ember's layout, chat view, profile modal, studio page, mobile drawer. |
 | Out of scope | Everything Emberfolk gets from Perchance's hosted services: Groups, Feed, Discuss, likes from others, publishing, the guided tour. Pantheon has no community; nothing here invents one. |
 
