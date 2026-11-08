@@ -67,6 +67,9 @@ COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh   # choose the first ADMIN passwo
 Open **`http://127.0.0.1:7867/`** (`localhost` redirects there). Both `run-podman.sh` and compose
 publish on `127.0.0.1` only. The microphone needs a secure context, so voice input works on this
 computer ([INSTALL.md, section 9](INSTALL.md#9-reaching-cantinero-from-other-devices)).
+With `run-podman.sh`, other devices can talk to it too: open `http://<this computer>.local:7867/ca`
+on the device, trust Cantinero's local certificate once (the page walks through it), then use
+`https://<this computer>.local:7868/`.
 
 The in-app **Guide** (Settings → Guide) documents custom system prompts and memory.
 

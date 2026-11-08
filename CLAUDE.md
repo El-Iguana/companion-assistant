@@ -75,7 +75,23 @@ to `127.0.0.1` (`service.LocalhostRedirect`) so this computer keeps one sign-in.
 needs a secure context, so voice input works on this computer only, and only at `127.0.0.1`
 or `localhost`: opened by its network name or IP (`http://amd-halo.local:7867`), even here,
 the page has no `navigator.mediaDevices`. voice.js `micBlocked()` says so in the mic toasts and
-Settings' "Find microphones" (it used to be a bare "TypeError"). HTTPS for other devices: #7. Accounts are the app's own (`pantheon_web/auth.py` checks
+Settings' "Find microphones" (it used to be a bare "TypeError").
+**HTTPS for other devices' microphones (#7, 2026-11-08):** `run-podman.sh` also serves the app over
+HTTPS on **7868** (`PANTHEON_HTTPS_PORT`; 0/unset = off, so compose installs stay plain), one process
+with two uvicorn listeners (`service.py __main__`; the HTTPS one has `lifespan="off"`). The
+certificate comes from Cantinero's own CA in `data/tls/` (`pantheon_web/tls.py`, `openssl` CLI): a
+10-year P-256 CA, **name-constrained** to `localhost`, `.local`, the single-label host name it was
+made with and private IPv4 nets, so a copy of its key can't impersonate a real site (a forged
+`www.bank.com` cert fails to verify, tested). The server cert (397 days) covers
+`PANTHEON_TLS_NAMES` (run-podman.sh: `hostname -s`, `NAME.local`, `hostname -I`), keeping only names the
+CA may vouch for (public IPv6 is dropped and logged; one outside name would void the whole cert), and
+is remade on start when the names change (DHCP) or <30 days are left; the CA is never remade.
+Devices trust the CA once from **`http://NAME.local:7867/ca`** (`pantheon_web/tls_page.py`: public,
+plain HTTP, steps for Android/iOS/Windows/Mac/Linux, SHA-256 fingerprint, `/ca.crt`), then use
+`https://NAME.local:7868/` (or the IP: Android often can't resolve `.local`). The mic message points
+there. Tested in a test build: curl verifies the chain by name and IP with the CA and refuses
+without it; a browser signed in over HTTPS by IP, had a secure context and sent a hands-free
+utterance. Not yet tried from a real phone. Tests: `tests/test_tls.py`. Accounts are the app's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
 The container runs **`service.py`**: `main` (the app itself — accounts, data, clients, every
@@ -192,6 +208,7 @@ services/
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
 pantheon_web/           # server-side plain modules (never shipped to the browser): auth (login hook) ·
+                        #   tls + tls_page (HTTPS for other devices: local CA, /ca, /ca.crt) ·
                         #   login_page · media (/pmedia: images, export, import, VRM list/file/upload, tts, stt,
                         #   avatar.vrm, help.html) · desktop (/desktop + /pdesk/*) · jobs (background sprite
                         #   generation) · present (shared formatting) · assets/help.html (the in-app guide)

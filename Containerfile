@@ -124,7 +124,7 @@ ENV KOBOLD_URL=http://koboldcpp:5001
 ENV PANTHEON_BIND=0.0.0.0 \
     PANTHEON_PORT=7867
 
-EXPOSE 7867
+EXPOSE 7867 7868
 
 # HEALTHCHECK is a docker-format field with no OCI slot, so podman drops it unless the build
 # passes --format docker (run-podman.sh does). Without that flag this block is silently inert.
