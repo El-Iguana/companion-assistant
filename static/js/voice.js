@@ -35,6 +35,18 @@
     window.dispatchEvent(new CustomEvent("pvoice:" + name, { detail: detail || {} }));
   const toast = (msg, kind) => emit("toast", { msg, kind: kind || "warning" });
 
+  // Browsers offer the microphone only in a secure context: https:// or this computer's own
+  // address. Opened by its network name or IP (http://amd-halo.local:7867), the page has no
+  // navigator.mediaDevices, and the error was a bare "TypeError" (2026-11-08).
+  function micBlocked() {
+    if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return "";
+    const port = location.port ? ":" + location.port : "";
+    return "The microphone is blocked at this address. Browsers allow it only over https:// or at " +
+           "the computer's own address: on the computer running Cantinero, open http://127.0.0.1" +
+           port + "/. Other devices can't use the microphone yet.";
+  }
+  const micError = (detail) => micBlocked() || ("Microphone unavailable: " + (detail || "permission denied"));
+
   function csrf() {
     const parts = document.cookie.split(";").map(s => s.trim());
     const hit = parts.find(p => /csrf/i.test(p.split("=")[0]) && /pantheon/i.test(p.split("=")[0]))
@@ -585,7 +597,7 @@
     try {
       if (!micStream) micStream = await openMic();
     } catch (e) {
-      toast("Microphone unavailable: " + ((e && e.name) || "permission denied"), "error");
+      toast(micError(e && e.name), "error");
       return;
     }
     recPcm = [];
@@ -918,7 +930,7 @@
     if (on) {
       if (!await engageHandsFree()) {
         console.error("[mic] hands-free failed:", hfLastError || "(no detail)");
-        toast("Microphone unavailable: " + (hfLastError || "permission denied"), "error");
+        toast(micError(hfLastError), "error");
         on = false;
       }
     } else {
@@ -938,7 +950,7 @@
     window.addEventListener("pointerdown", async () => {
       resumeArmed = false;
       if (attached && settings.hands_free && !hfActive && !await engageHandsFree()) {
-        toast("Microphone unavailable: " + (hfLastError || "permission denied"), "error");
+        toast(micError(hfLastError), "error");
       }
     }, { once: true });
   }
@@ -1110,6 +1122,8 @@
                                                 aec: /aec|echo|cancel/i.test(d.label || "") })));
     },
     state,
+    // Why the microphone can't be used at this address ("" when it can).
+    micBlocked,
     // The page's Python brain (ui/mic.py) and what it may do here.
     useBrain(b) { brain = b || null; configureBrain(); },
     hasBrain() { return !!brain; },

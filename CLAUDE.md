@@ -72,7 +72,10 @@ whoever installs it; security against the LAN is not a goal. pytincture's
 but answers 403 to non-loopback clients, so `service.LanAsLoopback` (outermost) presents every
 client as 127.0.0.1 — the spike. The container publishes `0.0.0.0:7867`; `localhost` is redirected
 to `127.0.0.1` (`service.LocalhostRedirect`) so this computer keeps one sign-in. The microphone
-needs a secure context, so voice input works on this computer only. Accounts are the app's own (`pantheon_web/auth.py` checks
+needs a secure context, so voice input works on this computer only, and only at `127.0.0.1`
+or `localhost`: opened by its network name or IP (`http://amd-halo.local:7867`), even here,
+the page has no `navigator.mediaDevices`. voice.js `micBlocked()` says so in the mic toasts and
+Settings' "Find microphones" (it used to be a bare "TypeError"). HTTPS for other devices: #7. Accounts are the app's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
 The container runs **`service.py`**: `main` (the app itself — accounts, data, clients, every

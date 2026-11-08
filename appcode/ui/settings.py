@@ -229,7 +229,9 @@ class SettingsView:
             return
         if not devices:
             if ask:
-                toast("No microphones visible — the browser refused access or none is plugged in.", "warning")
+                blocked = str(v.micBlocked()) if hasattr(v, "micBlocked") else ""
+                toast(blocked or "No microphones visible — the browser refused access or none is "
+                      "plugged in.", "warning", 9000 if blocked else 4000)
             return
         want = self.data["settings"].get("mic_device_id") or ""
         label = self.data["settings"].get("mic_device_label") or ""
