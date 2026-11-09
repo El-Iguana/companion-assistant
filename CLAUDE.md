@@ -91,7 +91,10 @@ plain HTTP, steps for Android/iOS/Windows/Mac/Linux, SHA-256 fingerprint, `/ca.c
 `https://NAME.local:7868/` (or the IP: Android often can't resolve `.local`). The mic message points
 there. Tested in a test build: curl verifies the chain by name and IP with the CA and refuses
 without it; a browser signed in over HTTPS by IP, had a secure context and sent a hands-free
-utterance. Not yet tried from a real phone. Tests: `tests/test_tls.py`. Accounts are the app's own (`pantheon_web/auth.py` checks
+utterance. Not yet tried from a real phone. Tests: `tests/test_tls.py`.
+`frontend.json` declares `"https_port": 7868, "https_setup": "/ca"`, so the ai-stack dashboard
+links Cantinero over HTTPS (at the LAN address even when the dashboard is opened as localhost)
+with a "Set up a device for HTTPS" link to `/ca`. Accounts are the app's own (`pantheon_web/auth.py` checks
 them with `services.auth`); the session cookie key is `data/auth/pytincture.key`.
 
 The container runs **`service.py`**: `main` (the app itself — accounts, data, clients, every
