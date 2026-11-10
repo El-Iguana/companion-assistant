@@ -4,14 +4,14 @@
 ARG PYTHON_IMAGE=docker.io/library/python:3.13-slim
 
 # ── wapyt, the new page's widgetset: not on PyPI, so built from GitHub at a pinned commit.
-# Two wheels: 0.2.0 for the server's Python (pytincture's widgetset discovery reads it) and
+# Two wheels: 0.3.0 for the server's Python (pytincture's widgetset discovery reads it) and
 # 99.99.99 for the BROWSER, with its asset manifest regenerated for that version
 # (pytincture hash-checks every widget asset). Same recipe and commit as ai-stack/stack-ui
 # and ~/Development/Pytinc/basilisk_wapyt. Local checkout instead:
 #   podman build --build-context wapyt-src=../../Pytinc/wa_pytincture_widgetset .
 FROM ${PYTHON_IMAGE} AS wapyt-git
 ARG WAPYT_REPO=https://github.com/WAwesome-AI/wa_pytincture_widgetset.git
-ARG WAPYT_REF=0457960bca1481ffee0c4e778128e5e4a4f295b5
+ARG WAPYT_REF=44d37bb076ed8d693222067fe844985062ce691a
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --filter=blob:none "$WAPYT_REPO" /src \
