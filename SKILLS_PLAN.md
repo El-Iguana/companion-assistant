@@ -187,6 +187,63 @@ with option 1 plus the TZ fix**, and only add the endpoint when GPU/service stat
 > server Phase 1 spec: `../orpheus/docs/phase1-server-spec.md`. The network survey below is kept because it's still
 > true; the Navidrome plan after it is superseded.
 
+### Plan of record, 2026-11-13
+
+Supersedes the details below where they disagree. Orpheus is now deployed on **Homelab**; Cantinero and
+the speakers are on **predator**. The server side is `../orpheus/docs/phase5-remote-control-spec.md`.
+
+**The flow.** "Play Sigur Rós" → `media_find` → Orpheus `resolve` (albums, artists, tracks, *and the
+user's playlists*) → if the match is clear she plays it at once; if `needs_disambiguation` is set she
+offers the top two or three and plays the one chosen → `media_play` → if no Orpheus player is online on
+predator, the desktop shell opens it and the skill waits for it to connect → Orpheus sends `play` to the
+player → music. **Confirm only when ambiguous** (user decision, 2026-11-13).
+
+**Decisions:**
+
+- **Player:** Orpheus's browser player at `http://<homelab>:8096/player/`, in the Chromium app window
+  that `../orpheus/player/desktop/install.sh` installs as `orpheus-player.desktop` — not the Flutter/Flatpak
+  player below, which was superseded on 2026-10-09. Installed with the autoplay switch (Orpheus Phase 5
+  AD-7), because nobody clicks a window the assistant opened.
+- **Launching it:** the desktop shell (`desktop/pantheon-desktop.py`) is the only process on the host, so
+  it gains a **page → shell channel** (a WebKit script-message handler) with one fixed message,
+  `open_orpheus_player`, which runs `gtk-launch orpheus-player`. Fixed and parameterless: the page can ask
+  for that one launch, never a command line. The skill's server side can't reach the desktop, so the
+  launch is requested through the page: `media_play` returns `player_offline`, the turn's `skill` SSE event
+  carries `{"launch": "orpheus_player"}`, the page relays it to the shell, and the skill retries `play` once
+  the player shows online (poll `GET /api/v1/devices`, ~10 s). Without the desktop shell (a plain browser
+  tab), she says to open the player.
+- **Profile:** Cantinero's controller device is **bound to the user's Orpheus profile** at setup
+  (`PUT /api/v1/devices/{id}/profile`), so "my road-trip playlist" resolves.
+- **Pending choice survives the turn.** Tool results aren't kept in history, so when she asks "the album
+  or the live recording?", the skill stores the candidates per user (`data/u/<uid>/media/pending.json`,
+  expires after 5 min) and the next turn's prompt carries a one-line note ("Waiting on: 1) Ágætis
+  byrjun — album, 2) …"). `strip_initiative_question` must not strip that question: skip it when a
+  `skill` event fired this turn.
+- **Names:** `services/orpheus.py` and `ORPHEUS_URL` already mean the **Orpheus TTS voice**. The media
+  skill is `services/skills/media.py` with its client in `services/skills/orpheus_media.py`, configured by
+  `ORPHEUS_MEDIA_URL` (the saved server, optional) and `ORPHEUS_MEDIA_SCAN_CIDR`.
+- **Token storage:** its own file, `data/u/<uid>/media/orpheus.json` (`server_id`, URL, device id, token,
+  default player name) — **not** `AppSettings`, which `Account.settings()` sends to the browser whole.
+- **Discovery:** the server is on another host now, so the subnet scan crosses a real LAN; the
+  single-host `host.containers.internal` workaround in the Orpheus docs no longer applies.
+
+**Build order** (each step usable on its own):
+
+1. **Orpheus Phase 5** — control connection, command relay, playlists in `resolve`, the player obeying,
+   autoplay. Spec: `../orpheus/docs/phase5-remote-control-spec.md`.
+2. **Phase 0b scaffolding here** — `kobold.chat_generate_stream` reads `delta.tool_calls` and stops on
+   `finish_reason == "tool_calls"` (today it treats that as a natural stop and returns an empty reply);
+   `kobold_params` carries `tools`; the two-pass loop in `main.chat()`; `CharacterCard.skills`; the
+   registry; the `skill` SSE event in both consumers (`appcode/ui/chat.py`, `static/js/desktop.js`); tool
+   schemas counted in `fit_history`.
+3. **Connect** — discovery, pairing as a `controller` (settings button first; the `media_connect` tool
+   after), profile binding, token file.
+4. **Find and play** — `media_find`, `media_play`, `media_control`, `media_status`, the pending choice.
+5. **Launch** — the desktop shell's page → shell channel and the retry.
+6. **Coexistence** — `duck`/`unduck` around TTS through a server-side route (the browser knows when she
+   speaks, the token must stay server-side), then vocabulary biasing for STT (`stt.transcribe` gains an
+   `initial_prompt`).
+
 ### What's actually on the network ✅ VERIFIED, and it isn't what we assumed
 
 Discovery (mDNS + port probe, 2026-08-17):
@@ -313,7 +370,8 @@ already verified above. The wake word (`applyWakeWord`) is unchanged.
 - **Phase 2 — Media, read-only.** Needs Orpheus server Phase 1 (library, resolver, pairing).
   `media_connect` / `media_find` / `media_status`. She can talk about the library before she can
   touch it — the low-risk half.
-- **Phase 3 — Media playback.** Needs Orpheus Phase 4 (control protocol) and at least one Orpheus
+- **Phase 3 — Media playback.** Needs Orpheus **Phase 5** (control protocol; Orpheus Phase 4 became
+  profiles and state) and at least one Orpheus
   player. `media_play` / `media_control` / `media_volume`, PTT-compatible. Hands-free documented as
   headphones-only.
 - **Phase 4 — Audio coexistence.** `duck` / `unduck` around TTS, plus a VAD policy for when a nearby
@@ -322,7 +380,7 @@ already verified above. The wake word (`applyWakeWord`) is unchanged.
 
 ## Security
 
-The app **publishes on all interfaces** (`0.0.0.0:7861`) and is multi-user with `admin`/`user` roles —
+The app **publishes on all interfaces** (`0.0.0.0:7867`) and is multi-user with `admin`/`user` roles —
 the same reasoning that killed the hardcoded admin password applies here, harder.
 
 - **No arbitrary command execution, no arbitrary file reads.** Fixed tools with typed, validated,
