@@ -180,34 +180,6 @@ async def tts(request: Request):
                                  "speed": speed}, None)
 
 
-@router.post("/tts/stream")
-async def tts_stream(request: Request):
-    """One sentence in an Orpheus voice as streamed PCM (``main.tts_stream``). JSON {text, voice}."""
-    import main
-
-    _ctx(request)
-    _require_csrf(request)
-    body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="bad body")
-    return await main.tts_stream({"text": str(body.get("text") or "")[:2000],
-                                  "voice": str(body.get("voice") or "")}, None)
-
-
-@router.post("/tts/engine")
-async def tts_engine(request: Request):
-    """Load or release the on-demand Orpheus voice (``main.tts_engine``). JSON {on}.
-    voice.js calls this when voice is switched on/off for a card with an Orpheus voice."""
-    import main
-
-    _ctx(request)
-    _require_csrf(request)
-    body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="bad body")
-    return await main.tts_engine({"on": bool(body.get("on"))}, None)
-
-
 @router.post("/stt")
 async def stt(request: Request, file: UploadFile = File(...), strict: str = Form("")):
     """A recorded utterance (WAV) -> {text} (``main.stt_transcribe``). ``strict=1`` when

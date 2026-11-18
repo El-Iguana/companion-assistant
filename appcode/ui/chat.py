@@ -66,8 +66,8 @@ def _js(obj):
     return js.JSON.parse(json.dumps(obj))
 
 
-# Sound tags an Orpheus voice performs (<laugh> …, services/orpheus.py TAGS). Heard, not
-# shown — the same split as the [expr:x] beats, which never reach the transcript at all.
+# Sound tags in replies written for the removed Orpheus voices (<laugh> …). Older chats
+# still contain them, so they stay hidden.
 _VOICE_TAG = re.compile(r"[ \t]*<(?:laugh|chuckle|sigh|gasp|cough|sniffle|groan|yawn)>")
 
 

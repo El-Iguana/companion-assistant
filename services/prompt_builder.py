@@ -275,33 +275,6 @@ def speaker(m, char: str, user: str) -> str:
     return char if m.role == "char" else user
 
 
-# Orpheus voices perform these instead of reading them (services/orpheus.py). Offered
-# only to cards whose voice is Orpheus; the chat view hides them, Kokoro strips them.
-# A subset of what Orpheus knows: cough/sniffle/yawn read as noise in conversation.
-VOICE_TAGS = ("laugh", "chuckle", "sigh", "gasp", "groan")
-
-
-def voice_tag_note(card) -> str:
-    """Tell an Orpheus-voiced card it may write sound tags. Shown by example, like the
-    expression beats: a small model copies a demonstrated shape far more reliably than
-    it follows a described one. Trailing, after ASSISTANT_FORMAT_NOTE, because that note
-    forbids stage directions and the later instruction is the one that wins."""
-    if not str(getattr(card, "tts_voice", "") or "").startswith("orpheus:"):
-        return ""
-    return (
-        "Voice tags: your replies are spoken by a voice that can really laugh, chuckle, "
-        "sigh, gasp and groan. React with one when the moment calls for it — something "
-        "funny or absurd: <laugh> or <chuckle>; a setback or something tiresome: <sigh> or "
-        "<groan>; a real surprise: <gasp>. Write the tag where the sound happens, usually "
-        "at the very start of the reply.\n"
-        "Example: <chuckle> That is exactly what I said. You just did not believe me.\n"
-        "At most one per reply; plain questions and requests need none. Use only these five "
-        "tags, written exactly so. They are the one allowed exception to having no stage "
-        "directions; never describe a sound in words instead (no \"haha\", no *laughs*). "
-        "They are performed, not shown, so never mention them."
-    )
-
-
 def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    longterm_note: str = "",
                    expr_labels: List[str] | None = None,
@@ -396,9 +369,6 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     if expr_hint:
         tail.append(expr_hint)
     tail.append(ASSISTANT_FORMAT_NOTE.format(char=char_name, user=user_name))
-    voice_hint = voice_tag_note(card)
-    if voice_hint:
-        tail.append(voice_hint)
     if retake_of:
         # "Another take": the take being replaced is no longer in the history, so the
         # model had nothing to differ from and wrote much the same reply again. Quoting

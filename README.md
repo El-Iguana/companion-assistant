@@ -16,7 +16,7 @@ and assistant memory, with no roleplay, relationship system or narrator.
 
 ## Features
 
-- **Local voice** — Kokoro, Piper and (with ai-stack) the expressive Orpheus TTS, per-character voice
+- **Local voice** — Kokoro and Piper, per-character voice
   and pace; push-to-talk and hands-free faster-whisper STT with a wake word, a sleep phrase and barge-in
 - **A face** — ComfyUI expression sprites (one portrait → per-emotion sprites, live with the mood),
   or a **3D VRM avatar** with lip-sync, expressions and idle motion
@@ -46,8 +46,8 @@ docker compose logs companion-assistant  # the first ADMIN password
   Cantinero looks for both on this computer. `compose.koboldcpp.yaml` runs KoboldCPP in a container
   beside it (NVIDIA; with `compose.gpu.docker.yaml` or `compose.gpu.podman.yaml`).
 - Cantinero itself needs **no GPU**: its own models (TTS, STT, background removal) are CPU/ONNX,
-  baked into the image. The first build downloads ~870 MB of them: Kokoro TTS (338 MB), rembg
-  (336 MB), faster-whisper `base.en` (141 MB) and the SNAC decoder for Orpheus (52 MB).
+  baked into the image. The first build downloads ~820 MB of them: Kokoro TTS (338 MB), rembg
+  (336 MB) and faster-whisper `base.en` (141 MB).
 - Everything a user makes lives in the `companion-assistant-data` volume (compose) or the `data/`
   folder (`run-podman.sh`). `manage.py` checks the backends and resets passwords.
 
@@ -79,7 +79,6 @@ Runs as a Podman container on the shared `ai-net` network.
 | this app (`127.0.0.1:7867`, container `companion-assistant`) | FastAPI + the pytincture page; voice and 3D avatar as JS islands |
 | KoboldCPP (`koboldcpp:5001`) | LLM text generation |
 | ComfyUI (`comfyui:8188`) | expression-sprite generation (optional) |
-| orpheus-tts (`orpheus-tts:5005`) | expressive voice, loaded only while used (optional) |
 
 Data lives under `data/` (git-ignored): `data/auth/` (accounts + session keys) and
 `data/u/<user>/` (each user's isolated library). It's a bind mount, so it survives rebuilds — and

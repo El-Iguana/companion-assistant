@@ -1,11 +1,9 @@
-"""Local text-to-speech — Kokoro (default) + Piper (per-voice ONNX models) + Orpheus.
+"""Local text-to-speech: Kokoro (default) + Piper (per-voice ONNX models).
 
-Both run on the onnxruntime already present for rembg — no torch, no cloud. Kokoro is
-one model + a bank of style embeddings ("af_sarah"); Piper is one .onnx per voice, so
+Both run on the onnxruntime already present for rembg, with no torch and no cloud. Kokoro
+is one model + a bank of style embeddings ("af_sarah"); Piper is one .onnx per voice, so
 its voices are namespaced `piper:<name>` and loaded from /app/models/piper (see
-Containerfile). `orpheus:<name>` is the expressive voice served by the stack's
-orpheus-tts container (services/orpheus.py); it falls back to a Kokoro voice whenever
-Orpheus can't speak. Anything without a prefix goes to Kokoro.
+Containerfile). Anything without a prefix goes to Kokoro.
 """
 from __future__ import annotations
 
@@ -14,6 +12,8 @@ import os
 import re
 import wave
 
+from models.schema import current_voice_id
+
 MODEL = os.environ.get("KOKORO_MODEL", "/app/models/kokoro/kokoro-v1.0.onnx")
 VOICES = os.environ.get("KOKORO_VOICES", "/app/models/kokoro/voices-v1.0.bin")
 PIPER_DIR = os.environ.get("PIPER_DIR", "/app/models/piper")
@@ -21,6 +21,10 @@ PIPER_PREFIX = "piper:"
 # Piper's raw output is much quieter than Kokoro's; this gain matches the two so
 # switching a character's voice doesn't jump in volume (see _piper_wav).
 PIPER_GAIN = float(os.environ.get("PIPER_GAIN", "3.5"))
+
+# Replies written for the removed Orpheus voices can contain these. Kokoro and Piper would
+# read one out loud ("less than laugh greater than").
+_SOUND_TAG = re.compile(r"\s*<(?:laugh|chuckle|sigh|gasp|cough|sniffle|groan|yawn)>\s*")
 
 _engine = None
 _piper: dict[str, object] = {}
@@ -61,11 +65,6 @@ def voices() -> list[str]:
     except Exception:
         out = ["af_sarah"]
     out += [PIPER_PREFIX + n for n in _piper_names()]
-    # Listed only when the service is there, so a compose install without it never
-    # offers a voice that can only ever fall back.
-    from services import orpheus
-    if orpheus.available():
-        out += [orpheus.PREFIX + n for n in orpheus.VOICES]
     return out
 
 
@@ -95,32 +94,6 @@ def _piper_wav(text: str, name: str, speed: float) -> bytes:
     return buf.getvalue()
 
 
-def stream_pcm(text: str, voice: str):
-    """Orpheus voices, streamed: raw PCM s16le 24 kHz mono chunks as they are generated
-    (services/orpheus.stream_pcm). If Orpheus can't speak, the line is spoken whole in
-    its Kokoro fallback voice, which is 24 kHz too, so the stream format never changes."""
-    from services import orpheus
-    clean = _clean(text)
-    name = voice[len(orpheus.PREFIX):] if voice.startswith(orpheus.PREFIX) else ""
-    started = False
-    try:
-        for chunk in orpheus.stream_pcm(clean, name):
-            started = True
-            yield chunk
-        return
-    except Exception as e:
-        if started:                     # mid-sentence: nothing sensible to splice in
-            import logging
-            logging.getLogger("tts").warning("orpheus stream broke off: %s", e)
-            return
-        import logging
-        logging.getLogger("tts").warning("orpheus failed, falling back to Kokoro: %s", e)
-    wav = synth_wav(re.sub(r"\s*<(%s)>\s*" % "|".join(orpheus.TAGS), " ", clean),
-                    orpheus.fallback_voice(name))
-    with wave.open(io.BytesIO(wav)) as w:
-        yield w.readframes(w.getnframes())
-
-
 # Bounds for the speaking pace, matching CharacterCard.tts_speed. Clamped here as well
 # because /api/tts takes a raw dict, not a validated model — a 0 or a negative divides
 # through in _piper_wav and is meaningless to Kokoro.
@@ -131,18 +104,8 @@ def synth_wav(text: str, voice: str = "af_sarah", speed: float = 1.0) -> bytes:
     """Synthesize `text` to WAV bytes, routed by voice id (`piper:<name>` -> Piper)."""
     clean = _clean(text)
     speed = min(max(speed, SPEED_MIN), SPEED_MAX)
-    from services import orpheus
-    if voice.startswith(orpheus.PREFIX):
-        name = voice[len(orpheus.PREFIX):]
-        try:
-            return orpheus.synth_wav(clean, name)
-        except Exception as e:
-            # Never silent: an unloaded/unreachable Orpheus speaks the line in Kokoro.
-            import logging
-            logging.getLogger("tts").warning("orpheus failed, falling back to Kokoro: %s", e)
-            voice = orpheus.fallback_voice(name)
-    # Kokoro and Piper would read a sound tag out loud ("less than laugh greater than").
-    clean = re.sub(r"\s*<(%s)>\s*" % "|".join(orpheus.TAGS), " ", clean).strip() or "..."
+    voice = current_voice_id(voice)
+    clean = _SOUND_TAG.sub(" ", clean).strip() or "..."
     if voice.startswith(PIPER_PREFIX):
         return _piper_wav(clean, voice[len(PIPER_PREFIX):], speed)
     import soundfile as sf
