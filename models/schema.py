@@ -127,6 +127,21 @@ class CharacterBook(BaseModel):
     extensions: Dict[str, Any] = {}
 
 
+# Orpheus TTS left the stack. A card saved with one of its voices keeps a distinct voice
+# of the same character instead of collapsing onto a single default.
+LEGACY_ORPHEUS_VOICES = {
+    "tara": "af_heart", "leah": "af_sarah", "jess": "af_jessica", "mia": "af_nova",
+    "zoe": "af_sky", "leo": "am_michael", "dan": "am_adam", "zac": "am_puck",
+}
+
+
+def current_voice_id(voice: str) -> str:
+    """A voice id the TTS engines can speak; maps a saved `orpheus:<name>` to Kokoro."""
+    if voice.startswith("orpheus:"):
+        return LEGACY_ORPHEUS_VOICES.get(voice[len("orpheus:"):], "af_heart")
+    return voice
+
+
 class CharacterCard(BaseModel):
     """Character Card V2/V3 `data` object, plus local storage fields."""
     # --- local storage (not part of the card spec) ---
@@ -189,6 +204,11 @@ class CharacterCard(BaseModel):
     # --- V3 additions ---
     nickname: str = ""
     group_only_greetings: List[str] = []
+
+    @field_validator("tts_voice")
+    @classmethod
+    def _speakable_voice(cls, v: str) -> str:
+        return current_voice_id(v)
 
 
 # ---------------------------------------------------------------------------

@@ -74,46 +74,12 @@
     return { speaker: ttsEnabled, handsFree: !!settings.hands_free, hfActive, listening: hfCapturing,
              awake, recording, busy: pttBusy, speaking: !!ttsSource, avatar: avatarActive };
   }
-  const repaint = () => { syncEngine(); emit("state", state()); };
-
-  // ---- on-demand Orpheus voice -------------------------------------------------------
-  // The Orpheus model takes ~3 GB of VRAM, so it is loaded only while voice is on for a
-  // card that uses it (speaker or hands-free), and released when that stops. Checked on
-  // every repaint, which follows every state change. Turning off waits: a quick toggle
-  // or switching chats should not unload and reload 3 GB. The service also unloads by
-  // itself when idle, which covers a closed tab (services/orpheus.py).
-  const ENGINE_OFF_DELAY = 20000;
-  let engineOn = false, engineTimer = null, engineWarned = false;
-  function syncEngine() {
-    const want = attached && !!card && String(card.tts_voice || "").startsWith("orpheus:")
-      && (ttsEnabled || !!settings.hands_free);
-    clearTimeout(engineTimer); engineTimer = null;
-    if (want === engineOn) return;
-    engineTimer = setTimeout(() => {
-      engineTimer = null; engineOn = want; postEngine(want);
-    }, want ? 0 : ENGINE_OFF_DELAY);
-  }
-  async function postEngine(on) {
-    try {
-      const r = await fetch("/pmedia/tts/engine", { method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-        body: JSON.stringify({ on }) });
-      const s = r.ok ? await r.json() : { state: "unavailable" };
-      console.log("[voice] orpheus " + (on ? "load" : "release") + ": " + s.state);
-      if (on && s.state === "unavailable" && !engineWarned) {
-        engineWarned = true;
-        toast("The Orpheus voice could not load (not enough GPU memory, or the service is " +
-              "down) — speaking with a standard voice instead.", "warning");
-      }
-    } catch (e) { console.warn("[voice] orpheus engine call failed:", e); }
-  }
+  const repaint = () => emit("state", state());
 
   // ---- TTS --------------------------------------------------------------------
   let audioCtx = null, ttsSource = null, ttsLevel = 0, ttsHangoverUntil = 0, mouthRAF = null;
   let ttsRun = 0, speechQueue = [], speechConsuming = false, speechFedLen = 0;
   let firstPiece = true;            // the next segment opens a reply (see enqueueSpeech)
-  const liveStreams = new Set();    // AbortControllers of streamed sentences in flight
-  let genQueue = [], genBusy = false; // Orpheus sentences waiting to be generated, in order
   let exprPending = null, exprLive = null, forced = false;
   const spokenRecent = [];          // what she said lately, for the self-hearing guard
   let selfHeardCount = 0;
@@ -138,11 +104,6 @@
     // so this is also the per-reply reset: a repeated label still re-applies next time.
     exprPending = null; exprLive = null;
     firstPiece = true;
-    for (const c of liveStreams) { try { c.abort(); } catch {} }
-    liveStreams.clear();
-    // Sentences that never started: mark them finished so a player waiting on one returns.
-    for (const c of genQueue) { c.done = true; const w = c.wake; c.wake = null; if (w) w(); }
-    genQueue = []; genBusy = false;
     try { if (ttsSource) ttsSource.stop(); } catch {}
     ttsSource = null; ttsLevel = 0;
     if (mouthRAF) { cancelAnimationFrame(mouthRAF); mouthRAF = null; }
@@ -158,95 +119,7 @@
     } catch { return null; }
   }
 
-  // ---- streamed Orpheus speech ------------------------------------------------------
-  // Orpheus voices arrive as raw PCM (s16le, 24 kHz) while the server is still generating
-  // them (/pmedia/tts/stream), so a sentence starts playing ~0.4 s in rather than after
-  // all of it exists — 1.8–8 s for one sentence, measured. The request is read into memory
-  // as it arrives, so a prefetched sentence keeps generating while the previous one plays.
-  const usesStream = () => String(currentVoice()).startsWith("orpheus:");
-  // Start playing once what is buffered covers the rest of the sentence at the rate audio
-  // is arriving, so playback never catches up with generation. Orpheus runs ~1.5x real
-  // time alone but 0.65–1.0x while the chat model is still writing the reply on the same
-  // GPU; a fixed 0.3 s buffer stalled up to 48 times in one sentence there (measured).
-  // With this rule: 0 stalls in 6 contended runs, starting 1.1–2.8 s into a 7–15 word
-  // piece — the old whole-sentence wait was 3–8 s. Speech length is estimated from the
-  // words (0.42 s/word, measured on Orpheus "tara").
-  const PREBUFFER = 0.3;            // s, the floor
-  const SEC_PER_WORD = 0.42;
-  function readyToPlay(clip, have) {
-    if (!clip.started || have < PREBUFFER) return false;
-    const elapsed = (performance.now() - clip.t0) / 1000;
-    const rate = have / Math.max(elapsed, 0.01);          // s of audio per s, so far
-    if (rate >= 1) return true;
-    const est = Math.max(1, (clip.text.match(/\S+/g) || []).length * SEC_PER_WORD);
-    return have >= Math.max(0, est - have) * (1 / rate - 1) * 1.15;
-  }
-  function makeClip(sentence) {
-    return { chunks: [], done: false, rate: 24000, wake: null, text: sentence,
-             t0: Infinity, started: false };
-  }
-  const streamTTS = (sentence) => { const c = makeClip(sentence); startClip(c); return c; };
-
-  // Each sentence is generated as soon as its text exists and the one before it has
-  // finished generating — never waiting on playback. Fetching only one sentence ahead of
-  // what was playing left Orpheus idle and turned any slowdown into a pause before the
-  // next sentence; on a 195-word reply that cost 1.3–1.9 s of silence, pipelined 0 s.
-  // One at a time and in order, so sentence 2 never competes with sentence 1 for the GPU.
-  function queueGeneration(clip) {
-    genQueue.push(clip);
-    pumpGeneration();
-  }
-  async function pumpGeneration() {
-    if (genBusy) return;
-    const clip = genQueue.shift();
-    if (!clip) return;
-    genBusy = true;
-    const run = ttsRun;
-    await startClip(clip);
-    if (run !== ttsRun) return;              // stopSpeaking reset the queue meanwhile
-    genBusy = false;
-    pumpGeneration();
-  }
-
-  function startClip(clip) {
-    if (clip.started) return Promise.resolve();
-    clip.started = true;
-    clip.t0 = performance.now();
-    const sentence = clip.text;
-    const ctl = new AbortController();
-    liveStreams.add(ctl);
-    const notify = () => { const w = clip.wake; clip.wake = null; if (w) w(); };
-    return (async () => {
-      try {
-        const r = await fetch("/pmedia/tts/stream", { method: "POST", credentials: "same-origin",
-          signal: ctl.signal,
-          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-          body: JSON.stringify({ text: sentence, voice: currentVoice() }) });
-        if (!r.ok || !r.body) throw new Error("status " + r.status);
-        clip.rate = Number(r.headers.get("X-Sample-Rate")) || 24000;
-        const reader = r.body.getReader();
-        let carry = null;                       // an odd byte split across reads
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          let b = value;
-          if (carry) { const j = new Uint8Array(carry.length + b.length); j.set(carry); j.set(b, carry.length); b = j; carry = null; }
-          const even = b.length & ~1;
-          if (even < b.length) carry = b.slice(even);
-          if (!even) continue;
-          const v = new DataView(b.buffer, b.byteOffset, even), f = new Float32Array(even / 2);
-          for (let i = 0; i < f.length; i++) f[i] = v.getInt16(i * 2, true) / 32768;
-          clip.chunks.push(f);
-          notify();
-        }
-      } catch (e) { if (e.name !== "AbortError") console.warn("[tts] stream failed:", e); }
-      liveStreams.delete(ctl);
-      clip.done = true;
-      notify();
-    })();
-  }
-
-  // Lip-sync off the playback level — shared by whole clips and streams.
+  // Lip-sync off the playback level.
   function startMouth(analyser) {
     const data = new Uint8Array(analyser.frequencyBinCount);
     const tick = () => {
@@ -269,55 +142,8 @@
     repaint();
   }
 
-  // Schedules the chunks back to back as they arrive. `ttsSource` is a handle whose
-  // stop() silences everything scheduled, which is all barge-in and stopSpeaking need.
-  function playStream(ctx, clip, valid) {
-    return new Promise(async (resolve) => {
-      const buffered = (from) => clip.chunks.slice(from).reduce((n, c) => n + c.length, 0) / clip.rate;
-      while (!clip.done && !readyToPlay(clip, buffered(0))) {
-        await new Promise(r => { clip.wake = r; });
-        if (!valid()) return resolve();
-      }
-      if (!valid() || !clip.chunks.length) return resolve();
-      const analyser = ctx.createAnalyser(); analyser.fftSize = 256;
-      analyser.connect(ctx.destination);
-      const playing = new Set();
-      let next = 0, idx = 0, over = false;
-      const finish = () => { if (over) return; over = true; endMouth(); resolve(); };
-      ttsSource = { stop() { for (const s of playing) { try { s.stop(); } catch {} } playing.clear(); finish(); } };
-      repaint();
-      startMouth(analyser);
-      for (;;) {
-        while (idx < clip.chunks.length) {
-          const pcm = clip.chunks[idx++];
-          const buf = ctx.createBuffer(1, pcm.length, clip.rate);
-          buf.getChannelData(0).set(pcm);
-          const src = ctx.createBufferSource(); src.buffer = buf; src.connect(analyser);
-          // Fell behind (generation slower than playback): leave a short gap rather
-          // than scheduling in the past, which would garble the audio.
-          if (next < ctx.currentTime + 0.02) next = ctx.currentTime + 0.05;
-          src.start(next); next += buf.duration;
-          playing.add(src);
-          src.onended = () => {
-            playing.delete(src);
-            if (clip.done && idx >= clip.chunks.length && !playing.size) finish();
-          };
-        }
-        if (over || !valid()) return finish();
-        if (clip.done) { if (!playing.size) finish(); return; }
-        await new Promise(r => { clip.wake = r; });
-      }
-    });
-  }
-
-  // Whole WAV for Kokoro/Piper; the streamed path for Orpheus.
-  async function fetchAudio(text) {
-    return usesStream() ? { clip: streamTTS(text) } : { buf: await fetchTTS(text) };
-  }
-  function playAudio(ctx, a, valid) {
-    if (!a) return Promise.resolve();
-    if (a.clip) return playStream(ctx, a.clip, valid);
-    return a.buf ? playBuffer(ctx, a.buf, valid) : Promise.resolve();
+  function playAudio(ctx, buf, valid) {
+    return buf ? playBuffer(ctx, buf, valid) : Promise.resolve();
   }
 
   function playBuffer(ctx, arrayBuf, valid) {
@@ -420,7 +246,6 @@
     spokenRecent.push({ text: clean.toLowerCase(), t: performance.now() });
     if (spokenRecent.length > 40) spokenRecent.shift();
     const item = { text: clean, run: ttsRun, expr: exprPending };
-    if (usesStream()) { item.clip = makeClip(clean); queueGeneration(item.clip); }
     speechQueue.push(item);
     exprPending = null;
     consumeSpeech();
@@ -434,12 +259,10 @@
     while (speechQueue.length) {
       const item = speechQueue.shift();
       if (item.run !== ttsRun) { prefetch = null; continue; }
-      // Orpheus items are already generating (queueGeneration); whole-WAV voices
-      // prefetch the next sentence while this one plays.
-      const audio = item.clip ? { clip: item.clip }
-        : (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchAudio(item.text);
+      // Prefetch the next sentence while this one plays.
+      const audio = (prefetch && prefetch.item === item) ? await prefetch.promise : await fetchTTS(item.text);
       const nxt = speechQueue[0];
-      prefetch = (nxt && !nxt.clip) ? { item: nxt, promise: fetchAudio(nxt.text) } : null;
+      prefetch = nxt ? { item: nxt, promise: fetchTTS(nxt.text) } : null;
       if (item.expr && item.run === ttsRun) applyExpr(item.expr);
       if (item.run === ttsRun) await playAudio(ctx, audio, () => item.run === ttsRun);
     }
@@ -462,7 +285,7 @@
     while ((m = SENT.exec(fullText))) {
       // An ellipsis followed by a lowercase word is a pause inside the thought, not its
       // end: "but yes... there's some truth" was cut in two, and the halves were spoken
-      // as separate utterances with a gap between. Orpheus voices the "..." pause itself.
+      // as separate utterances with a gap between.
       const at = m.index, next = fullText.slice(at + m[0].length).match(/^\S/);
       const ellipsis = fullText[at] === "\u2026" || fullText.slice(Math.max(0, at - 2), at + 1) === "...";
       if (ellipsis && (!next || /[a-z]/.test(next[0]))) continue;
@@ -490,7 +313,7 @@
       const ctx = ensureAudioCtx();
       stopSpeaking();
       const run = ttsRun;
-      const audio = await fetchAudio(text);
+      const audio = await fetchTTS(text);
       if (run === ttsRun) await playAudio(ctx, audio, () => run === ttsRun);
     } catch (e) { console.warn("[tts] line failed:", e); }
   }
@@ -1080,9 +903,6 @@
     beginReply() {
       stopSpeaking();
       if (ttsEnabled) ensureAudioCtx();
-      // Make sure Orpheus is still loaded (an idle timeout or a backend restart unloads
-      // it) while the first sentence is being written, not when it is about to be spoken.
-      if (engineOn) postEngine(true);
     },
     feed(text, final) { feedSpeech(String(text || ""), !!final); },
     expr(label) { pendingExpr(String(label || "")); },

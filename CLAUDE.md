@@ -1,7 +1,7 @@
 # Cantinero — Project Context
 
 **Cantinero** — *El Iguana's bartender, at your service.* A self-hosted **voice assistant on
-character cards**: TTS (Kokoro / Piper / Orpheus) + STT (faster-whisper), hands-free with wake
+character cards**: TTS (Kokoro / Piper) + STT (faster-whisper), hands-free with wake
 word and barge-in, a face from **expression sprites or a VRM avatar**, a **desktop shell**, and
 **assistant memory** (standing instructions, facts, task notes). FastAPI + uvicorn in a Podman
 container, talking to **KoboldCPP** (text) and **ComfyUI** (sprites) on the shared `ai-net`
@@ -103,7 +103,6 @@ PANTHEON_URL=http://127.0.0.1:7877 PANTHEON_USER=… PANTHEON_PASS=… \
 | `PANTHEON_BIND` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
 | `PANTHEON_DATA_DIR` | `./data` | another library (dev/test); read by `main.py` |
 | `KOBOLD_URL` / `COMFYUI_URL` | `http://koboldcpp:5001` / `http://comfyui:8188` | backends |
-| `ORPHEUS_URL` | `http://orpheus-tts:5005` | the stack's on-demand Orpheus TTS (expressive voice); absent → those voices aren't offered |
 
 Health: `GET /api/health` (public, `{"ok": true}`) — what `stack status` and the compose
 healthchecks probe. `stack companion-assistant` opens `http://localhost:7867/`, which redirects.
@@ -160,7 +159,6 @@ Traps, all measured:
 | companion-assistant | ai-net | `127.0.0.1:7867`     | this app      |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
 | comfyui    | host            | `host.containers.internal:8188` | image gen    |
-| orpheus-tts | ai-net         | `orpheus-tts:5005`              | voice (on demand) |
 
 ## File structure
 
@@ -179,8 +177,7 @@ services/
   memory.py             # what the assistant fold shares: needs_summary, the transcript, fold_chunks/budget
   assistant_memory.py   # assistant memory: directives + facts + task notes (fold, extract, block)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
-  tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`) + Orpheus (`orpheus:<name>`), text -> WAV, strips *action* narration
-  orpheus.py            # Orpheus TTS client: load/release on the orpheus-tts service, prompt, SNAC ONNX decode (CPU)
+  tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
@@ -222,7 +219,6 @@ models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background remov
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
-models/snac/            # baked: SNAC 24 kHz decoder ONNX — Orpheus audio codes -> sound
 MEMORY.md               # memory reference — the assistant pipeline, its fold, injection, the eval
 MEMORY_PLAN.md          # memory design + decision log from before the split (companion phases are history)
 PROMPT_BUDGET.md        # shared: what's in a prompt, overflow behavior, eviction plan (steps 1+3 built)
@@ -269,7 +265,7 @@ Login-gated, role-based, per-user isolated libraries.
   injected as "Background", `first_mes`, `mes_example`, `alternate_greetings`, `system_prompt`,
   `post_history_instructions`, `character_book`, `tags`, `nickname`, …). Local: `image` (base64
   portrait), `appearance` (sprite prompt), `expressions` (emotion→base64),
-  **`tts_voice`** (Kokoro id, `piper:<name>` or `orpheus:<name>`), **`tts_speed`** (0.5–1.5 speaking
+  **`tts_voice`** (Kokoro id or `piper:<name>`), **`tts_speed`** (0.5–1.5 speaking
   pace, 1.0 = the voice's own tempo; Kokoro multiplier / inverse Piper `length_scale`),
   **`wake_word` / `sleep_phrase` / `farewell`** (per card; blank = the global setting),
   **`vrm` + `avatar_mode`** (`sprite` | `vrm`; a model stays assigned while showing sprites),
@@ -373,7 +369,7 @@ POST /api/chat                             SSE stream; done carries {message_id,
 - **Chat:** `build_messages()` assembles system (card system prompt or `DEFAULT_ASSISTANT` + persona
   + lorebook + character block + pinned facts + assistant memory + today's date) → history (`char`
   and `user` messages only) → `post_history_instructions` → **one trailing note** (exact time when
-  asked, expression beats, `ASSISTANT_FORMAT_NOTE`, Orpheus voice tags, the retake note, then
+  asked, expression beats, `ASSISTANT_FORMAT_NOTE`, the retake note, then
   `focus_note`); streams via `kobold.chat_generate_stream()`. A stop sequence on the user's turn is
   added. After the reply: strip bare labels, the courtesy question and the closing offer; pick the
   expression (inline tag, else classify when the card has sprites); update mood; save; send `done`
@@ -457,7 +453,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 memory** (directives/facts/notes, per char+persona, idle sweep, curated + revertible) · ✅ persona ·
 ✅ card editor (fields, portrait, lorebook, Duplicate) · ✅ ComfyUI expression sprites (same-character,
 transparent via rembg, Core-8/Full-28, gallery w/ per-sprite regen/delete, Flux Kontext) · ✅ live
-portrait swap · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper/Orpheus,
+portrait swap · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper,
 faster-whisper), hands-free, wake word, barge-in · ✅ **VRM avatar** (idle life, lip-sync, expressions,
 gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new libraries.
 
@@ -508,62 +504,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   `<name>.onnx` + `<name>.onnx.json` pair in there needs only a container restart, no rebuild. Piper honours
   each voice's own `inference` block; `speed` scales its `length_scale` inversely. Note Piper voices carry
   their own sample rate (jarvis = 22.05 kHz vs Kokoro's 24 kHz).
-- **Orpheus voices** (`orpheus:tara` … `services/orpheus.py`, 2026-10-28): the expressive voice, a 3B model
-  in the stack's `orpheus-tts` container (`ai-stack/orpheus-tts/CLAUDE.md`). It costs ~3 GB of VRAM, so it
-  is **loaded only while voice is on**: `voice.js syncEngine()` (run on every repaint) posts
-  `/pmedia/tts/engine {on}` when the speaker or hands-free is on for a card with an `orpheus:` voice, and
-  `{on:false}` 20 s after that stops (a quick toggle or chat switch doesn't reload 3 GB). The service also
-  unloads itself after 10 min idle (closed tab), and `koboldcpp/start.sh` unloads it before a model swap.
-  A load that fails (out of VRAM) is seen in ~5 s from the admin API's idle → down → idle and toasts once;
-  every line then falls back to Kokoro (`fallback_voice`: af_heart / am_michael, tags stripped) — for 60 s
-  without retrying, or until voice is toggled. Model output is SNAC codes, decoded on the CPU by the
-  baked ONNX decoder (`SNAC_DECODER`, 52 MB) — no torch, no VRAM. Measured: ~1.5× real time per
-  sentence alone, 0.65–1.0× while the chat model is still writing; load 3 s cached / 15 s cold. The
-  voices are listed only when the service answers.
-- **Orpheus is streamed** (2026-10-28): voice.js fetches `/pmedia/tts/stream` for `orpheus:` voices —
-  raw PCM s16le 24 kHz (`X-Sample-Rate`) as it is generated (`orpheus.stream_pcm`: KoboldCPP
-  `/api/extra/generate/stream`, SNAC decoded in sliding 4-frame windows like Canopy's decoder, but the
-  first frame and the last two are kept and each join is crossfaded over 256 samples — extra
-  discontinuity at joins ≤0.007 vs the whole-sentence decode, correlation 0.995+). The browser reads
-  each stream into memory as it arrives (a prefetched sentence keeps generating) and schedules the
-  chunks back to back. **Start rule (`readyToPlay`)**: play once the buffer covers the rest of the
-  sentence at the measured arrival rate (est. 0.42 s/word) — a fixed 0.3 s buffer stalled up to 48
-  times per sentence under GPU contention; this rule had 0 stalls in 6 contended runs. **First
-  piece kept short** (`enqueueSpeech`/`clauseCut`): an opening sentence >14 words splits at its first
-  clause break after 6+ words, and while streaming a clause break after 8+ words is spoken before the
-  full stop. Measured server-side, send → first audio: 3.2–13.4 s before, 1.8–2.3 s after (idle GPU),
-  ~1–3 s under contention. A failed Orpheus streams its Kokoro fallback (also 24 kHz). Kokoro/Piper
-  voices still use whole WAVs via `/pmedia/tts`.
-- **Pauses between sentences** (2026-10-28, measured on a real 195-word Mira reply):
-  - **The SNAC decoder is capped at 2 CPU threads** (`SNAC_THREADS`). onnxruntime's default (all 24)
-    starved the chat model, which runs 8 of its 41 layers on the CPU: Rocinante took 55–60 s for 250
-    tokens beside Orpheus vs 13.6 s alone, and that long overlap was what slowed Orpheus to
-    0.65–0.9× and made her pause mid-reply. Capped: 18–19 s, Orpheus 0.85× during the overlap, 1.4×
-    after. The decoder itself is faster on 2 threads (32 windows/s) than on all (27/s); real time
-    needs ~12/s.
-  - **Generation is pipelined** (`queueGeneration`): each Orpheus sentence starts generating as soon
-    as its text exists and the previous one has finished generating, never waiting on playback.
-    Fetching one sentence ahead of playback left 1.3–1.9 s of silence in a long reply; pipelined, 0.
-  - **KoboldCPP's idle timer counts from the last generate request, not from a load**, so a server
-    idle past `--adminunloadtimeout` unloaded the model ~1 s after loading it ("Inactive for over
-    871 s"); `warm()` then read the idle model as a failed load and the whole reply fell back to
-    Kokoro. `warm()` now sends a 1-token request before the load (any generate resets the timer,
-    even one that errors with no model) and after it (`_settle_ready`, which also absorbs the ~7 s
-    first-request warm-up), and tracks `_inflight` so "loaded, then unloaded" just loads again.
-    `voice.js beginReply` re-posts `/tts/engine {on}` so an unload is repaired while the first
-    sentence is being written.
-  - **A mid-sentence ellipsis no longer ends a piece** (`feedSpeechWhole`): "yes... there's" stays one
-    utterance; Orpheus voices the "..." pause itself.
-  - **CUDA MPS was tried and dropped**: with the thread cap in place it gave Orpheus 0.93× instead of
-    0.85× during the overlap and nothing for the chat model, at the cost of a host daemon at every
-    boot — and quitting it crashed both attached containers.
-  Inline tags it voices instead of reading: `<laugh> <chuckle> <sigh> <gasp> <cough> <sniffle> <groan> <yawn>`.
-  **Cards with an `orpheus:` voice are taught five of them** (`prompt_builder.voice_tag_note`, trailing,
-  after `ASSISTANT_FORMAT_NOTE` since that note bans stage directions and the later one wins). The note maps moments to tags (funny →
-  laugh/chuckle, setback → sigh/groan, surprise → gasp) and leads its example with one — the first,
-  permissive wording got 1/12 on inviting messages; this one 9/12 inviting, 2/12 neutral, 0 invented,
-  1 double (Mira's live history, 2026-10-28). Tags are hidden in the chat view (`md()`), the chat-list
-  preview (`shell._preview`) and the desktop caption, and stripped before Kokoro/Piper speak.
+- **Speech runs in this container** (Kokoro, or Piper when its voices are mounted). `voice.js`
+  fetches one WAV per sentence from `/pmedia/tts` and prefetches the next while one plays. A long
+  opening sentence is split at an early clause break, and a mid-sentence ellipsis does not end a piece.
+- **Orpheus voices were removed on 2026-11-18**, with the ai-stack backend. `CharacterCard` maps a
+  saved `orpheus:<name>` voice to Kokoro when it loads (`schema.current_voice_id`), and the next save
+  stores the new id. Older replies can still contain sound tags such as `<laugh>`: they stay hidden
+  in the chat view, chat-list preview and desktop caption, and are stripped before speech.
 - **What gets spoken** (`feedSpeech` in `static/js/voice.js`): **everything**, flushed a sentence at
   a time as it streams. (The roleplay app speaks only quoted dialogue; here quotes mark a term or a
   citation, and feeding only the quoted spans spoke the citations and dropped the answer.)
