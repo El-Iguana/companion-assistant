@@ -155,6 +155,38 @@ def _choices(cands: list[dict], ask: str) -> dict:
                     "choice's id. Don't call media_play with the same query again."}
 
 
+_RECENT_PLAY_S = 90
+
+
+def _remember_play(ctx: SkillContext, what: str, player: str) -> None:
+    try:
+        p = ctx.root / "media" / "last_play.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"at": time.time(), "what": what.strip().lower(), "player": player}))
+    except OSError:
+        pass
+
+
+def _just_played(ctx: SkillContext, what: str, player: str) -> bool:
+    try:
+        p = json.loads((ctx.root / "media" / "last_play.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return (p.get("what") == what.strip().lower() and p.get("player") == player
+            and time.time() - float(p.get("at") or 0) < _RECENT_PLAY_S)
+
+
+def _spoken(name: str) -> str:
+    """A candidate's display ("Crash — Dave Matthews Band (1996)") as said aloud."""
+    name = re.sub(r"\s*\(\d{4}\)$", "", name)
+    title, _, rest = name.partition(" — ")
+    if rest == "playlist":
+        return f"the {title} playlist"                     # "the Road Trip playlist"
+    if rest.endswith("'s playlist"):
+        return f"{rest[:-len(' playlist')]} {title} playlist"   # "Sam's Road Trip playlist"
+    return name.replace(" — ", " by ")
+
+
 # --- searching -----------------------------------------------------------------------------
 
 async def _search(st: dict, query: str, kinds: list[str] | None) -> tuple[list[dict], dict]:
@@ -251,6 +283,10 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                 return _choices(cands[:3], how["ask"])
             pick = cands[0]
         dev = await _target(ctx, st, args.get("player", ""))
+        if _just_played(ctx, query or choice_id, dev["id"]):
+            # The same play to the same player again in the same breath: it's on; don't restart it.
+            return {"ok": True, "played": True, "already_playing": True, "player": dev.get("name"),
+                    "final": "It's playing."}
         queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                                 playlist_id="" if pick["id"].isdigit() else pick["id"])
         if not queue:
@@ -261,7 +297,10 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
     except om.OrpheusError as e:
         return _refusal(e)
     _save_pending(ctx, None)
-    return {"ok": True, "played": True, "playing": pick.get("name") or "it", "player": dev.get("name")}
+    _remember_play(ctx, query or choice_id, dev["id"])
+    name = pick.get("name") or "it"
+    return {"ok": True, "played": True, "playing": name, "player": dev.get("name"),
+            "final": f"Playing {_spoken(name)} on {dev.get('name')}."}
 
 
 async def _control(ctx: SkillContext, args: dict) -> dict:
@@ -283,7 +322,9 @@ async def _control(ctx: SkillContext, args: dict) -> dict:
         await _send(dev["id"], body)
     except om.OrpheusError as e:
         return _refusal(e)
-    return {"ok": True, "done": action, "player": dev.get("name")}
+    said = {"pause": "Paused.", "resume": "Playing.", "stop": "Stopped.", "next": "Skipping.",
+            "previous": "Going back.", "seek": "Done.", "volume": f"Volume {body.get('level')}."}
+    return {"ok": True, "done": action, "player": dev.get("name"), "final": said.get(action, "Done.")}
 
 
 async def _status(ctx: SkillContext, args: dict) -> dict:
@@ -447,7 +488,21 @@ def _note(ctx: SkillContext) -> str:
     if not om.paired(om.load(ctx.root)):
         return ""
     note = ("Music: you can play the user's music and control it (media_play, media_control). "
-            "To play something, call media_play with what they said; don't search first.")
+            "To play something, call media_play with what they said; don't search or check status first.")
+    # What is true now, so an old line in the chat ("the player isn't running") can't win.
+    try:
+        live = _residents(ctx.user_id)
+    except Exception:  # noqa: BLE001
+        live = []
+    if live:
+        def one(d):
+            st = d["state"] or {}
+            now = st.get("now") or {}
+            what = st.get("status") or "idle"
+            if what in ("playing", "paused") and now.get("title"):
+                what += f" ({now['title']}" + (f" by {now['artist']}" if now.get("artist") else "") + ")"
+            return f"{d['name']}: " + (what if d["online"] else "not connected")
+        note += " The players right now: " + "; ".join(one(d) for d in live) + "."
     pending = _load_pending(ctx)
     if pending:
         note += (" You offered these and are waiting for the user's pick (call media_play with its id): "
