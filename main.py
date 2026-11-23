@@ -33,7 +33,7 @@ from models.schema import (
 )
 from services.kobold import KoboldClient, ExprEvent, ToolCallsEvent
 from services import skills as skills_rt
-import services.skills.media  # noqa: F401 — registers the DJ skill
+import services.skills.media as media_skill  # registers the DJ skill
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -1446,7 +1446,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     window = await _context_tokens(settings)
     # The Menu: the tools this bartender offers right now, and what their schemas cost.
     skill_ctx = skills_rt.SkillContext(user_id=cur.user.id, root=cur.cards.parent,
-                                       card_id=card.id, session_id=session.id)
+                                       card_id=card.id, session_id=session.id,
+                                       can_launch=req.can_launch, events=asyncio.Queue())
     tools = skills_rt.tools_for(card, skill_ctx)
     if tools:
         window = max(2048, window - skills_rt.schema_tokens(tools))
@@ -1486,14 +1487,27 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     emotions = expressions.card_emotions(card)
     known = set(emotions)
 
+    # The DJ's fast path: "pause", "next song", "turn it down" are done without the
+    # model (a tool turn costs ~25 s on the local model). None = not a music command.
+    fast = None
+    if not req.regenerate and "dj" in (card.skills or []):
+        fast = media_skill.fast_command(req.input_text)
+
     async def _turn():
         acc = ""
         used_skill = False
         convo = list(messages)
         try:
+            if fast is not None:
+                yield _sse({"skill": {"tool": "media_control", "status": "On it…"}})
+                acc = await media_skill.fast_control(skill_ctx, fast)
+                used_skill = True
+                if "neutral" in known:
+                    tagged.append("neutral")      # no classifier round-trip for "Paused."
+                yield _sse({"token": acc})
             # A turn may take several passes: the model asks for tools, they run, and it
             # answers with their results (SKILLS_PLAN.md, "Chat-flow change").
-            for _pass in range(MAX_TOOL_ROUNDS + 1):
+            for _pass in range(0 if fast is not None else MAX_TOOL_ROUNDS + 1):
                 calls = None
                 async for tok in kobold.chat_generate_stream(convo, params):
                     if isinstance(tok, ToolCallsEvent):
@@ -1515,7 +1529,17 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                     tool = next((t for t in tools if t.name == call["name"]), None)
                     yield _sse({"skill": {"tool": call["name"],
                                           "status": (tool.status if tool else "") or "Working on it…"}})
-                    results.append((call, await skills_rt.run(call, tools, skill_ctx)))
+                    # Run it while relaying anything it asks of the page (open the player).
+                    task = asyncio.ensure_future(skills_rt.run(call, tools, skill_ctx))
+                    while True:
+                        getter = asyncio.ensure_future(skill_ctx.events.get())
+                        done_set, _ = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+                        if getter in done_set:
+                            yield _sse({"skill": {"tool": call["name"], **getter.result()}})
+                            continue
+                        getter.cancel()
+                        break
+                    results.append((call, task.result()))
                 convo = _with_tool_results(convo, results)
                 if _pass == MAX_TOOL_ROUNDS - 1:
                     params.pop("tools", None)          # last pass: answer, don't call again

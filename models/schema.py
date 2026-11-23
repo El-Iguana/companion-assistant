@@ -379,3 +379,4 @@ class ChatRequest(BaseModel):
     session_id: str
     input_text: str
     regenerate: bool = False             # re-roll the last char message (swipe)
+    can_launch: bool = False             # the client can open the Orpheus player (desktop shell)

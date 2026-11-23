@@ -167,13 +167,13 @@ def test_a_card_without_skills_gets_no_tools(cur, session, monkeypatch):
 
 # --- the DJ ------------------------------------------------------------------------------------
 
-def test_dj_offers_connect_until_paired_then_find_and_status(tmp_path):
+def test_dj_offers_connect_until_paired_then_playback(tmp_path):
     ctx = _ctx(tmp_path)
     dj = skills.REGISTRY["dj"]
     assert [t.name for t in dj.tools(ctx)] == ["media_connect"] and dj.note(ctx) == ""
     om.save(tmp_path, {"url": "http://o", "device_id": "d", "token": "t"})
-    assert [t.name for t in dj.tools(ctx)] == ["media_find", "media_status"]
-    assert "can't start" in dj.note(ctx)
+    assert [t.name for t in dj.tools(ctx)] == ["media_play", "media_control", "media_find", "media_status"]
+    assert "media_play" in dj.note(ctx)
 
 
 def test_pairing_needs_approval_and_keeps_the_token_out_of_results(tmp_path, monkeypatch):
@@ -210,14 +210,14 @@ def test_find_returns_candidates_and_the_servers_question(tmp_path, monkeypatch)
 
     async def resolve(base, token, query, kinds, limit=5):
         assert (base, token, query) == ("http://o", "t", "sigur ros")
-        assert kinds == ["artist", "album", "track"]                   # music only by default
+        assert kinds == ["artist", "album", "track", "playlist"]       # music only by default
         return {"candidates": [{"item_id": 9042, "kind": "album", "display": "( ) — Sigur Rós (2002)", "score": 0.83},
                                {"item_id": 9050, "kind": "album", "display": "Ágætis byrjun — Sigur Rós (1999)", "score": 0.8}],
                 "needs_disambiguation": True, "disambiguation_prompt": "The album ( ), or Ágætis byrjun?"}
     monkeypatch.setattr(om, "resolve", resolve)
     out = asyncio.run(media._find(_ctx(tmp_path), {"query": "sigur ros"}))
-    assert out["ambiguous"] and out["ask"].startswith("The album") and out["can_play"] is False
-    assert [c["id"] for c in out["candidates"]] == [9042, 9050]
+    assert out["ambiguous"] and out["ask"].startswith("The album")
+    assert [c["id"] for c in out["candidates"]] == ["9042", "9050"]
 
 
 def test_discovery_refuses_a_wide_or_public_network(monkeypatch):

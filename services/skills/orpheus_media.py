@@ -123,6 +123,19 @@ async def _request(method: str, url: str, token: str = "", **kw) -> dict:
     if r.status_code == 404:
         raise OrpheusError("NOT_FOUND", "the music server doesn't know that")
     if r.status_code >= 400:
+        try:
+            err = (r.json() or {}).get("error") or {}
+        except ValueError:
+            err = {}
+        code = str(err.get("code") or "")
+        # Phase 5 commands: 409 carries the player's refusal (offline, autoplay_blocked,
+        # nothing_playing), 422 nothing_to_play, 504 a player that didn't answer.
+        if r.status_code == 409 and code:
+            raise OrpheusError(code.upper(), str(err.get("message") or code))
+        if r.status_code == 422:
+            raise OrpheusError("NOTHING_TO_PLAY", "nothing in that can be played")
+        if r.status_code == 504:
+            raise OrpheusError("PLAYER_TIMEOUT", "the player didn't answer")
         raise OrpheusError("SERVER_ERROR", f"the music server answered {r.status_code}")
     try:
         return r.json()
@@ -152,6 +165,11 @@ async def resolve(base: str, token: str, query: str, kinds: list[str] | None, li
     if kinds:
         body["kinds"] = kinds
     return await _request("POST", f"{base}/api/v1/resolve", token=token, json=body)
+
+
+async def command(base: str, token: str, device_id: str, body: dict) -> dict:
+    """Phase 5: one command to a player, answered with its ack (raises on a refusal)."""
+    return await _request("POST", f"{base}/api/v1/devices/{device_id}/commands", token=token, json=body)
 
 
 async def devices(base: str, token: str) -> list[dict]:

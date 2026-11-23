@@ -47,6 +47,17 @@ class SkillContext:
     root: Path                 # the user's library folder, data/u/<uid>
     card_id: str = ""
     session_id: str = ""
+    # The client can open the Orpheus player (the desktop shell can; a browser tab can't).
+    can_launch: bool = False
+    # A tool that needs the page mid-run (the DJ asking it to open the player) puts an
+    # event here; the chat turn relays it as a `skill` SSE event while the tool runs.
+    events: "asyncio.Queue | None" = None
+
+    def emit(self, event: dict) -> bool:
+        if self.events is None:
+            return False
+        self.events.put_nowait(event)
+        return True
 
 
 @dataclass
@@ -56,6 +67,7 @@ class Tool:
     parameters: dict                           # JSON Schema subset, see validate()
     handler: Callable[[SkillContext, dict], Awaitable[dict]]
     status: str = ""                           # what the page shows while it runs
+    timeout: float = 0                         # seconds; 0 = TOOL_TIMEOUT_S
 
     def schema(self) -> dict:
         return {"type": "function", "function": {
@@ -200,7 +212,7 @@ async def run(call: dict, tools: list[Tool], ctx: SkillContext) -> dict:
             result = error("BAD_ARGUMENTS", str(e))
         else:
             try:
-                result = await asyncio.wait_for(tool.handler(ctx, args), TOOL_TIMEOUT_S)
+                result = await asyncio.wait_for(tool.handler(ctx, args), tool.timeout or TOOL_TIMEOUT_S)
                 if not isinstance(result, dict):
                     result = error("TOOL_FAILED", "the tool returned nothing usable")
                 result.setdefault("ok", True)
