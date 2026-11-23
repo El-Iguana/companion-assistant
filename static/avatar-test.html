@@ -52,6 +52,10 @@
       <input id="post" type="range" min="-1" max="1" step="0.05" value="0">
       <span id="postv">0</span>
       <span class="dim">— relationship stage bias, stranger … intimate</span></div>
+    <div>arm pose
+      <select id="pose"><option value="">auto (scheduler)</option></select>
+      turn <input id="turn" type="range" min="-90" max="90" step="5" value="0">
+      <span class="dim">— hold a pose; turn to check it from the side</span></div>
   </div>
 </div>
 <script type="module">
@@ -201,6 +205,14 @@ try {
     pv.textContent = st[1];
     window.dispatchEvent(new CustomEvent("avatar:mood", { detail: { stage: st[1] } }));
   });
+
+  const psel = document.getElementById("pose");
+  for (const name of Object.keys(window.__avatarPoses || {})) {
+    const o = document.createElement("option"); o.value = o.textContent = name; psel.appendChild(o);
+  }
+  psel.addEventListener("change", () => { window.__avatarStats.pose = psel.value; });
+  const tsl = document.getElementById("turn");
+  tsl.addEventListener("input", () => { window.__avatarStats.turn = Number(tsl.value); });
 
   const as = document.getElementById("arm"), av = document.getElementById("armv");
   as.addEventListener("input", () => {
