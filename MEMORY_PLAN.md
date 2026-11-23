@@ -15,7 +15,8 @@ Code: `services/memory.py`, `services/assistant_memory.py`, Muninn (`services/mu
 `prompt_builder.build_messages`, and the chat flow in `main.py`.
 
 Phases 1–6 have all shipped. Phases 1–5 built the companion's memory; Phase 6 split a second
-pipeline out of it for assistant-mode cards.
+pipeline out of it for assistant-mode cards. **Phase 7 is planned**: memory that belongs to the
+bartender rather than to a chat, folded per episode and recalled per turn (issues #15–#23).
 
 ## Settled design decisions
 
@@ -190,10 +191,65 @@ copy when one of them next needs changing.
     worth running, so the test was that the fact-side expectation was untouched and the fixture still
     fails. It does.
 
+- **Phase 7 — Memory that belongs to the bartender. ◻ PLANNED (2026-11-23).** Cantinero is a voice
+  assistant, and its memory should follow the character, not the chat session. The long-term store
+  is already per character, but the session still decides when a fold runs, what it reads, and
+  what is in the prompt.
+
+  **Why — where the session still decides (found reading the code, 2026-11-23):**
+  - Folds fire on session events: `summarize_after` messages in one session, or a 5-minute idle
+    sweep per session. Voice arrives as short bursts that may never reach the threshold, and the
+    desktop window reopens the bartender's latest session (`pantheon_web/desktop.py`), so that
+    session grows without end.
+  - `fold()` rewrites `notes` whole from one session's transcript. The stored notes are in the
+    prompt, but nothing stops a fold of chat B from dropping a thread only chat A knew about.
+  - The store is keyed (character, persona): switching persona hides the bartender's standing
+    instructions.
+  - Pinned facts are per session, so the one thing the user curates doesn't carry over.
+  - `block()` injects in list order and skips what doesn't fit 2,400 characters. Facts are
+    appended, so once the store is full the **newest** facts are the ones dropped, silently.
+
+  **Decided: shared basics.** Facts about the user are shared by every bartender in a library (name,
+  time zone, family); standing instructions and task notes stay per bartender, and an instruction
+  can be marked for all bartenders. Persona becomes a tag on an entry. Strictly per-character facts
+  were rejected: telling each bartender your name separately is a chore, not a feature.
+
+  **Kept from Phase 6, unchanged:** the instruction/fact split, extraction from user turns only, the
+  deterministic note filters, string-level dedupe, directives never truncated, every step
+  degrading to nothing, and the Memory modal as the correction surface.
+
+  **Steps, in order** (each a GitHub issue; mechanics go in `MEMORY.md` as each ships):
+  1. **#15 — eval fixtures first.** Cross-session thread, shared basics, expiry, recall precision;
+     baseline totals recorded before any behaviour changes.
+  2. **#16 — the bartender owns memory.** Shared user facts plus per-character instructions and
+     notes; persona as a tag; pinned facts move into the store; a one-time merge of the
+     `{cid}__{pid}.json` files, old files kept until checked.
+  3. **#17 — notes as items.** `id`, `status`, `created`, `touched`; a fold returns changes by id
+     instead of a fresh list; notes untouched for about two weeks leave the prompt.
+  4. **#18 — "lately with this bartender".** The last few turns of her most recent conversation,
+     whichever window it was in, so a new chat isn't a blank start.
+  5. **#19 — fold per episode.** An episode ends on the sleep phrase or a farewell, a quiet gap
+     (about 10 minutes), the desktop window closing or the page hidden, or a new chat with her.
+     One high-water mark per bartender, across sessions. The message-count trigger becomes context
+     pressure: fold when `build_messages` is about to drop turns.
+  6. **#20 — fact lifetimes.** `kind` lasting or time-bound with `expires`; `created`,
+     `last_used`, `uses`. Answers the open decay question below.
+  7. **#21 — tiered recall.** Always: directives plus a small core of user-written and most-used
+     facts, in the system block. Per turn: other facts and notes scored against the latest user
+     turn (keywords plus recency, with a minimum score), in the trailing note **after the
+     history**, because a system block that changes every turn invalidates KoboldCPP's cached
+     prefix. No model needed; embeddings only if keywords measure poorly.
+  8. **#22 — memory commands.** "Remember…", "forget…", "what do you remember about me?" act at
+     once through tool calling (verified over streaming in `SKILLS_PLAN.md`); the first item on the
+     Menu.
+  9. **#23 — Fortuna gate (optional).** A yes/no from Fortuna on whether an episode holds anything
+     lasting, to skip extraction on small talk. Only if episode folds turn out to cost too much.
+
 ## Open decisions
 
 - Whether long-term `facts` should ever expire/decay, or stay until the user removes them.
   (Lumina has no decay and its store grows unbounded — a caution, not a model to copy.)
+  **Planned answer:** Phase 7's fact lifetimes (#20): time-bound facts expire, lasting ones stay.
 - **Total prompt budget** — the long-term block is capped, but the prompt as a whole is not, and on
   overflow KoboldCPP truncates from the front, silently deleting the memory blocks. Measured and
   written up in `PROMPT_BUDGET.md`; the fix is proposed, not built. Directives make this sharper: the
@@ -202,7 +258,7 @@ copy when one of them next needs changing.
   finish the middleware"), where it outlives its truth. Two prompt revisions improved the split and a
   third without a new idea would be guessing; the alternatives are a durability re-check on fold, an
   age-out for `auto` entries, or accepting the modal as the correction surface. Related to the decay
-  question above, and probably the same answer.
+  question above, and probably the same answer. **Planned:** the same answer (#20).
 - **Whether the companion prompts get fixtures too.** `eval/assistant_memory` demonstrated that
   reading runs gives wrong answers; `LONGTERM_PROMPT`, `AUTO_FACT_PROMPT` and the recall gate
   (calibrated on 8 documents and 13 queries) were all tuned that way.

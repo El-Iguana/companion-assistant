@@ -692,6 +692,10 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   Replaced the Navidrome/DJ plan on 2026-09-15; design in `../orpheus/docs/architecture.md`. NAS: UGREEN
   NASync DH2300 @ `192.168.1.219` (SMB 445), mounted by the Orpheus server, not by Cantinero. Hard part
   is still audio coexistence: music breaks the half-duplex mic gate in both directions.
+- **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
+  user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
+  per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the
+  eval fixtures, first).
 - **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
 - Tuning knobs: `expressions` img2img denoise, `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.
