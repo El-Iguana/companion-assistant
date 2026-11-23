@@ -3,7 +3,7 @@
 
     python service.py                 # http://127.0.0.1:7867/
 
-``main`` is Pantheon itself: accounts, data, the KoboldCPP/ComfyUI clients, the assistant
+``main`` is Pantheon itself: accounts, data, the KoboldCPP client, the assistant
 memory, and the handlers every feature runs through. The page is a pytincture
 app built here (``appcode/``): its BFF classes call ``main``'s handlers directly with the
 signed-in user's context, and ``pantheon_web/`` adds the plain routes a JSON BFF cannot
@@ -209,7 +209,7 @@ def build_web_app():
             response.headers["Cache-Control"] = "no-cache"
         return response
 
-    # main's clients (KoboldCPP, ComfyUI) were closed by main.app's shutdown hook when it was
+    # main's KoboldCPP client was closed by main.app's shutdown hook when it was
     # the served app; it no longer is.
     from contextlib import asynccontextmanager
 

@@ -50,19 +50,14 @@ fi
 
 mkdir -p "$SCRIPT_DIR"/data/{auth,u,vrm}
 
-# Both backend URLs have to move together. They used to not: only KOBOLD_URL was set
-# here, so the fallback left COMFYUI_URL at its by-name default (main.py) and sprite
-# generation died on DNS while chat worked — on exactly the path someone without the
-# full ai-stack takes.
+# KoboldCPP by name on ai-stack's network, else on this computer.
 if podman network exists "$NETWORK"; then
   NET_ARG="--network=$NETWORK"
   KOBOLD_URL="http://koboldcpp:5001"
-  COMFYUI_URL="http://comfyui:8188"
   echo "==> Joining network: $NETWORK (backends reachable by container name)"
 else
   NET_ARG="--network=host"
   KOBOLD_URL="http://localhost:5001"
-  COMFYUI_URL="http://localhost:8188"
   echo "==> Network '$NETWORK' not found; falling back to host networking"
 fi
 
@@ -102,7 +97,6 @@ podman run -d \
   -e "PANTHEON_HTTPS_PORT=${HTTPS_PORT}" \
   -e "PANTHEON_TLS_NAMES=${TLS_NAMES}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
-  -e "COMFYUI_URL=${COMFYUI_URL}" \
   -e "TZ=${TZ_VAL}" \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \

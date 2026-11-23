@@ -3,7 +3,7 @@
 Cantinero administration from the command line.
 
     python3 manage.py probe host.docker.internal 5001   # can Cantinero reach it?
-    python3 manage.py backends               # check KOBOLD_URL and COMFYUI_URL
+    python3 manage.py backends               # check KOBOLD_URL
     python3 manage.py users                  # list accounts
     python3 manage.py reset-password ADMIN   # prompts for the new password
     python3 manage.py reset-password alice --create   # …or makes an admin
@@ -62,7 +62,6 @@ def backends() -> int:
 
     checks = [
         ("KoboldCPP", os.getenv("KOBOLD_URL", "http://koboldcpp:5001"), "/api/v1/model", True),
-        ("ComfyUI", os.getenv("COMFYUI_URL", "http://comfyui:8188"), "/system_stats", False),
     ]
     failed = False
     for label, base, path, required in checks:
@@ -141,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     probe_cmd = commands.add_parser("probe", help="check this container can reach host:port")
     probe_cmd.add_argument("host")
     probe_cmd.add_argument("port", type=int)
-    commands.add_parser("backends", help="check KOBOLD_URL and COMFYUI_URL answer")
+    commands.add_parser("backends", help="check KOBOLD_URL answers")
     commands.add_parser("users", help="list accounts")
     reset = commands.add_parser("reset-password", help="set a user's password")
     reset.add_argument("username")

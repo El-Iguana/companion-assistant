@@ -180,7 +180,7 @@ class Pantheon(MainWindow):
             '<input id="pt-q" type="search" autocomplete="off" placeholder="Search the staff…"></label>'
             '<span class="pt-spacer"></span>'
             '<span class="pt-status" id="pt-status" title="Backends">'
-            '<span class="pt-dot" id="pt-dot-k"></span><span class="pt-dot" id="pt-dot-c"></span>'
+            '<span class="pt-dot" id="pt-dot-k"></span>'
             '<span class="pt-status-txt" id="pt-status-txt">checking…</span></span>'
             '<a class="pt-btn primary" href="#/create"><i class="mdi mdi-plus"></i>'
             '<span class="pt-create-txt">Hire</span></a>'
@@ -260,9 +260,8 @@ class Pantheon(MainWindow):
         r = await Shell().status()
         if not isinstance(r, dict) or not r.get("ok"):
             return
-        k, c = r.get("kobold") or {}, r.get("comfy") or {}
+        k = r.get("kobold") or {}
         by_id("pt-dot-k").className = "pt-dot " + ("on" if k.get("online") else "off")
-        by_id("pt-dot-c").className = "pt-dot " + ("on" if c.get("online") else "off")
         if k.get("online"):
             model = str(k.get("model") or "").split("/", 1)[-1]
             text = model[:28] + ("…" if len(model) > 28 else "")
@@ -270,8 +269,7 @@ class Pantheon(MainWindow):
             text = "KoboldCPP offline"
         by_id("pt-status-txt").textContent = text
         by_id("pt-status").title = (
-            f"KoboldCPP: {'up · ' + str(k.get('model')) if k.get('online') else 'offline'}\n"
-            f"ComfyUI: {'up' if c.get('online') else 'offline'}")
+            f"KoboldCPP: {'up · ' + str(k.get('model')) if k.get('online') else 'offline'}")
 
     # --- memory save when a chat ends ----------------------------------------------
     def end_chat(self, session_id: str, leaving: bool = False) -> None:

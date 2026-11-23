@@ -10,8 +10,8 @@
 > welcome in [Issues](https://github.com/El-Iguana/companion-assistant/issues).
 
 A self-hosted, fully-local **voice assistant built on character cards**. You talk to it, it talks
-back, and it shows a face: expression sprites or a 3D VRM avatar, in the browser or in a corner of
-your desktop. A FastAPI backend and a [pytincture](https://github.com/pytincture/pytincture) page
+back, and it shows a face: a 3D VRM avatar (or a portrait), in the browser or in a corner of your
+desktop. A FastAPI backend and a [pytincture](https://github.com/pytincture/pytincture) page
 (Python in the browser). All inference runs on your own machine — no cloud, no external services,
 no database (state is plain JSON files).
 
@@ -23,8 +23,8 @@ roleplay, relationship system or narrator.
 
 - **Local voice** — Kokoro and Piper, per-character voice
   and pace; push-to-talk and hands-free faster-whisper STT with a wake word, a sleep phrase and barge-in
-- **A face** — ComfyUI expression sprites (one portrait → per-emotion sprites, live with the mood),
-  or a **3D VRM avatar** with lip-sync, expressions and idle motion
+- **A face** — a **3D VRM avatar** with lip-sync, expressions that follow the reply's feeling,
+  gestures and idle poses (or simply a portrait)
 - **Desktop mode** — the avatar in a transparent window in the corner of the screen (`desktop/`, Linux/KDE)
 - **Assistant memory** — standing instructions it obeys, facts it knows, and "where things stand"
   task notes, per character and persona, reviewable and editable
@@ -38,8 +38,8 @@ roleplay, relationship system or narrator.
 ## Installing
 
 **[INSTALL.md](INSTALL.md)** covers Windows, macOS and Linux with Docker or Podman: the container
-engine, KoboldCPP (natively, in a container next to Cantinero, or through ai-stack), optional
-ComfyUI, first sign-in, backups, and troubleshooting. In short:
+engine, KoboldCPP (natively, in a container next to Cantinero, or through ai-stack), first
+sign-in, backups, and troubleshooting. In short:
 
 ```sh
 cp .env.example .env                     # time zone, port, backend addresses
@@ -47,12 +47,11 @@ docker compose up -d                     # or: podman compose up -d  →  http:/
 docker compose logs companion-assistant  # the first ADMIN password
 ```
 
-- **KoboldCPP** is required (chat); **ComfyUI** is optional (expression sprites only). By default
-  Cantinero looks for both on this computer. `compose.koboldcpp.yaml` runs KoboldCPP in a container
+- **KoboldCPP** is the one backend (chat). By default Cantinero looks for it on this computer. `compose.koboldcpp.yaml` runs KoboldCPP in a container
   beside it (NVIDIA; with `compose.gpu.docker.yaml` or `compose.gpu.podman.yaml`).
-- Cantinero itself needs **no GPU**: its own models (TTS, STT, background removal) are CPU/ONNX,
-  baked into the image. The first build downloads ~820 MB of them: Kokoro TTS (338 MB), rembg
-  (336 MB) and faster-whisper `base.en` (141 MB).
+- Cantinero itself needs **no GPU**: its own models (TTS, STT) are CPU/ONNX, baked into the image.
+  The first build downloads ~480 MB of them: Kokoro TTS (338 MB) and faster-whisper `base.en`
+  (141 MB).
 - Everything a user makes lives in the `companion-assistant-data` volume (compose) or the `data/`
   folder (`run-podman.sh`). `manage.py` checks the backends and resets passwords.
 
@@ -71,7 +70,7 @@ COMPANION_ADMIN_PASSWORD='…' ./run-podman.sh   # choose the first ADMIN passwo
 
 Open **`http://127.0.0.1:7867/`** (`localhost` redirects there). Both `run-podman.sh` and compose
 publish on `127.0.0.1` only. The microphone needs a secure context, so voice input works on this
-computer ([INSTALL.md, section 9](INSTALL.md#9-reaching-cantinero-from-other-devices)).
+computer ([INSTALL.md, section 8](INSTALL.md#8-reaching-cantinero-from-other-devices)).
 With `run-podman.sh`, other devices can talk to it too: open `http://<this computer>.local:7867/ca`
 on the device, trust Cantinero's local certificate once (the page walks through it), then use
 `https://<this computer>.local:7868/`.
@@ -86,7 +85,6 @@ Runs as a Podman container on the shared `ai-net` network.
 |-----------|------|
 | this app (`127.0.0.1:7867`, container `companion-assistant`) | FastAPI + the pytincture page; voice and 3D avatar as JS islands |
 | KoboldCPP (`koboldcpp:5001`) | LLM text generation |
-| ComfyUI (`comfyui:8188`) | expression-sprite generation (optional) |
 
 Data lives under `data/` (git-ignored): `data/auth/` (accounts + session keys) and
 `data/u/<user>/` (each user's isolated library). It's a bind mount, so it survives rebuilds — and
@@ -101,5 +99,5 @@ pixiv's redistributable sample model; models you import stay in your own `data/v
 ## License
 
 [MIT](LICENSE). The bundled `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample and
-keeps pixiv's own terms. The models the image downloads when it builds (Kokoro, faster-whisper,
-rembg) keep their own licenses as well.
+keeps pixiv's own terms. The models the image downloads when it builds (Kokoro, faster-whisper)
+keep their own licenses as well.

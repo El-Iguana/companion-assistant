@@ -22,7 +22,6 @@ data/vrm/*
 models/*.onnx
 models/*.bin
 models/kokoro/
-models/rembg/
 
 # Misc
 *.wav

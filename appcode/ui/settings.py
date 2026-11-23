@@ -368,7 +368,7 @@ class SettingsView:
             await self.load_users()
 
 
-_COPY_GROUPS = (("character", "Characters", "Portrait, sprites, voice and VRM come along."),
+_COPY_GROUPS = (("character", "Characters", "Portrait, voice and VRM come along."),
                 ("persona", "Personas", "Copies are never made their active persona."))
 
 

@@ -11,10 +11,9 @@ you run next to it:
 | Backend | Needed for | Required? | Cantinero's default address |
 |---|---|---|---|
 | **KoboldCPP** | chat | **yes** | `http://host.docker.internal:5001` |
-| **ComfyUI** | expression sprites | no | `http://host.docker.internal:8188` |
 
 `host.docker.internal` means "this computer, seen from inside the
-container". Without ComfyUI everything except sprite generation works.
+container". KoboldCPP is the only backend.
 
 - **Disk:** about 2.1 GB for Cantinero's image, plus your models (a chat model
   is typically 3–10 GB). The optional KoboldCPP container is another 3 GB.
@@ -33,20 +32,19 @@ PowerShell differs from macOS/Linux shells, both are given.
 2. [Install a container engine](#2-install-a-container-engine)
 3. [Get Cantinero and configure it](#3-get-cantinero-and-configure-it)
 4. [Set up KoboldCPP](#4-set-up-koboldcpp): [natively](#4a-koboldcpp-natively-any-computer) · [in a container](#4b-koboldcpp-in-a-container-nvidia) · [with ai-stack](#4c-ai-stack-linux--nvidia)
-5. [Optional: ComfyUI for sprites](#5-optional-comfyui-for-expression-sprites)
-6. [Start Cantinero and sign in](#6-start-cantinero-and-sign-in)
-7. [Everyday tasks](#7-everyday-tasks): stop, logs, update, back up, reset a password, voices, uninstall
-8. [Without compose](#8-without-compose)
-9. [Reaching Cantinero from other devices](#9-reaching-cantinero-from-other-devices)
-10. [Troubleshooting](#10-troubleshooting)
-11. [What was actually tested](#11-what-was-actually-tested)
+5. [Start Cantinero and sign in](#5-start-cantinero-and-sign-in)
+6. [Everyday tasks](#6-everyday-tasks): stop, logs, update, back up, reset a password, voices, uninstall
+7. [Without compose](#7-without-compose)
+8. [Reaching Cantinero from other devices](#8-reaching-cantinero-from-other-devices)
+9. [Troubleshooting](#9-troubleshooting)
+10. [What was actually tested](#10-what-was-actually-tested)
 
 ---
 
 ## 1. Choose where the backends run
 
-Cantinero's container is the same everywhere. What differs is KoboldCPP (and
-ComfyUI), which want your GPU. Find your row:
+Cantinero's container is the same everywhere. What differs is KoboldCPP, which
+wants your GPU. Find your row:
 
 | Your computer | KoboldCPP | Section |
 |---|---|---|
@@ -224,9 +222,9 @@ Open `.env` in a text editor. The settings you are most likely to change:
 | Setting | What it does |
 |---|---|
 | `TZ` | Your time zone, e.g. `Europe/Berlin`, `America/New_York`. Timestamps, and "what time is it?" in assistant mode, use it. Default `UTC`. |
-| `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([6](#6-start-cantinero-and-sign-in)). |
+| `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([5](#5-start-cantinero-and-sign-in)). |
 | `PANTHEON_PORT` | The port on this computer, default `7867`. |
-| `KOBOLD_URL`, `COMFYUI_URL` | Where the backends are, if not on this computer's usual ports. |
+| `KOBOLD_URL` | Where KoboldCPP is, if not on this computer's usual port. |
 
 The rest of `.env.example` is for the KoboldCPP container ([4b](#4b-koboldcpp-in-a-container-nvidia))
 and is explained there.
@@ -289,7 +287,7 @@ computer: <http://127.0.0.1:5001> shows KoboldCPP's own page.
   services bound to this computer's `127.0.0.1`. KoboldCPP listens on all
   addresses unless told otherwise, so the default URL works. If you started it
   with `--host 127.0.0.1`, start Cantinero with `compose.host-network.yaml`
-  instead ([6](#6-start-cantinero-and-sign-in)).
+  instead ([5](#5-start-cantinero-and-sign-in)).
 
 **KoboldCPP on another computer** (a gaming PC, say): start it there as above,
 make sure its firewall allows port 5001, and set in `.env`:
@@ -298,7 +296,7 @@ make sure its firewall allows port 5001, and set in `.env`:
 KOBOLD_URL=http://192.168.1.20:5001
 ```
 
-with that computer's address. The same goes for `COMFYUI_URL`.
+with that computer's address.
 
 ### 4b. KoboldCPP in a container (NVIDIA)
 
@@ -329,7 +327,7 @@ runs the official KoboldCPP Linux build with CUDA; compose builds it from
    does not fit), `KOBOLD_CONTEXT` (default `8192`), and `KOBOLD_ARGS` for
    any other KoboldCPP flag (e.g. `--flashattention`).
 
-When you start Cantinero ([6](#6-start-cantinero-and-sign-in)), the KoboldCPP
+When you start Cantinero ([5](#5-start-cantinero-and-sign-in)), the KoboldCPP
 container starts with it, and Cantinero reaches it by the name `koboldcpp`.
 Loading a model takes from a few seconds to several minutes. Check that it
 found the GPU:
@@ -339,7 +337,7 @@ docker compose logs koboldcpp
 ```
 
 Look for `found 1 CUDA devices` and your GPU's name. If there is no such
-line, the container got no GPU: see [10](#10-troubleshooting).
+line, the container got no GPU: see [9](#9-troubleshooting).
 
 The KoboldCPP version is pinned in `backends/koboldcpp/Containerfile`
 (`KOBOLDCPP_VERSION`). To move to another release, change it and run
@@ -348,7 +346,7 @@ The KoboldCPP version is pinned in `backends/koboldcpp/Containerfile`
 ### 4c. ai-stack (Linux + NVIDIA)
 
 If you use the `ai-stack` launcher (also a private JotunheimPress
-repository), its KoboldCPP and ComfyUI containers already run on a network
+repository), its KoboldCPP container already runs on a network
 called `ai-net`. Either:
 
 - use `stack companion-assistant`, which runs Cantinero through `run-podman.sh` in a
@@ -366,46 +364,11 @@ called `ai-net`. Either:
 
 Run one or the other, not both: they are separate installs with separate
 data. To move between them, see *Move data between installs* in
-[7](#7-everyday-tasks).
+[6](#6-everyday-tasks).
 
 ---
 
-## 5. Optional: ComfyUI for expression sprites
-
-Cantinero draws a character's portrait and per-emotion sprites with ComfyUI.
-It uses only ComfyUI's built-in nodes, so **no custom nodes are needed**; one
-checkpoint is enough. The model family (SD 1.5, SDXL or Flux) is guessed from
-the checkpoint's file name. On a 12 GB card shared with KoboldCPP, an SD 1.5
-checkpoint such as `absolutereality_v181` (about 2 GB) is the safe choice.
-
-Install ComfyUI natively:
-
-- **Windows:** the portable package from
-  <https://github.com/comfyanonymous/ComfyUI/releases>. There are packages
-  for NVIDIA, AMD and Intel (`ComfyUI_windows_portable_nvidia.7z` and so on).
-  Extract it with 7-Zip and run the `run_…_gpu.bat` inside. It listens on
-  port **8188**.
-- **Windows or macOS:** ComfyUI Desktop, from <https://www.comfy.org/download>.
-  It listens on port **8000** by default, so set
-  `COMFYUI_URL=http://host.docker.internal:8000` in `.env`, or change its
-  port in the app's settings.
-- **Linux, or manual installs:** follow <https://github.com/comfyanonymous/ComfyUI#installing>
-  and start it with `python main.py`.
-
-Put the checkpoint in ComfyUI's `models/checkpoints/` folder and restart
-ComfyUI.
-
-ComfyUI listens on `127.0.0.1` by default.
-
-- **Windows and macOS** (Docker Desktop, Podman machine): the container still
-  reaches it through `host.docker.internal`.
-- **Linux:** a bridged container cannot reach `127.0.0.1`. Either start
-  ComfyUI with `--listen 0.0.0.0` (it is then also open to your network, so
-  firewall port 8188), or run Cantinero with `compose.host-network.yaml`.
-
----
-
-## 6. Start Cantinero and sign in
+## 5. Start Cantinero and sign in
 
 In the `companion-assistant` folder:
 
@@ -437,11 +400,10 @@ docker compose exec companion-assistant python3 manage.py backends
 ```
 ```
 KoboldCPP http://host.docker.internal:5001: OK — model koboldcpp/Qwen3-4B-Instruct-2507-Q8_0
-ComfyUI   http://host.docker.internal:8188: OK
 ```
 
 A `NOT reachable` line comes with the next command to try. See
-[10](#10-troubleshooting).
+[9](#9-troubleshooting).
 
 ### First sign-in
 
@@ -483,7 +445,7 @@ or press the microphone. Hire more under **Hire**, or import a character card
 
 ---
 
-## 7. Everyday tasks
+## 6. Everyday tasks
 
 With `COMPOSE_FILE` in `.env`, these commands apply to everything you
 started. Without it, repeat the same `-f` options you started with.
@@ -572,7 +534,7 @@ put them in.
 
 ---
 
-## 8. Without compose
+## 7. Without compose
 
 The same thing with plain commands. For Podman, replace `docker` with
 `podman`.
@@ -584,7 +546,6 @@ docker run -d --name companion-assistant --restart unless-stopped \
   -p 127.0.0.1:7867:7867 \
   --add-host host.docker.internal:host-gateway \
   -e KOBOLD_URL=http://host.docker.internal:5001 \
-  -e COMFYUI_URL=http://host.docker.internal:8188 \
   -e TZ=Europe/Berlin \
   -v companion-assistant-data:/app/data \
   localhost/companion-assistant:latest
@@ -618,7 +579,7 @@ from the host.
 
 ---
 
-## 9. Reaching Cantinero from other devices
+## 8. Reaching Cantinero from other devices
 
 **Not yet.** Cantinero answers on this computer only, at `http://127.0.0.1:7867`
 (`localhost` redirects there). Its sign-in runs over plain HTTP, and it allows
@@ -635,7 +596,7 @@ is ignored.
 
 ---
 
-## 10. Troubleshooting
+## 9. Troubleshooting
 
 Start with:
 
@@ -656,17 +617,16 @@ docker compose exec companion-assistant python3 manage.py probe host.docker.inte
 - *Connection refused*: the address is right, but nothing listens there **as
   seen from the container**. Either KoboldCPP is not running, or (on Linux)
   it listens on `127.0.0.1` only. Start it without `--host 127.0.0.1`, or use
-  `compose.host-network.yaml` ([6](#6-start-cantinero-and-sign-in)).
+  `compose.host-network.yaml` ([5](#5-start-cantinero-and-sign-in)).
 - *Name does not resolve*: with `compose.koboldcpp.yaml` the name is
   `koboldcpp`, and that container is not running (`docker compose logs
   koboldcpp`). With `compose.ai-stack.yaml`, ai-stack's backends are not
   started (`stack up`).
 - *Timed out*: a firewall, or the wrong address for another computer.
 - **Windows or macOS**, and `host.docker.internal` does not reach a backend
-  that works in the browser on the same computer: set `KOBOLD_URL` (or
-  `COMFYUI_URL`) to the computer's own network address, e.g.
-  `http://192.168.1.10:5001`. The backend must then listen on all addresses
-  (ComfyUI: `--listen 0.0.0.0`).
+  that works in the browser on the same computer: set `KOBOLD_URL` to the
+  computer's own network address, e.g. `http://192.168.1.10:5001`. KoboldCPP
+  must then listen on all addresses.
 
 **The KoboldCPP container exits with "No model"**: `KOBOLD_MODEL` is empty or
 names a file that is not in `KOBOLD_MODELS_DIR`. The log lists the `.gguf`
@@ -685,18 +645,14 @@ files it found.
 
 **KoboldCPP runs out of memory** (`cudaMalloc failed`, or it exits while
 loading): the model is too large for the GPU. Lower `KOBOLD_GPU_LAYERS` or
-`KOBOLD_CONTEXT`, or pick a smaller quantisation. ComfyUI shares the same
-VRAM.
+`KOBOLD_CONTEXT`, or pick a smaller quantisation. Anything else on the GPU
+(a game, an image generator) shares the same VRAM.
 
 **Replies get cut off, or the character forgets the persona in long chats**:
 the conversation outgrew KoboldCPP's context size. Raise `--contextsize` /
 `KOBOLD_CONTEXT` if the VRAM allows.
 
-**Sprite generation fails**: ComfyUI is optional, so chat is unaffected.
-Run `manage.py backends`, and check that ComfyUI has at least one checkpoint.
-ComfyUI Desktop listens on port 8000, not 8188.
-
-**I lost the ADMIN password**: `manage.py reset-password ADMIN` ([7](#7-everyday-tasks)).
+**I lost the ADMIN password**: `manage.py reset-password ADMIN` ([6](#6-everyday-tasks)).
 
 **`PANTHEON_ADMIN_PASSWORD` was ignored**: it is read only when there are no
 accounts yet. Use `reset-password`.
@@ -723,7 +679,7 @@ for this, never at your whole home or Downloads folder.
 
 ---
 
-## 11. What was actually tested
+## 10. What was actually tested
 
 On Linux (Bazzite 44, x86_64, RTX 4070 12 GB), rootless **Podman 5 with
 `podman compose`** (Docker Compose v5 as provider), from a clean export of
@@ -743,7 +699,7 @@ this repository on 2026-09-26:
   short, unknown user). Data kept across `down` and `up`. Backup with
   `compose cp`, and restore into a fresh volume via `create`. A restore after
   the first start produced the duplicate `ADMIN` described in
-  [7](#7-everyday-tasks).
+  [6](#6-everyday-tasks).
 - A KoboldCPP on the host, seen from the default network: bound to
   `127.0.0.1` it was *connection refused*, and bound to all addresses it was
   reachable. `compose.host-network.yaml` reached the `127.0.0.1` one and
@@ -760,6 +716,5 @@ this repository on 2026-09-26:
 - Docker itself (the test machine's Docker daemon was not usable without root).
 - Windows and macOS: Docker Desktop, and the Podman machine with its
   `host.containers.internal` forwarding.
-- Native KoboldCPP and ComfyUI builds.
-- ComfyUI sprite generation through `host.docker.internal`.
+- Native KoboldCPP builds.
 - The reverse-proxy recipes.

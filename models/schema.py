@@ -370,12 +370,6 @@ class KoboldSettings(BaseModel):
     url: str = "http://koboldcpp:5001"
 
 
-class ComfyUISettings(BaseModel):
-    url: str = "http://comfyui:8188"
-    checkpoint: str = ""
-    style: str = "anime"
-
-
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------

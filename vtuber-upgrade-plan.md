@@ -1,5 +1,8 @@
 # AI Companion — Animated Avatar Upgrade Plan (rev. 2026-08b)
 
+> **Note (2026-11-23):** expression sprites and the ComfyUI dependency were removed from Cantinero.
+> A card without a 3D avatar shows its portrait. The sprite parts of this plan are history.
+
 Brief for building the VTuber layer *inside the existing companion app*. Fitted to the app's current
 architecture (rich emotion/mood/relationship systems, transparent expression sprites) and the
 Bazzite / RTX 4070, local-first environment.

@@ -4,8 +4,7 @@
 #   docker compose -f compose.host-network.yaml up -d
 #   podman compose -f compose.host-network.yaml up -d
 #
-# For backends that listen on this computer's 127.0.0.1 only — ComfyUI does
-# by default. With compose.yaml's bridge network, host.docker.internal reaches
+# For a KoboldCPP that listens on this computer's 127.0.0.1 only. With compose.yaml's bridge network, host.docker.internal reaches
 # only services listening beyond loopback (INSTALL.md, section 4a). Here
 # 127.0.0.1 inside the container *is* this computer.
 #
@@ -26,7 +25,6 @@ services:
     network_mode: host
     environment:
       KOBOLD_URL: ${KOBOLD_URL:-http://127.0.0.1:5001}
-      COMFYUI_URL: ${COMFYUI_URL:-http://127.0.0.1:8188}
       TZ: ${TZ:-UTC}
       COMPANION_ADMIN_PASSWORD: ${PANTHEON_ADMIN_PASSWORD:-}
       # With host networking these ARE the host's addresses, so loopback, not the

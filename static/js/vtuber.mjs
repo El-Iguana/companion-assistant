@@ -22,7 +22,7 @@ import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 
 const CANVAS_ID = "avatar-canvas";
 const FRAME_CAP = 30;           // plenty for a bust, and this shares a 4070 with
-                                // KoboldCPP + ComfyUI — see the plan's perf budget.
+                                // KoboldCPP (and whatever else uses the GPU).
 
 let renderer = null, scene = null, camera = null, clock = null;
 let currentVrm = null, placeholder = null, rafId = null;

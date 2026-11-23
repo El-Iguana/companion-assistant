@@ -81,18 +81,15 @@
       : st.hfActive ? (st.awake ? "in conversation" : "ready") : "idle";
   }
 
-  // ---- the sprite tier ------------------------------------------------------
-  // The same corner as the 3D canvas; voice.js hides it under a loaded avatar.
-  function sprite(label) {
+  // ---- without a 3D avatar: the portrait --------------------------------------
+  // The same corner as the 3D canvas; hidden under a loaded avatar. (Expression sprites
+  // were removed on 2026-11-23.)
+  function portrait() {
     const img = $("#ch-portrait");
-    const have = (card && card.expressions) || [];
-    if (!card || !have.length || document.body.classList.contains("pt-avatar-on")) {
+    if (!card || !card.has_portrait || document.body.classList.contains("pt-avatar-on")) {
       img.hidden = true; return;
     }
-    label = label || mood.mood || "neutral";
-    if (!have.includes(label)) label = have.includes("neutral") ? "neutral" : have[0];
-    img.src = `/pmedia/card/${encodeURIComponent(card.id)}/expr/${encodeURIComponent(label)}.png` +
-              `?v=${encodeURIComponent(card.updated_at || "")}`;
+    img.src = `/pmedia/card/${encodeURIComponent(card.id)}.png?v=${encodeURIComponent(card.updated_at || "")}`;
     img.hidden = false;
   }
 
@@ -105,7 +102,7 @@
     card = r.card; sessionId = r.session_id; mood = r.mood || {};
     V.attach(card, settings);
     V.mood(mood.mood || "", mood.valence || 0, "");
-    sprite();
+    portrait();
     paint();
     return true;
   }
@@ -180,7 +177,7 @@
       V.flushExpr();
       mood = { mood: done.mood, valence: done.valence };
       V.mood(done.mood || "", done.valence || 0, "");
-      sprite();
+      portrait();
       caption(visible(acc), 9000);
     } else if (!acc) {
       caption("", 0);
@@ -193,7 +190,6 @@
   window.addEventListener("pvoice:abort", () => { if (controller) controller.abort(); });
   window.addEventListener("pvoice:asleep", () => endChat(sessionId));
   window.addEventListener("pagehide", () => endChat(sessionId));
-  window.addEventListener("pvoice:expr", (e) => sprite(e.detail.label));
   window.addEventListener("pvoice:state", paint);
   window.addEventListener("pvoice:persist", (e) => {
     Object.assign(settings, e.detail.patch || {});
@@ -201,7 +197,7 @@
   });
   // There is no toast surface here; the caption is the only place words can go.
   window.addEventListener("pvoice:toast", (e) => { console.log("[desktop]", e.detail.msg); caption(e.detail.msg, 7000); });
-  window.addEventListener("avatar:active", () => sprite());
+  window.addEventListener("avatar:active", () => portrait());
 
   $("#dt-tts").addEventListener("click", () => V.speaker());
   $("#dt-mic").addEventListener("click", () => V.handsFree());

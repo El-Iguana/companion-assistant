@@ -1,5 +1,8 @@
 # Pantheon on pytincture, with Ember's UX — plan
 
+> **Note (2026-11-23):** expression sprites and the ComfyUI dependency were removed from Cantinero.
+> A card without a 3D avatar shows its portrait. The sprite parts of this plan are history.
+
 Started 2026-10-26. The goal is a **UX change, not a feature change**: Pantheon keeps everything it
 does (cards V2/V3, swipes, mood and expression sprites, the relationship system, both memory
 pipelines, personas, presets, Kokoro/Piper TTS, faster-whisper STT, hands-free voice, the VRM avatar,
