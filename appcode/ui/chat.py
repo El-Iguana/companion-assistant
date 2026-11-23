@@ -133,6 +133,10 @@ class ChatView:
         # save it to long-term memory then (app.end_chat), as on leaving it (unmount).
         self.listeners.on(w, "pvoice:asleep", lambda _e: self.app.end_chat(self.sid))
         self.listeners.on(w, "pagehide", lambda _e: self.app.end_chat(self.sid, leaving=True))
+        # The card may be edited elsewhere (the Studio in another tab or window) while
+        # this chat stays open: check it when the chat comes back into view.
+        self.listeners.on(js.document, "visibilitychange", lambda _e: self._maybe_refresh_card())
+        self.listeners.on(w, "focus", lambda _e: self._maybe_refresh_card())
         spawn(self.load(), "open chat")
 
     def unmount(self) -> None:
@@ -218,6 +222,41 @@ class ChatView:
             self.listeners.on(ptt, name, self._on_ptt)
         self._attach_voice()
         inp.focus()
+
+    # --- the card edited elsewhere ------------------------------------------------
+    def _maybe_refresh_card(self) -> None:
+        if (js.document.hidden or self.streaming or not self.data or self.root is None
+                or getattr(self, "_card_check", False)):
+            return
+        self._card_check = True
+        spawn(self._refresh_card(), "refresh card")
+
+    async def _refresh_card(self) -> None:
+        """Pick up a change saved since this chat opened: a new 3D model, figure, voice,
+        name or portrait. The page used to read the card once, at open, so a model chosen
+        in the Studio meanwhile never appeared until the chat was reopened."""
+        try:
+            old = (self.data or {}).get("card") or {}
+            r = await Chat().card(old.get("id", ""))
+            if not isinstance(r, dict) or not r.get("ok") or self.root is None:
+                return
+            new = r["card"]
+            if new.get("updated_at") == old.get("updated_at") or self.streaming:
+                return
+            self.data["card"] = new
+            if any(new.get(k) != old.get(k) for k in ("name", "has_portrait", "has_vrm")):
+                # The header and the stage column depend on these: redraw, keeping the draft.
+                inp = by_id("ch-input")
+                draft = str(inp.value) if inp else ""
+                self.render()
+                inp = by_id("ch-input")
+                if inp and draft:
+                    inp.value = draft
+                    self._grow()
+            else:
+                self._attach_voice()          # voice.js reloads the model if it changed
+        finally:
+            self._card_check = False
 
     def _rerollable(self) -> int:
         """Index of the reply "Another take" re-rolls, or -1."""

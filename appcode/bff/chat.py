@@ -31,11 +31,44 @@ class Chat:
 
         return ctx_for(self._user)
 
+    @staticmethod
+    def _card_payload(card) -> dict:
+        """What the chat view (and the voice island it hands it to) knows about the card."""
+        from pantheon_web.present import has_portrait, starters, tagline
+
+        return {
+            "id": card.id, "name": card.name, "tagline": tagline(card),
+            "has_portrait": has_portrait(card), "updated_at": card.updated_at,
+            # No sprites any more (2026-11-23): a card without a 3D avatar shows its
+            # portrait, so the page gets no sprite labels to swap between.
+            "expressions": [],
+            "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
+            "figure": card.figure,
+            "starters": starters(card),
+            # The voice island's per-character knobs (empty = the global setting).
+            "tts_voice": card.tts_voice, "tts_speed": card.tts_speed,
+            "wake_word": card.wake_word, "sleep_phrase": card.sleep_phrase,
+            "farewell": card.farewell,
+        }
+
+    async def card(self, card_id: str) -> dict:
+        """The card alone, for a chat view checking whether it was edited elsewhere (the
+        Studio in another tab): cheap, no session or memory read."""
+        import main
+        from models.schema import CharacterCard
+
+        cur = self._cur()
+        if cur is None:
+            return {"ok": False, "error": "not signed in", "signed_out": True}
+        card = main._load(cur.cards, card_id or "", CharacterCard)
+        if card is None:
+            return {"ok": False, "error": "that character no longer exists", "gone": True}
+        return {"ok": True, "card": self._card_payload(card)}
+
     async def open(self, session_id: str) -> dict:
         """The session plus everything the chat view shows around it."""
         import main
         from models.schema import CharacterCard, ChatSession, Persona
-        from pantheon_web.present import has_portrait, starters, tagline
 
         cur = self._cur()
         if cur is None:
@@ -52,20 +85,7 @@ class Chat:
         return {
             "ok": True,
             "session": s.model_dump(),
-            "card": {
-                "id": card.id, "name": card.name, "tagline": tagline(card),
-                "has_portrait": has_portrait(card), "updated_at": card.updated_at,
-                # No sprites any more (2026-11-23): a card without a 3D avatar shows its
-                # portrait, so the page gets no sprite labels to swap between.
-                "expressions": [],
-                "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
-                "figure": card.figure,
-                "starters": starters(card),
-                # The voice island's per-character knobs (empty = the global setting).
-                "tts_voice": card.tts_voice, "tts_speed": card.tts_speed,
-                "wake_word": card.wake_word, "sleep_phrase": card.sleep_phrase,
-                "farewell": card.farewell,
-            },
+            "card": self._card_payload(card),
             "voice": {k: v for k, v in main._load_settings(cur).model_dump().items() if k in VOICE},
             "persona": {"id": persona.id, "name": persona.name,
                         "has_portrait": bool(persona.image)},
