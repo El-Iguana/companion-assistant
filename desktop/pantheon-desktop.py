@@ -156,6 +156,11 @@ class DesktopShell(Gtk.Application):
         self.view.set_vexpand(True)
         box.append(self.view)
         self.win.set_child(box)
+        # The resident's service may not be listening yet: at login both units start
+        # together and the container takes a few seconds. A failed load is retried every
+        # 3 s rather than leaving an empty window for the session (found on predator,
+        # 2026-11-23: the page had never loaded since the install).
+        self.view.connect("load-failed", self._on_load_failed)
         self.view.load_uri(self.url)
 
         self.win.connect("notify::default-width", lambda *_: self._apply_input_region())
@@ -233,6 +238,19 @@ class DesktopShell(Gtk.Application):
             os.replace(tmp, self._geom_file)                  # atomic
         except Exception as e:                                # noqa: BLE001
             print(f"[shell] could not save geometry: {e}")
+
+    def _on_load_failed(self, _view, _event, uri, error):
+        if getattr(self, "_retrying", False):
+            return True
+        self._retrying = True
+        print(f"[shell] couldn't load {uri} ({error.message}); trying again in 3 s")
+
+        def again():
+            self._retrying = False
+            self.view.load_uri(self.url)
+            return False
+        GLib.timeout_add_seconds(3, again)
+        return True                                    # no WebKit error page in her window
 
     def _on_permission(self, _view, request):
         request.allow()
