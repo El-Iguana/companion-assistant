@@ -644,7 +644,20 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   (`avatar:mood`'s `stage`; this app always sends "", so the posture stays neutral). **Pose composition rule: `resetPose()` returns every animated
   bone to rest each frame and all channels are purely ADDITIVE** — mixing absolute assignment with `+=`
   is what sent the arms wandering, and shoulders must stay in the rest set.
-  **All six channels of "fully animated" are now live.** ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  **All six channels of "fully animated" are now live.** ✅ **3e arm poses** (2026-11-23):
+  held poses so a quiet avatar doesn't stand with her arms hanging: `foldedArms`, `handOnHipL`/`R`,
+  `handsOnHips`, `handsClasped`, `thinking` (hand to chin). `POSES` in `vtuber.mjs` are
+  **directions in the body's frame** (`[out, up, forward]` per segment, the same numbers for both
+  arms), and `targetArms` turns each bone so its child points that way on *this* model. Euler
+  angles were tried first and failed: the two test models (`baseline.vrm`, armSign −1, and a VRoid
+  VRM0, +1) need opposite rotations, and folding an arm is too large a move to add angles. Arm bones
+  are set absolutely each frame (slerp from rest, 0.9 s smoothstep), so they can't drift; shoulders
+  stay additive. The scheduler alternates rest (6–14 s) and a weighted random pose (7–16 s), never
+  re-posing while she talks; an emotion beat can ask for a fitting one (`POSE_FOR`: anger → folded
+  arms, thoughtful → thinking, pride → hands on hips…, 20 s cooldown). `/static/avatar-test.html`
+  has a pose picker and a turn slider (`stats.pose`, `stats.turn`); `window.__avatarPoses` is
+  editable live. Picked against screenshots of both models, front and side. Fingers stay at rest
+  (no curl yet). ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone

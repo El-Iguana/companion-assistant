@@ -45,6 +45,12 @@ const stats = { frames: 0, lastRender: 0,
   get mouthGain() { return mouthGain; },
   set mouthGain(v) { mouthGain = Math.max(0, Number(v) || 0); },
   armSign: 0, presets: "", emotion: "", beat: "", gesture: "", posture: "0",
+  armPose: "rest",
+  // Harness override: a pose name holds that pose; "" hands it back to the scheduler.
+  get pose() { return armPose.forced; },
+  set pose(v) { forceArmPose(String(v || "")); },
+  // Harness only: turn the model (degrees) to check a pose from the side.
+  set turn(deg) { if (currentVrm) currentVrm.scene.rotation.y = (Number(deg) || 0) * Math.PI / 180 + (currentVrm.meta?.metaVersion === "0" ? Math.PI : 0); },
   shoulderDeg: 0,
   get armDeg() { return armRestDeg; },
   set armDeg(v) {
@@ -317,6 +323,7 @@ function initIdle(vrm) {
     // Sway: two incommensurable periods so the loop never visibly repeats.
     swayPhase: Math.random() * Math.PI * 2,
   };
+  initArms(vrm);
   if (vrm.lookAt) {
     lookTarget = new THREE.Object3D();
     scene.add(lookTarget);
@@ -476,6 +483,7 @@ function setBeat(label) {
   stats.beat = label;
   const g = GESTURE_FOR[String(label || "").toLowerCase()];
   if (g) playGesture(g);
+  armPoseForBeat(label);
 }
 
 // Resting affect from the running mood: a low, sustained bias, distinct from the
@@ -606,6 +614,202 @@ function updateGesture(vrm, dt) {
   GESTURES[gesture.name].apply(
     { head: idle.head, neck: idle.neck, spine: idle.spine, chest: idle.chest,
       ls: idle.ls, rs: idle.rs }, ph, w);
+}
+
+
+// ---- Phase 3e: arm poses ----------------------------------------------------
+// Held poses for the arms, so a resting avatar doesn't stand with them hanging for
+// minutes: folded arms, a hand on a hip, hands clasped, a hand to the chin. Each is
+// held for a while and eased in and out; the scheduler picks the next one while she
+// is quiet, and an emotion beat can ask for a fitting one.
+//
+// Unlike the other channels these are not small offsets: folding the arms moves the
+// upper arm a long way, and adding Euler angles that far tears. So each arm bone is
+// set ABSOLUTELY every frame, slerped between its rest rotation and the pose's, which
+// also means nothing can drift (the rule resetPose exists for). Nothing else touches
+// these bones; gestures and posture move the shoulders, which stay additive.
+//
+// Poses are DIRECTIONS, not angles: for each arm segment, where it should point in the
+// body's own frame, [out, up, forward] (out = away from the body on that side, so one
+// definition serves both arms; negative = across the body). The rotation that points
+// each bone that way is worked out per model from where its child bone actually sits
+// (targetArms), so a pose needs no per-model angles and doesn't care which way a rig's
+// axes run: the two test models disagree on the arm sign, and Euler angles tuned on one
+// were nonsense on the other. An optional 4th number twists the segment about its own
+// length (radians), for the palm. Tunable live from the harness (window.__avatarPoses),
+// which is how these numbers were picked.
+const ARM_BONES = ["UpperArm", "LowerArm", "Hand"];
+const ARM_CHILD = { UpperArm: "LowerArm", LowerArm: "Hand", Hand: "MiddleProximal" };
+const POSES = {
+  rest: null,                                   // the rest pose itself
+  // Forearms stacked (the right one higher and nearer the chest), hands tucked back
+  // toward the opposite upper arm rather than sticking out past it.
+  foldedArms: {
+    L: { UpperArm: [0.3, -0.85, 0.42], LowerArm: [-0.85, 0.12, 0.45], Hand: [-0.2, 0.25, -0.9] },
+    R: { UpperArm: [0.3, -0.85, 0.36], LowerArm: [-0.85, 0.28, 0.3], Hand: [-0.2, 0.25, -0.9] },
+  },
+  handOnHipL: {
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+  },
+  handOnHipR: {
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+  },
+  handsOnHips: {
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+  },
+  // Hands folded low in front. Forearms forward enough to clear the body.
+  handsClasped: {
+    L: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35] },
+    R: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35] },
+  },
+  // Right hand to the chin, its elbow resting on the left forearm across the waist.
+  thinking: {
+    L: { UpperArm: [0.2, -0.88, 0.4], LowerArm: [-0.85, 0.1, 0.5], Hand: [-0.3, 0.3, -0.9] },
+    R: { UpperArm: [0.05, -0.85, 0.52], LowerArm: [-0.28, 0.82, 0.42], Hand: [-0.35, 0.5, -0.75] },
+  },
+};
+if (typeof window !== "undefined") window.__avatarPoses = POSES;
+
+// How often each is picked when nothing asks for one. Rest stays the most common:
+// a pose is punctuation for a quiet moment, and constant re-posing is a fidget.
+const POSE_WEIGHTS = { rest: 4, foldedArms: 2, handOnHipL: 1.2, handOnHipR: 1.2,
+                       handsClasped: 2, handsOnHips: 0.6, thinking: 1 };
+const POSE_FOR = {
+  angry: "foldedArms", anger: "foldedArms", annoyance: "foldedArms",
+  disapproval: "foldedArms", disgust: "foldedArms",
+  thoughtful: "thinking", curiosity: "thinking", confusion: "thinking",
+  realization: "thinking",
+  pride: "handsOnHips", excitement: "handOnHipR", amusement: "handOnHipL",
+  caring: "handsClasped", nervousness: "handsClasped", embarrassed: "handsClasped",
+  embarrassment: "handsClasped", gratitude: "handsClasped",
+};
+const POSE_EASE_S = 0.9;                 // seconds to move into or out of a pose
+const POSE_HOLD = [7, 16];               // a pose is held this long (s), at random
+const POSE_REST = [6, 14];               // and rest between poses this long
+
+const armPose = { name: "rest", forced: "", from: null, to: null, t: 1, hold: 4,
+                  beatCooldown: 0 };
+
+function initArms(vrm) {
+  const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
+  const hips = bone("hips");
+  const arms = { bones: {}, rest: {}, child: {}, parentRel: {}, frame: null };
+  if (!hips) { idle.arms = null; return; }
+  vrm.scene.updateWorldMatrix(true, true);
+  const toHips = hips.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const hipsInv = new THREE.Matrix4().copy(hips.matrixWorld).invert();
+  const at = (n) => { const b = bone(n); return b && b.getWorldPosition(new THREE.Vector3()).applyMatrix4(hipsInv); };
+  // The body's frame, in the hips' space: left, up, forward from the model itself.
+  const la = at("leftUpperArm"), ra = at("rightUpperArm"), head = at("head");
+  if (!la || !ra || !head) { idle.arms = null; return; }
+  const L = la.clone().sub(ra).normalize();
+  const F = L.clone().cross(head.clone().normalize()).normalize();
+  const U = F.clone().cross(L).normalize();
+  arms.frame = { L, U, F };
+  for (const side of ["L", "R"]) {
+    const pre = side === "L" ? "left" : "right";
+    const ua = bone(pre + "UpperArm");
+    if (ua && ua.parent) arms.parentRel[side] = toHips.clone().multiply(ua.parent.getWorldQuaternion(new THREE.Quaternion()));
+    for (const part of ARM_BONES) {
+      const node = bone(pre + part);
+      if (!node) continue;
+      arms.bones[side + part] = node;
+      arms.rest[side + part] = node.quaternion.clone();
+      const c = bone(pre + ARM_CHILD[part]);
+      if (c && c.position.lengthSq() > 1e-8) arms.child[side + part] = c.position.clone().normalize();
+    }
+  }
+  idle.arms = arms;
+  armPose.name = "rest"; armPose.t = 1; armPose.hold = 3 + Math.random() * 5;
+  stats.armPose = "rest";
+  armPose.from = snapshotArms(); armPose.to = targetArms("rest");
+}
+
+// The pose's rotation for every arm bone: each segment turned so its child bone points
+// the way the pose says, worked down the chain (upper arm, then forearm, then hand) so
+// every step knows where its parent ended up.
+function targetArms(name) {
+  const a = idle && idle.arms, out = {};
+  if (!a) return out;
+  const { L, U, F } = a.frame, def = POSES[name];
+  for (const side of ["L", "R"]) {
+    const sideDef = def && def[side];
+    const out_ = side === "L" ? 1 : -1;               // "out" is +left for the left arm
+    let parent = a.parentRel[side] ? a.parentRel[side].clone() : new THREE.Quaternion();
+    for (const part of ARM_BONES) {
+      const key = side + part;
+      if (!a.bones[key]) continue;
+      const v = sideDef && sideDef[part];
+      let q;
+      if (!v || !a.child[key]) {
+        q = a.rest[key].clone();
+      } else {
+        const d = L.clone().multiplyScalar(v[0] * out_)
+          .add(U.clone().multiplyScalar(v[1])).add(F.clone().multiplyScalar(v[2])).normalize();
+        const local = d.applyQuaternion(parent.clone().invert());
+        q = new THREE.Quaternion().setFromUnitVectors(a.child[key], local);
+        if (v[3]) q.premultiply(new THREE.Quaternion().setFromAxisAngle(local, v[3] * out_));
+      }
+      out[key] = q;
+      parent = parent.multiply(q);
+    }
+  }
+  return out;
+}
+
+function snapshotArms() {
+  const a = idle && idle.arms, out = {};
+  if (a) for (const k of Object.keys(a.bones)) out[k] = a.bones[k].quaternion.clone();
+  return out;
+}
+
+function startArmPose(name) {
+  if (!idle || !idle.arms || !(name in POSES)) return;
+  if (name === armPose.name && armPose.t >= 1) return;
+  armPose.from = snapshotArms();                     // from wherever the arms are now
+  armPose.to = targetArms(name);
+  armPose.name = name; armPose.t = 0;
+  const [lo, hi] = name === "rest" ? POSE_REST : POSE_HOLD;
+  armPose.hold = lo + Math.random() * (hi - lo);
+  stats.armPose = name;
+}
+
+function forceArmPose(name) {
+  armPose.forced = name in POSES ? name : "";
+  if (armPose.forced) { armPose.name = ""; startArmPose(armPose.forced); }   // even if current
+}
+
+function pickArmPose() {
+  const names = Object.keys(POSE_WEIGHTS).filter((n) => n !== armPose.name);
+  let r = Math.random() * names.reduce((s, n) => s + POSE_WEIGHTS[n], 0);
+  for (const n of names) { r -= POSE_WEIGHTS[n]; if (r <= 0) return n; }
+  return "rest";
+}
+
+function armPoseForBeat(label) {
+  const want = POSE_FOR[String(label || "").toLowerCase()];
+  if (!want || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name) return;
+  armPose.beatCooldown = 20;                         // a beat may re-pose her now and then
+  startArmPose(want);
+}
+
+function updateArms(vrm, dt) {
+  const a = idle && idle.arms;
+  if (!a || !armPose.to) return;
+  if (armPose.beatCooldown > 0) armPose.beatCooldown -= dt;
+  armPose.t = Math.min(1, armPose.t + dt / POSE_EASE_S);
+  const k = armPose.t * armPose.t * (3 - 2 * armPose.t);         // smoothstep
+  for (const key of Object.keys(a.bones)) {
+    const from = armPose.from[key] || a.rest[key], to = armPose.to[key] || a.rest[key];
+    a.bones[key].quaternion.slerpQuaternions(from, to, k);
+  }
+  if (armPose.forced || armPose.t < 1) return;
+  // Held long enough: move on, but not mid-sentence: re-posing while she talks reads
+  // as fidgeting. A beat (above) is the exception, since it is the reply's own cue.
+  armPose.hold -= dt;
+  if (armPose.hold <= 0 && speech.env < 0.05)
+    startArmPose(armPose.name === "rest" ? pickArmPose() : "rest");
 }
 
 function updateSpeech(vrm, dt) {
@@ -749,6 +953,7 @@ function tick(now) {
       updateIdle(currentVrm, dt);
       updateSpeech(currentVrm, dt);      // after idle: adds to the idle pose
       updateGesture(currentVrm, dt);     // and so does gesture
+      updateArms(currentVrm, dt);        // 3e: held arm poses (absolute, from rest)
       updateEmotion(currentVrm, dt);     // expression track (independent of pose)
     } catch (e) {
       if (!idleFailed) {
