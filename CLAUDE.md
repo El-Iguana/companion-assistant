@@ -719,6 +719,12 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   Replaced the Navidrome/DJ plan on 2026-09-15; design in `../orpheus/docs/architecture.md`. NAS: UGREEN
   NASync DH2300 @ `192.168.1.219` (SMB 445), mounted by the Orpheus server, not by Cantinero. Hard part
   is still audio coexistence: music breaks the half-duplex mic gate in both directions.
+- **The resident** (`RESIDENT_PLAN.md`, 2026-11-23, issues #37–#41): **the resident app is the primary
+  voice interface; the web chat is for configuration and testing.** A local Cantinero on each speaker
+  machine (predator first) does the wake word, STT and TTS locally, holds the Orpheus player built in and
+  always on, and sends only text to amd-halo, which stays the brain (KoboldCPP, cards, memory, the DJ's
+  pairing). A browser chat plays on the user's default speaker machine. #36's "shell launches the player"
+  is superseded.
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the
