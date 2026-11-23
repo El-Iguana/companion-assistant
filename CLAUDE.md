@@ -176,6 +176,15 @@ Traps, all measured:
 - **Restoring into a volume after the first start duplicates ADMIN.** The first start seeds an
   account; the backup brings another with the same name. Restore = `compose create`, `compose cp`,
   then `up`.
+- **VRM uploads: up to `vrm.MAX_BYTES` (120 MB), streamed** (2026-11-23). pytincture caps every
+  request body (16 MiB by default) in front of Cantinero's own limit, so models over 16 MiB used to
+  fail with a bare 413. `service.py` passes `max_request_body_bytes` in the `PytinctureConfig`:
+  given a config object, pytincture uses only its values and **ignores** the
+  `MAX_REQUEST_BODY_BYTES` environment variable (an env-only fix silently did nothing).
+  `main.upload_vrm` streams to `data/vrm/.upload-*.part` 1 MiB at a time, stops past the limit,
+  audits from the header only (`vrm.audit_file` reads the glb header + JSON chunk, never the
+  textures), renames into place, and leaves nothing behind on refusal. The Studio checks the size
+  before sending. Tests: `tests/test_vrm_upload.py`.
 - **A new named volume is filled from the image**, which is how `data/vrm/baseline.vrm` reaches
   compose installs (`COPY` in the Containerfile, re-included in `.containerignore`). A bind-mounted
   `data/` hides it.

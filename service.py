@@ -52,6 +52,15 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pytincture import PytinctureConfig, create_app  # noqa: E402
 
 import main  # noqa: E402  — Pantheon itself
+from services import vrm  # noqa: E402
+
+# pytincture caps every request body (16 MiB by default). A VRM model is routinely bigger
+# (VRoid exports run 20-60 MB), and that cap sat in front of Cantinero's own (vrm.MAX_BYTES),
+# so any model over 16 MiB was refused with a bare 413. Cantinero passes a PytinctureConfig,
+# and pytincture then takes ONLY that object's values (the MAX_REQUEST_BODY_BYTES environment
+# variable is ignored), so the cap is set here: Cantinero's limit plus room for the multipart
+# framing. MAX_REQUEST_BODY_BYTES in the environment still overrides it.
+REQUEST_MAX_BYTES = int(os.environ.get("MAX_REQUEST_BODY_BYTES") or vrm.MAX_BYTES + 1024 * 1024)
 from pantheon_web.login_page import LoginPageMiddleware, check_at_startup  # noqa: E402
 from pantheon_web.desktop import router as desktop_router  # noqa: E402
 from pantheon_web.media import router as media_router  # noqa: E402
@@ -163,6 +172,7 @@ def build_web_app():
         allow_microphone=True,           # hands-free and push-to-talk (Phase 6)
         session_secret=_session_secret(),
         cookie_namespace="pantheon",
+        max_request_body_bytes=REQUEST_MAX_BYTES,  # VRM uploads; see REQUEST_MAX_BYTES
         environment={
             # Pantheon's own accounts and scrypt hashes (pantheon_web/auth.py).
             "AUTH_USER_AUTHENTICATOR": "pantheon_web.auth.authenticate",

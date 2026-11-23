@@ -674,31 +674,50 @@ async def list_vrm(_: User = Depends(current_user)):
     return out
 
 
+UPLOAD_CHUNK = 1024 * 1024
+
+
 @app.post("/api/vrm")
 async def upload_vrm(file: UploadFile = File(...), _: User = Depends(current_user)):
     """Import a .vrm. Audited before it is written, so a file that cannot work
     as an avatar is rejected at the door rather than failing later in the
-    renderer, where the only symptom is a model that never appears."""
-    data = await file.read()
-    if len(data) > vrm.MAX_BYTES:
-        raise HTTPException(413, f"model exceeds {vrm.MAX_BYTES // 1048576} MB")
-    try:
-        report = vrm.audit(data)
-    except vrm.NotAVrm as e:
-        raise HTTPException(400, str(e)) from e
-    if not report["usable"]:
-        raise HTTPException(400, "unusable as an avatar: " + "; ".join(report["problems"]))
+    renderer, where the only symptom is a model that never appears.
 
-    name = Path(file.filename or "model.vrm").name
-    if not name.lower().endswith(".vrm"):
-        name += ".vrm"
-    dest = _vrm_dir() / name
-    stem, i = dest.stem, 1
-    while dest.exists():                            # never silently replace a model
-        dest = _vrm_dir() / f"{stem}-{i}.vrm"
-        i += 1
-    dest.write_bytes(data)
-    return {"name": dest.name, **report}
+    Streamed: copied to a part file a megabyte at a time (stopping once it passes
+    vrm.MAX_BYTES), audited from its header alone (vrm.audit_file never reads the
+    textures), then renamed into place. A 100 MB model used to sit in memory whole."""
+    d = _vrm_dir()
+    part = d / f".upload-{uuid.uuid4().hex}.part"     # dot-file: never listed as a model
+    try:
+        size = 0
+        with open(part, "wb") as out:
+            while chunk := await file.read(UPLOAD_CHUNK):
+                size += len(chunk)
+                if size > vrm.MAX_BYTES:
+                    raise HTTPException(413, f"model is larger than {vrm.MAX_BYTES // 1048576} MB")
+                out.write(chunk)
+        try:
+            report = vrm.audit_file(part)
+        except vrm.NotAVrm as e:
+            raise HTTPException(400, str(e)) from e
+        if not report["usable"]:
+            raise HTTPException(400, "unusable as an avatar: " + "; ".join(report["problems"]))
+
+        name = Path(file.filename or "model.vrm").name
+        if not name.lower().endswith(".vrm"):
+            name += ".vrm"
+        if name.startswith("."):
+            name = "model" + name
+        dest = d / name
+        stem, i = dest.stem, 1
+        while dest.exists():                        # never silently replace a model
+            dest = d / f"{stem}-{i}.vrm"
+            i += 1
+        part.replace(dest)
+        report.pop("name", None)
+        return {"name": dest.name, **report}
+    finally:
+        part.unlink(missing_ok=True)                # refused or failed: leave nothing behind
 
 
 @app.delete("/api/vrm/{name}")

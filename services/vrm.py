@@ -33,7 +33,9 @@ VISEMES = ["aa", "ih", "ou", "ee", "oh"]
 _V0_EMOTIVE = {"joy": "happy", "angry": "angry", "sorrow": "sad", "fun": "relaxed"}
 _V0_VISEME = {"a": "aa", "i": "ih", "u": "ou", "e": "ee", "o": "oh"}
 
-MAX_BYTES = 120 * 1024 * 1024      # generous; real models run 10-60 MB
+MAX_BYTES = 120 * 1024 * 1024      # generous; real models run 10-60 MB (service.py raises
+                                    # pytincture's request cap to match)
+MAX_JSON_BYTES = 32 * 1024 * 1024  # a glTF JSON chunk this big is not a model we want
 
 
 class NotAVrm(ValueError):
@@ -178,6 +180,31 @@ def audit(data: bytes) -> dict:
     return out
 
 
+def _head(path: Path) -> bytes:
+    """The bytes audit() needs from a file: the 12-byte glb header and the chunks up to and
+    including the JSON one (which glb puts first). A 60 MB model's JSON is a few hundred KB,
+    so the textures and meshes are never read into memory."""
+    with open(path, "rb") as f:
+        head = f.read(12)
+        if len(head) < 12:
+            return head
+        out = bytearray(head)
+        while True:
+            ch = f.read(8)
+            if len(ch) < 8:
+                return bytes(out)
+            clen, ctype = struct.unpack("<II", ch)
+            out += ch
+            if ctype == CHUNK_JSON:
+                if clen > MAX_JSON_BYTES:
+                    raise NotAVrm("the model's JSON chunk is implausibly large")
+                out += f.read(clen)
+                return bytes(out)
+            f.seek(clen, 1)                     # skip a non-JSON chunk (none, in practice)
+
+
 def audit_file(path: str | Path) -> dict:
     p = Path(path)
-    return {"name": p.name, **audit(p.read_bytes())}
+    report = audit(_head(p))
+    report["size"] = p.stat().st_size           # audit() saw only the head
+    return {"name": p.name, **report}
