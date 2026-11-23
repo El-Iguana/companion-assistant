@@ -1,5 +1,9 @@
 # Shared memory core — review and plan (Pantheon + Rhapsode)
 
+> **History.** Since 2026-11-23 Cantinero no longer depends on Muninn: the four modules it used
+> (context, fold, emotion, text) are copied into `services/muninn/`, so the public repo builds on
+> its own. The plan below is kept as the record of how that code came to be.
+
 Status (2026-11-04): **Phase 1 done for Pantheon** (the move, no behaviour change; see Progress at
 the end); Phase 0 fixtures in progress. Spans two repos: Pantheon (`companion/`) and
 Rhapsode (`ai_story_maker/`). Pantheon's shipped mechanics stay documented in `MEMORY.md`,
