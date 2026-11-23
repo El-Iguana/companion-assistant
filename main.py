@@ -1022,13 +1022,14 @@ async def set_swipe(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
                 m.content = m.swipes[idx]   # keep content in sync with shown swipe
                 while len(m.swipe_expressions) < len(m.swipes):
                     m.swipe_expressions.append("")
-                # Reclassify this swipe if not already cached (and the card has sprites).
+                # Reclassify this swipe if not already cached (and the card shows a face).
                 if not m.swipe_expressions[idx]:
                     card = _load(cur.cards, s.character_id, CharacterCard)
-                    if card and card.expressions:
+                    labels = expressions.card_emotions(card) if card else []
+                    if labels:
                         try:
                             m.swipe_expressions[idx] = await expressions.classify(
-                                kobold, m.content, labels=list(card.expressions))
+                                kobold, m.content, labels=labels)
                         except Exception:
                             m.swipe_expressions[idx] = "neutral"
                 expr = m.swipe_expressions[idx] or m.expression
@@ -1593,8 +1594,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     trimmed: list = []
     messages = prompt_builder.build_messages(
         card, persona, session, longterm_note=lt_note,
-        # Only ask for beats we can actually render a sprite for.
-        expr_labels=sorted(card.expressions.keys()) if card.expressions else [],
+        # Beats only for a card whose 3D face can show them (expressions.card_emotions).
+        expr_labels=expressions.card_emotions(card),
         context_tokens=window, trimmed=trimmed,
         # Another take: quote what is being replaced, so the new one differs from it.
         retake_of=_pending_swipes if req.regenerate else None)
@@ -1619,7 +1620,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # Inline [expr:x] beats the model emitted, in order. The last valid one wins for
     # the stored message; the classifier below is the fallback when there were none.
     tagged: list[str] = []
-    known = set(expressions.CORE_EMOTIONS) | set(expressions.FULL_EMOTIONS)
+    emotions = expressions.card_emotions(card)
+    known = set(emotions)
 
     async def _turn():
         acc = ""
@@ -1639,7 +1641,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
 
         # A label the model emitted without its brackets never reached the tag
         # parser, so scrub it here before it is stored and re-spoken on reload.
-        reply = expressions.strip_bare_labels(acc.strip(), card.expressions.keys())
+        reply = expressions.strip_bare_labels(acc.strip(), emotions)
         # Questions are for clarification only; a courtesy question tacked onto a
         # finished answer is the assistant making conversation, which is not the job.
         # See prompt_builder for why this is code and not just a rule.
@@ -1649,18 +1651,18 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
                           swipe_index=len(swipes) - 1)
 
-        # Classify emotion for the expression sprite — only if this card has sprites.
+        # The reply's emotion, for the 3D face and the mood: only for a card that has one.
         new_expr = ""
-        if card.expressions:
+        if emotions:
             # Prefer what the model tagged inline — it is free and beat-accurate.
             # Only fall back to the classifier round-trip when it tagged nothing usable.
             for label in reversed(tagged):
-                if label in card.expressions:
+                if label in known:
                     new_expr = label
                     break
             if not new_expr:
                 try:
-                    new_expr = await expressions.classify(kobold, reply, labels=list(card.expressions))
+                    new_expr = await expressions.classify(kobold, reply, labels=emotions)
                 except Exception:
                     new_expr = "neutral"
         msg.expression = new_expr or None

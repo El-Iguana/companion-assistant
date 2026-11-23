@@ -188,8 +188,9 @@ try {
   // Emotion beats: the same event the SSE stream fires, so this exercises the
   // real 3d path rather than a parallel one.
   const bbar = document.getElementById("beats");
-  for (const lbl of ["happy", "sad", "angry", "surprised", "love", "curiosity",
-                     "annoyance", "embarrassed", "grief", "neutral"]) {
+  for (const lbl of ["neutral", "happy", "amused", "curious", "thoughtful", "surprised",
+                     "confused", "concerned", "apologetic", "grateful", "proud", "relieved",
+                     "sympathetic"]) {          // the assistant set (services/expressions.py)
     const b = document.createElement("button");
     b.type = "button"; b.textContent = lbl;
     b.onclick = () => window.dispatchEvent(

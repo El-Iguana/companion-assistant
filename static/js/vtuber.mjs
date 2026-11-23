@@ -92,6 +92,11 @@ let mouthGain = 6;      // RMS from the analyser runs ~0.05-0.25 on speech
 // Unsupported targets are remapped at load time against what the model actually
 // reports, so a missing preset degrades instead of silently doing nothing.
 const EXPR_MAP = {
+  // The assistant's own labels (services/expressions.py ASSISTANT_EMOTIONS). The rest
+  // below are the old roleplay set, kept so a mood stored in an old chat still shows.
+  amused: ["happy", 0.75], curious: ["relaxed", 0.4], confused: ["surprised", 0.45],
+  concerned: ["sad", 0.35], apologetic: ["sad", 0.3], grateful: ["happy", 0.65],
+  proud: ["happy", 0.6], relieved: ["happy", 0.5], sympathetic: ["sad", 0.45],
   // -> happy
   happy: ["happy", 1.0], joy: ["happy", 1.0], amusement: ["happy", 0.8],
   excitement: ["happy", 0.9], optimism: ["happy", 0.6], pride: ["happy", 0.7],
@@ -570,14 +575,10 @@ const GESTURES = {
 // gesture on every beat would be a fidget, so several emotions share one and
 // some map to nothing at all.
 const GESTURE_FOR = {
-  happy: "nod", joy: "nod", amusement: "nod", excitement: "nod",
-  approval: "nod", gratitude: "nod", admiration: "leanIn",
-  love: "leanIn", caring: "leanIn", desire: "leanIn", curiosity: "tilt",
-  confusion: "tilt", realization: "tilt", thoughtful: "tilt",
-  surprised: "recoil", surprise: "recoil", fear: "recoil", grief: "recoil",
-  disgust: "recoil", anger: "recoil", angry: "recoil",
-  annoyance: "shrug", disapproval: "shrug", disappointment: "shrug",
-  nervousness: "shrug", embarrassed: "tilt", embarrassment: "tilt",
+  happy: "nod", amused: "nod", grateful: "nod", relieved: "nod", proud: "nod",
+  curious: "tilt", thoughtful: "tilt", confused: "tilt", apologetic: "tilt",
+  concerned: "leanIn", sympathetic: "leanIn",
+  surprised: "recoil",
 };
 
 const gesture = { name: null, t: 0, dur: 0, cooldown: 0 };
@@ -759,13 +760,10 @@ if (typeof window !== "undefined") window.__avatarPoses = POSES;
 // is punctuation for a quiet moment, and constant re-posing is a fidget. A figure is the
 // card's `figure` ("" = not set: the shared set every card had before figures).
 const BEAT_POSE = {
-  angry: "foldedArms", anger: "foldedArms", annoyance: "foldedArms",
-  disapproval: "foldedArms", disgust: "foldedArms",
-  thoughtful: "thinking", curiosity: "thinking", confusion: "thinking",
-  realization: "thinking",
-  pride: "handsOnHips", excitement: "handOnHipR", amusement: "handOnHipL",
-  caring: "handsClasped", nervousness: "handBehindHead", embarrassed: "handBehindHead",
-  embarrassment: "handBehindHead", gratitude: "handsClasped", relief: "bothHandsBehindHead",
+  curious: "thinking", thoughtful: "thinking", confused: "thinking",
+  proud: "handsOnHips", amused: "handOnHipL", happy: "handOnHipR",
+  concerned: "handsClasped", sympathetic: "handsClasped", grateful: "handsClasped",
+  apologetic: "handBehindHead", relieved: "bothHandsBehindHead",
 };
 const POSE_SETS = {
   "": {
@@ -778,14 +776,14 @@ const POSE_SETS = {
     weights: { rest: 4, foldedArms: 1.5, handOnHipLLean: 1.4, handOnHipRLean: 1.4,
                handsOnHipsLean: 0.8, handsClasped: 2, thinking: 1, handBehindHead: 0.5,
                bothHandsBehindHead: 0.6, handsBehindBack: 0.4 },
-    beats: { pride: "handsOnHipsLean", excitement: "handOnHipRLean", amusement: "handOnHipLLean" },
+    beats: { proud: "handsOnHipsLean", happy: "handOnHipRLean", amused: "handOnHipLLean" },
   },
   // Square: folded arms and hands behind the back; no hands behind the head.
   male: {
     weights: { rest: 4, foldedArms: 2.5, handOnHipL: 0.6, handOnHipR: 0.6, handsOnHipsSquare: 1,
                handsBehindBack: 2, thinking: 1, handsClasped: 0.5 },
-    beats: { pride: "handsOnHipsSquare", nervousness: "handsBehindBack", embarrassed: "handsBehindBack",
-             embarrassment: "handsBehindBack", relief: "handsBehindBack", caring: "handsBehindBack" },
+    beats: { proud: "handsOnHipsSquare", apologetic: "handsBehindBack", relieved: "handsBehindBack",
+             concerned: "handsBehindBack", sympathetic: "handsBehindBack" },
   },
 };
 let figure = "";                         // this model's card's figure, from avatar:card

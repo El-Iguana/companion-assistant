@@ -51,10 +51,11 @@ class Library:
                 "id": card.id, "name": card.name, "tagline": tagline(card),
                 "description": sub(card.description), "personality": sub(card.personality),
                 "scenario": sub(card.scenario), "greetings": greetings,
-                "tags": list(card.tags or []),
-                "creator": card.creator, "starters": starters(card),
+                # Tags and creator are card-sharing metadata, no longer edited or shown
+                # (2026-11-23); they stay on the card for export.
+                "tags": [], "creator": "", "starters": starters(card),
                 "has_portrait": has_portrait(card),
-                "sprites": len(card.expressions), "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm",
+                "sprites": 0, "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm",
                 "updated_at": card.updated_at,
             },
             "chats": {"count": len(chats),

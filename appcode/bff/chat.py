@@ -55,7 +55,9 @@ class Chat:
             "card": {
                 "id": card.id, "name": card.name, "tagline": tagline(card),
                 "has_portrait": has_portrait(card), "updated_at": card.updated_at,
-                "expressions": sorted(card.expressions.keys()),
+                # No sprites any more (2026-11-23): a card without a 3D avatar shows its
+                # portrait, so the page gets no sprite labels to swap between.
+                "expressions": [],
                 "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
                 "figure": card.figure,
                 "starters": starters(card),

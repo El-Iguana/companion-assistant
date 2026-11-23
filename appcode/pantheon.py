@@ -177,7 +177,7 @@ class Pantheon(MainWindow):
             '<header class="pt-top">'
             '<button class="pt-ibtn pt-burger" id="pt-burger" title="Menu"><i class="mdi mdi-menu"></i></button>'
             '<label class="pt-search"><i class="mdi mdi-magnify"></i>'
-            '<input id="pt-q" type="search" autocomplete="off" placeholder="Search the staff, tags…"></label>'
+            '<input id="pt-q" type="search" autocomplete="off" placeholder="Search the staff…"></label>'
             '<span class="pt-spacer"></span>'
             '<span class="pt-status" id="pt-status" title="Backends">'
             '<span class="pt-dot" id="pt-dot-k"></span><span class="pt-dot" id="pt-dot-c"></span>'

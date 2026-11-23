@@ -34,6 +34,23 @@ Renaming them is deliberately deferred; don't half-rename.
 | **the Menu** — what the staff can do beyond talk; a skill is **on the menu**, enabling one is **adding it to the menu**. The DJ (Media via Orpheus) is on the menu (planned) | skills, `SKILLS_PLAN.md` |
 | **standing orders** (help text) | directives (`AssistantMemory.directives`) |
 
+**Staff are assistants, not roleplay characters (2026-11-23).** The Staff studio has Basics,
+Personality & tone, Greetings, Lorebook, 3D avatar, Voice and Advanced (system prompt only). Gone
+from it: Background (`scenario`), Example dialogue, Post-history instructions, Creator, Version,
+Tags, and everything sprite (appearance prompt, expression generation, the sprite/VRM switch, the
+sprite profile picture). Those fields stay on the card, unshown, so V2/V3 export round-trips; the
+prompt no longer injects `scenario`, `mes_example` or `post_history_instructions` (text nobody can
+see or edit). **Voice & tone**: `CharacterCard.tone` (`Tone`: warmth, formality, playfulness,
+detail, femininity, each −1..1, clamped) → one "Voice and tone" line beside the personality
+(`prompt_builder.tone_note`, silent near 0). **Emotions**: `expressions.ASSISTANT_EMOTIONS`
+(neutral, happy, amused, curious, thoughtful, surprised, confused, concerned, apologetic,
+grateful, proud, relieved, sympathetic; no love, anger, fear…) drive the reply's `[expr:x]` beats,
+the classifier fallback, the VRM face, gestures and arm poses, for a card **with a 3D avatar**
+(`card_emotions`); a card without one shows its static portrait and gets none. Before this, only
+sprite cards got beats, so a VRM-only card (Mira) never moved its face or arms on emotion. The
+sprite generation endpoints, ComfyUI client and baked rembg models are still in the code, unused
+by the UI.
+
 Taglines: *"Pull up a stool. What'll it be?"* where the user is invited in (login, the Staff
 page's hero, the rail); *"El Iguana's bartender — at your service."* where the app is described
 (frontend.json, the image label, README, the Guide). Account and user management stay plain.
