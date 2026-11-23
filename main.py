@@ -18,7 +18,7 @@ import secrets
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -374,6 +374,8 @@ def _default_persona(cur: Ctx) -> Persona:
 
 @app.on_event("shutdown")
 async def _shutdown():
+    for t in list(_sweep_timers.values()):          # waiting idle timers; a restart's
+        t.cancel()                                   # catch-up sweeps those chats instead
     await kobold.close()
     await comfy.close()
 
@@ -1114,24 +1116,43 @@ async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
 
 @app.post("/api/sessions/{session_id}/sweep")
 async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
-    """Idle trigger: fold a finished conversation into long-term memory.
+    """A chat ended: fold everything not yet folded, recent turns included, into
+    long-term memory now.
 
-    The better of the two triggers — it captures a conversation that actually
-    ended, instead of cutting at whatever turn the threshold happened to land on.
-    Idempotent (see fold_into_longterm), so the frontend can fire it whenever a
-    session goes quiet without tracking whether it already did.
+    The page and the desktop call this when a chat ends (left, another one opened, the
+    tab or window closed, the sleep phrase); the server's own idle timer
+    (_schedule_sweep) and the startup catch-up are the net under them. Idempotent: a
+    chat with nothing new costs no model call. It runs as a background job (one per
+    chat at a time, giving way to replies) and is shielded, so a client that leaves
+    straight after asking (a closing tab) doesn't cancel it.
     """
+    if not _load(cur.sessions, session_id, ChatSession):
+        raise HTTPException(404, "session not found")
+    task = asyncio.create_task(_sweep_job(cur, session_id))
+    _memory_tasks.add(task)
+    task.add_done_callback(_memory_tasks.discard)
+    return await asyncio.shield(task)
+
+
+async def _sweep(cur: Ctx, session_id: str, kobold=kobold) -> dict:
+    """The fold a sweep runs: every turn of the chat not yet folded, recent ones too."""
     session = _load(cur.sessions, session_id, ChatSession)
     if not session:
-        raise HTTPException(404, "session not found")
+        return {"ok": True, "swept": False, "reason": "session not found"}
     card = _load(cur.cards, session.character_id, CharacterCard)
     persona = _load(cur.personas, session.persona_id, Persona) or _default_persona(cur)
     if not card:
         return {"ok": True, "swept": False, "reason": "session has no character"}
 
+    am = _load_assistant_memory(cur, session.character_id, persona.id)
+    if (am.swept_sessions.get(session.id, 0) >= len(session.messages)
+            or not any(m.role == "user" for m in session.messages)):
+        # Nothing new, or a chat nobody spoke in (only the greeting). Common: every
+        # chat that is left or closed asks for a save, and probing the backend's
+        # context size first cost seconds a time with KoboldCPP down.
+        return {"ok": True, "swept": False}
     st = _load_settings(cur)
     window = await _context_tokens(st)
-    am = _load_assistant_memory(cur, session.character_id, persona.id)
     am0 = am.model_copy(deep=True)
     changed = await assistant_memory.fold(
         kobold, am, session, card, persona, max_tokens=st.summary_max_tokens,
@@ -1147,6 +1168,104 @@ async def sweep_session(session_id: str, cur: Ctx = Depends(get_ctx)):
             live.memory.last_summarized_index = mark
             _save(live, cur.sessions)
     return {"ok": True, "swept": changed}
+
+
+# ---- sweeps the server runs itself ---------------------------------------------------
+# The idle sweep used to be a 5-minute timer in the browser, so closing the tab, a reload,
+# closing the desktop window or a restart before it fired lost it: the chat's recent
+# turns stayed out of long-term memory until that chat was opened again. Now every
+# finished turn re-arms a timer here, and startup catches up on chats it missed.
+SWEEP_IDLE_S = 5 * 60.0          # quiet time after the last reply before a chat is swept
+SWEEP_RETRY_S = 60.0             # a sweep that gave way to a reply runs again after this
+SWEEP_CATCHUP_DAYS = 2           # at startup, sweep chats active this recently
+SWEEP_CATCHUP_DELAY_S = 60.0     # ...starting after this (let the backends come up), then
+SWEEP_CATCHUP_GAP_S = 10.0       # ...this far apart, one chat at a time on the model
+_sweep_timers: dict[str, asyncio.Task] = {}   # session id -> a timer still WAITING
+_sweep_tasks: set[asyncio.Task] = set()       # strong refs to every timer, waiting or
+                                              # sweeping. Not _memory_tasks: that set is
+                                              # "work in flight", and a timer is mostly sleep
+
+
+def _schedule_sweep(uid: str, session_id: str, delay: float = SWEEP_IDLE_S) -> None:
+    """Arm (or re-arm) the idle sweep of one chat. Only a timer that is still waiting is
+    replaced: one whose sweep has started is left to finish, because cancelling it would
+    leave KoboldCPP generating for nobody."""
+    old = _sweep_timers.pop(session_id, None)
+    if old is not None and not old.done():
+        old.cancel()
+    task = asyncio.create_task(_sweep_later(uid, session_id, delay))
+    _sweep_timers[session_id] = task
+    _sweep_tasks.add(task)
+    task.add_done_callback(_sweep_tasks.discard)
+
+
+async def _sweep_later(uid: str, session_id: str, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+    except asyncio.CancelledError:
+        return
+    if _sweep_timers.get(session_id) is asyncio.current_task():
+        del _sweep_timers[session_id]           # from here on it can't be re-armed away
+    user = _user_by_id(uid)
+    if not user:                                # deleted meanwhile: nothing to save, and
+        return                                  # _ctx_for would recreate their folders
+    await _sweep_job(_ctx_for(user), session_id)
+
+
+async def _sweep_job(cur: Ctx, session_id: str) -> dict:
+    """A sweep under the same rules as the memory job: one job per chat at a time, and a
+    reply cancels it (_yield_memory_jobs). One that gave way runs again shortly, since a
+    chat that has ended has no next turn to re-arm it. Never raises."""
+    lock = _memory_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        k = _YieldingKobold(kobold, f"pantheon-sweep-{uuid.uuid4().hex[:12]}")
+        _memory_running[session_id] = k
+        try:
+            out = await _sweep(cur, session_id, k)
+            _memory_yields.pop(session_id, None)
+            return out
+        except _MemoryYielded:
+            print(f"[memory] sweep of session {session_id[:8]} yielded to a reply", flush=True)
+            _schedule_sweep(cur.user.id, session_id, SWEEP_RETRY_S)
+            return {"ok": True, "swept": False, "reason": "gave way to a reply; runs again shortly"}
+        except Exception as e:  # noqa: BLE001 — best-effort, like every memory step
+            print(f"memory sweep failed for session {session_id}: {e!r}", flush=True)
+            return {"ok": True, "swept": False, "reason": "failed"}
+        finally:
+            if _memory_running.get(session_id) is k:
+                del _memory_running[session_id]
+
+
+def _unswept_recent(cur: Ctx, days: float = SWEEP_CATCHUP_DAYS) -> list[str]:
+    """Chats active in the last `days` with a user turn the sweep hasn't folded."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    out = []
+    for s in _list(cur.sessions, ChatSession):
+        if (s.updated_at or "") < cutoff or not s.character_id:
+            continue
+        # The persona _sweep will fold into: a deleted one falls back to the default.
+        persona_id = (_load(cur.personas, s.persona_id, Persona) or _default_persona(cur)).id
+        mark = _load_assistant_memory(cur, s.character_id, persona_id).swept_sessions.get(s.id, 0)
+        if any(m.role == "user" for m in s.messages[mark:]):
+            out.append(s.id)
+    return out
+
+
+def start_sweep_catchup() -> None:
+    """At startup: schedule a sweep for every recent chat a restart (or a closed tab
+    before this server-side timer existed) left unswept. Staggered, so the model isn't
+    asked for all of them at once. Called from service.py's lifespan."""
+    n = 0
+    for user in _all_users():
+        try:
+            cur = _ctx_for(user)
+            for sid in _unswept_recent(cur):
+                _schedule_sweep(user.id, sid, SWEEP_CATCHUP_DELAY_S + n * SWEEP_CATCHUP_GAP_S)
+                n += 1
+        except Exception as e:  # noqa: BLE001 — a bad library must not stop startup
+            print(f"[memory] sweep catch-up skipped a library: {e!r}", flush=True)
+    if n:
+        print(f"[memory] {n} recent chat(s) not yet swept: sweeping them shortly", flush=True)
 
 
 @app.delete("/api/sessions/{session_id}/messages")
@@ -1571,6 +1690,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # them kept her "thinking" for 30 s+ after the text was on screen.
         _save_turn(cur, session)
         _spawn_memory_job(cur, session.id)
+        _schedule_sweep(cur.user.id, session.id)    # the idle net if no "end" ever arrives
         yield _sse({"done": True, "message_id": msg.id, "expression": msg.expression,
                     "mood": session.mood.mood, "valence": session.mood.valence})
 

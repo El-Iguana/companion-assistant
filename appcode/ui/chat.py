@@ -131,6 +131,10 @@ class ChatView:
         self.listeners.on(w, "pvoice:state", lambda e: self._paint_voice(e.detail))
         self.listeners.on(w, "pvoice:persist", self._on_voice_persist)
         self.listeners.on(w, "pvoice:toast", lambda e: toast(str(e.detail.msg), str(e.detail.kind or "info"), 6000))
+        # The chat ends when the hands-free conversation does, or with the page:
+        # save it to long-term memory then (app.end_chat), as on leaving it (unmount).
+        self.listeners.on(w, "pvoice:asleep", lambda _e: self.app.end_chat(self.sid))
+        self.listeners.on(w, "pagehide", lambda _e: self.app.end_chat(self.sid, leaving=True))
         spawn(self.load(), "open chat")
 
     def unmount(self) -> None:
@@ -140,6 +144,8 @@ class ChatView:
         self.listeners.clear()
         self.menu.destroy()
         self.root = None
+        # Leaving a chat (to another chat, a new one, any other screen) ends it.
+        self.app.end_chat(self.sid)
         v = voice()
         if v:
             v.detach()
@@ -472,8 +478,6 @@ class ChatView:
         if restore and by_id("ch-input"):
             by_id("ch-input").value = restore
             self._grow()
-        if done:
-            self.app.schedule_sweep(self.sid)
         await self.app.refresh()
 
     def stop(self) -> None:

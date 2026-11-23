@@ -16,7 +16,6 @@
 (() => {
   const $ = (s) => document.querySelector(s);
   const V = window.PantheonVoice;
-  const SWEEP_IDLE_MS = 5 * 60 * 1000;     // as on the main page
 
   function csrf() {
     const parts = document.cookie.split(";").map(s => s.trim());
@@ -40,7 +39,19 @@
 
   let characters = [], recent = [], settings = {};
   let card = null, sessionId = "", mood = {};
-  let streaming = false, controller = null, sweepTimer = null, live = "";
+  let streaming = false, controller = null, live = "";
+
+  // A chat ended (another bartender opened, the sleep phrase, the window closing): save
+  // it to long-term memory now. The server also sweeps a chat that has gone quiet, so a
+  // save missed here is late, not lost. keepalive lets the request outlive the page.
+  function endChat(sid) {
+    if (!sid) return;
+    fetch("/pdesk/sweep", {
+      method: "POST", credentials: "same-origin", keepalive: true,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+      body: JSON.stringify({ session_id: sid }),
+    }).catch(() => {});
+  }
 
   // ---- caption + HUD ----------------------------------------------------------
   // Her latest line, briefly. A face alone gives you no way to catch a missed word,
@@ -90,6 +101,7 @@
     const r = await api("/pdesk/open", { character_id: id });
     if (controller) controller.abort();
     V.stop();
+    if (sessionId && sessionId !== r.session_id) endChat(sessionId);
     card = r.card; sessionId = r.session_id; mood = r.mood || {};
     V.attach(card, settings);
     V.mood(mood.mood || "", mood.valence || 0, "");
@@ -170,10 +182,6 @@
       V.mood(done.mood || "", done.valence || 0, "");
       sprite();
       caption(visible(acc), 9000);
-      // Fold the chat into long-term memory once it goes quiet, as the main page does.
-      clearTimeout(sweepTimer);
-      const sid = sessionId;
-      sweepTimer = setTimeout(() => api("/pdesk/sweep", { session_id: sid }).catch(() => {}), SWEEP_IDLE_MS);
     } else if (!acc) {
       caption("", 0);
     }
@@ -183,6 +191,8 @@
   // ---- the voice island's events -------------------------------------------------
   window.addEventListener("pvoice:send", (e) => send(String(e.detail.text || "")));
   window.addEventListener("pvoice:abort", () => { if (controller) controller.abort(); });
+  window.addEventListener("pvoice:asleep", () => endChat(sessionId));
+  window.addEventListener("pagehide", () => endChat(sessionId));
   window.addEventListener("pvoice:expr", (e) => sprite(e.detail.label));
   window.addEventListener("pvoice:state", paint);
   window.addEventListener("pvoice:persist", (e) => {

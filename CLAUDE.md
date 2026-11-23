@@ -369,7 +369,7 @@ GET/POST /api/personas ; PUT/DELETE /api/personas/{id}
 # sessions + chat
 GET/PUT /api/sessions/{id}/memory          this chat's pinned facts
 GET/PUT /api/assistant-memory?character_id=&persona_id=   assistant store (directives[] + facts[] + notes[]); round-trip by id
-POST /api/sessions/{id}/sweep              idle trigger: fold a finished chat into assistant memory (idempotent)
+POST /api/sessions/{id}/sweep              a chat ended: fold all of it into assistant memory (idempotent)
 GET  /api/sessions ; POST /api/sessions    list / create ({character_id, persona_id?, greeting_index?})
 GET/DELETE /api/sessions/{id} ; DELETE /api/sessions/{id}/messages
 PUT  /api/sessions/{id}/swipe              select swipe + reclassify emotion -> {expression}
@@ -434,8 +434,11 @@ POST /api/chat                             SSE stream; done carries {message_id,
   task notes, per (character, persona); plus this chat's pinned facts. When `summarize_after`
   un-folded messages pile up, `_maintain_memory` folds all but `keep_recent` of them
   (`assistant_memory.fold`: notes rewritten whole, directives/facts extracted from the user's turns
-  only) and moves `last_summarized_index`, so those turns leave the prompt. `POST
-  /sessions/{id}/sweep` on a 5-min idle timer folds a finished chat. No summary, no recall.
+  only) and moves `last_summarized_index`, so those turns leave the prompt. **Ending a chat saves
+  it** (`POST /sessions/{id}/sweep` folds everything, recent turns included): leaving it, a new
+  chat, the hands-free conversation ending, the page or desktop window closing; the server also
+  sweeps 5 min after the last reply and catches up at startup (`MEMORY.md` → *When a sweep runs*).
+  No summary, no recall.
   Budget-capped, oldest auto entries evicted first, editable in the chat's ⋮ → Memory modal.
   Deleting a character or persona deletes its pairings' memory (`_forget_pairings`).
 - **Storage:** plain JSON under `data/`, UUID ids.
@@ -450,7 +453,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 
 | file | what |
 |---|---|
-| `pantheon.py` | the shell: 292 px rail (tile nav Staff/Hire/Chats/Personas/Settings, Recent chats, Staff with who is on shift, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Hire), hash routing, mobile drawer, the per-chat idle-sweep timers; loads `pantheon.css` and `voice.js` |
+| `pantheon.py` | the shell: 292 px rail (tile nav Staff/Hire/Chats/Personas/Settings, Recent chats, Staff with who is on shift, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Hire), hash routing, mobile drawer, `end_chat` (save a chat to memory when it ends); loads `pantheon.css` and `voice.js` |
 | `ui/discover.py` · `ui/profile.py` | the Staff page (route `discover`: hero with who is on shift, search, tags) · profile modal (greetings, start / continue, export, copy to user) |
 | `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, persona + memory count in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
 | `ui/chats.py` | all chats |
@@ -467,7 +470,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 ## Feature set (all built + verified)
 
 ✅ Card V2/V3 import/export · ✅ streaming chat · ✅ swipes + per-swipe emotions · ✅ **assistant
-memory** (directives/facts/notes, per char+persona, idle sweep, curated + revertible) · ✅ persona ·
+memory** (directives/facts/notes, per char+persona, saved when a chat ends, curated + revertible) · ✅ persona ·
 ✅ card editor (fields, portrait, lorebook, Duplicate) · ✅ ComfyUI expression sprites (same-character,
 transparent via rembg, Core-8/Full-28, gallery w/ per-sprite regen/delete, Flux Kontext) · ✅ live
 portrait swap · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper,

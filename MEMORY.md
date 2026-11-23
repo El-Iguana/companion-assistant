@@ -62,10 +62,28 @@ in the transcript to explain it.
 
 `fold()` keeps a per-session high-water mark (`swept_sessions`) and reads the range in chunked
 passes (`memory._fold_chunks`, `muninn.fold`), writing directives, facts and notes, never a narrative.
-The same two triggers fire it: the chat flow at the `summarize_after` threshold (advancing
-`session.memory.last_summarized_index` so the prompt cannot grow without bound, while
-`session.memory.summary` stays **empty** — there must be no prose to inject) and the idle sweep.
-`max_new` (`auto_facts_max_new`) is spent across **both** categories together.
+Two kinds of fold fire it. The chat flow folds at the `summarize_after` threshold, all but
+`keep_recent` turns (advancing `session.memory.last_summarized_index` so the prompt cannot grow
+without bound, while `session.memory.summary` stays **empty**: there must be no prose to inject).
+A **sweep** folds **everything** not yet folded, the recent turns included, so nothing said in a
+chat is left out of long-term memory once it ends. `max_new` (`auto_facts_max_new`) is spent
+across **both** categories together.
+
+**When a sweep runs** (since 2026-11-23; before, only a 5-minute timer in the browser did, and a
+closed tab, a reload or a restart before it fired left the recent turns out):
+
+| Trigger | Where |
+|---|---|
+| Leaving a chat: another chat, a new chat, any other screen | page, `ChatView.unmount` → `app.end_chat` |
+| The hands-free conversation ends: sleep phrase, timeout, mic off | `voice.js` sends `pvoice:asleep`; page and desktop |
+| The page or the desktop window closes (`pagehide`) | keepalive `POST /pdesk/sweep`, which outlives the page |
+| Another bartender opened in the desktop window | `desktop.js` `openCharacter` |
+| 5 minutes after the last reply, whatever the client did | server, `_schedule_sweep`, re-armed by every turn |
+| Startup: recent chats (2 days) with user turns not yet swept | server, `start_sweep_catchup`, staggered |
+
+Every sweep runs as a background job under the memory job's rules (one per chat at a time, a
+reply cancels it) and one that gave way runs again a minute later. A chat with nothing new, or
+with only the greeting, returns at once without asking the backend anything.
 
 **A session copied from the roleplay app (or from a card that was once in roleplay mode) arrives
 carrying a summary, and it is dealt with in two places.** Nothing in this app writes that field, so
@@ -137,7 +155,8 @@ GET/PUT /api/sessions/{id}/memory                 this chat's pinned facts
 GET/PUT /api/assistant-memory?character_id=&persona_id=
                                                   directives[] + facts[] + notes[];
                                                   directives/facts round-trip by id, notes as lines
-POST /api/sessions/{id}/sweep                     idle trigger; idempotent
+POST /api/sessions/{id}/sweep                     a chat ended: fold everything not yet folded; idempotent
+POST /pdesk/sweep {session_id}                    the same, as a plain route for keepalive on page close
 GET/PUT /api/settings                             summarize_after · keep_recent · summary_max_tokens ·
                                                   auto_facts_enabled · auto_facts_max_new
 ```
