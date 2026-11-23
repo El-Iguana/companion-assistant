@@ -60,10 +60,9 @@ def test_the_desktop_page_and_its_routes_forward_with_the_token(server, client):
     assert client.get("/static/js/voice.js").status_code == 200
     assert client.get("/pdesk/state").json()["path"] == "/pdesk/state"
     client.post("/pdesk/open", json={"character_id": "mira"}, headers=H)
-    client.post("/pmedia/music/duck", json={"on": True}, headers=H)
+    client.post("/pmedia/music/duck", json={"on": True}, headers=H)                 # local: never forwarded
     assert [(m, p, a) for m, p, a, _ in seen] == [("GET", "/pdesk/state", "Bearer TOK"),
-                                                  ("POST", "/pdesk/open", "Bearer TOK"),
-                                                  ("POST", "/pmedia/music/duck", "Bearer TOK")]
+                                                  ("POST", "/pdesk/open", "Bearer TOK")]
     assert json.loads(seen[1][3]) == {"character_id": "mira"}
 
 
@@ -95,7 +94,7 @@ def test_server_down_she_says_so_and_nothing_hangs(server, client):
     assert client.get("/pdesk/state").status_code == 502
     said = client.post("/pdesk/chat", json={"session_id": "s", "text": "hi"}, headers=H).text
     assert "can't reach the bar" in said and '"done": true' in said             # spoken, then done
-    assert client.post("/pmedia/music/duck", json={"on": True}, headers=H).json() == {"ok": False}
+    assert client.post("/pmedia/music/duck", json={"on": True}, headers=H).json() == {"ok": True}  # local
 
 
 def test_a_removed_resident_doesnt_reload_forever(server, client):

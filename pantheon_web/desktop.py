@@ -132,7 +132,7 @@ async def chat(request: Request):
     rec = getattr(request.state, "resident", None) or {}
     return await main.chat(ChatRequest(session_id=str(body.get("session_id") or ""),
                                        input_text=str(body.get("text") or "")), cur=cur,
-                           player_id=rec.get("orpheus_player_id", ""))
+                           player_id=rec.get("id", ""))
 
 
 @router.post("/pdesk/sweep")

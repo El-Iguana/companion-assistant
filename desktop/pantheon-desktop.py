@@ -46,7 +46,7 @@ from gi.repository import Gtk, Gdk, GLib, WebKit  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
-import player as orpheus_player  # noqa: E402
+import music  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
 # The tray icon: El Iguana behind the bar. The SNI host looks the icon name up here first.
@@ -62,7 +62,7 @@ class DesktopShell(Gtk.Application):
         super().__init__(application_id=APP_ID)
         self.url, self.w, self.h, self.want_tray = url, width, height, tray
         self.want_music = music
-        self.player = None             # the built-in Orpheus player (desktop/player.py)
+        self.player = None             # Cantinero's music player (desktop/music.py)
         self.win: Gtk.Window | None = None
         self.view: WebKit.WebView | None = None
         self.click_through = True
@@ -163,13 +163,13 @@ class DesktopShell(Gtk.Application):
         self.win.present()
         GLib.timeout_add(300, self._apply_input_region_once)
 
-        # The resident's Orpheus player: always on, so music from any chat plays here.
-        cfg = orpheus_player.resident_config()
-        if self.want_music and orpheus_player.configured(cfg):
-            self.player = orpheus_player.PlayerWindow(self, cfg)
+        # The resident's music player: always running, so music from any chat plays here.
+        cfg = music.resident_config()
+        if self.want_music and music.configured(cfg):
+            self.player = music.MusicPlayer(self, cfg, int(os.environ.get("RESIDENT_PORT") or 7867))
             self.player.start()
         elif self.want_music:
-            print("[shell] no Orpheus player yet: python -m resident pair-orpheus")
+            print("[shell] no music yet: pair the resident, then python -m resident pair-orpheus")
 
         if self.want_tray:
             self._build_tray()
@@ -455,7 +455,7 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=420)
     ap.add_argument("--height", type=int, default=620)
     ap.add_argument("--no-tray", action="store_true", help="run without a tray icon")
-    ap.add_argument("--no-music", action="store_true", help="don't run the built-in Orpheus player")
+    ap.add_argument("--no-music", action="store_true", help="don't run the music player")
     ap.add_argument("--icon", default="cantinero",
                     help="tray icon: a name in desktop/icons/ (default: cantinero) or the icon theme")
     args = ap.parse_args()

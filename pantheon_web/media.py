@@ -248,7 +248,8 @@ async def music_duck(request: Request):
     _require_csrf(request)
     body = await request.json()
     on = bool(body.get("on")) if isinstance(body, dict) else False
-    # A resident ducks its own player; the web page (testing) the default one (R-7).
-    rec = getattr(request.state, "resident", None) or {}
-    asyncio.ensure_future(dj.duck(cur.cards.parent, on, rec.get("orpheus_player_id", "")))
+    # A resident ducks its own player locally and doesn't come here; the web page (testing)
+    # ducks the default resident's (R-7).
+    if getattr(request.state, "resident", None) is None:
+        asyncio.ensure_future(dj.duck(cur.user.id, cur.cards.parent, on))
     return {"ok": True}

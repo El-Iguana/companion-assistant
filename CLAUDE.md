@@ -737,12 +737,25 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   only, POSTs need the `X-CSRF-Token` header (any value), no CORS. Server down: a 502, and the chat
   becomes her saying she can't reach the bar; a server 401 becomes a 403 so the page doesn't reload
   for ever; desktop.js boot retries every 10 s. Measured in the image: Kokoro 1.0 s, Whisper 0.5 s,
-  round trip exact. Tests: `tests/test_resident_service.py`. ✅ **R3 (the built-in player):**
-  `desktop/player.py`, a second always-on window of the shell running Orpheus's web player. It is signed
-  in by `orpheus_session` cookie from `resident.json` (`python -m resident pair-orpheus`) and starts
-  minimized. WebKit needs **both** `media-playback-requires-user-gesture=False` and
-  `WebsitePolicies(autoplay=ALLOW)`, or media loads and sits paused silently. Verified minimized on
-  predator: album, next, duck. `CANTINERO_PLAYER_DEBUG=1` logs the page's media state every 3 s.
+  round trip exact. Tests: `tests/test_resident_service.py`. ✅ **R3 (Cantinero's own player, revised 2026-11-23 at the user's request, not Orpheus's web
+  player):**
+  - **The player:** `desktop/music.py`, a small GTK4 window in the shell (cover, title, seek bar,
+    transport, volume, queue) on GStreamer `playbin3`. Its rules are in `desktop/musiccore.py` (pure,
+    tested).
+  - **Command path:** Cantinero commands it directly (amd-halo `services/music_hub.py` ←WS
+    `/resident/connect`→ `resident/relay.py` ←WS `/player/connect` with `player_key`→ the shell).
+  - **Queue:** amd-halo's DJ expands plays through Orpheus's API (`orpheus_media.expand`).
+  - **Streams:** the player fetches each track from Orpheus as the resident's own `player` device
+    (`pair-orpheus`, a `gstreamer` capability report, so everything plays direct).
+  - **Ducking** is local (page → resident → player).
+  - Verified on predator against a harness: play, volume, duck, next, seek, previous, pause, stop.
+  - **Two GStreamer traps:**
+    - a seek past the end raises *two* errors (HTTP 416, then "internal data stream error"); one skip
+      per failure (`_skip_soon`), and a seek past the end means next;
+    - a flushing seek passes through PAUSED, so the status is what was asked
+      (`want_playing`), not the pipeline's.
+  - `CANTINERO_MUSIC_DEBUG=1` logs each command; `CANTINERO_RESIDENT_URL` points the player at
+    another resident service.
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the

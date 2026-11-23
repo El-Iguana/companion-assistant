@@ -21,11 +21,12 @@ import os
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from resident import config, mdns
+from resident.relay import RELAY
 
 HERE = Path(__file__).resolve().parent.parent
 # The image's healthcheck probes $PANTHEON_PORT, so the resident answers on it too.
@@ -35,9 +36,39 @@ REMOVED = "This resident was removed from Cantinero. Pair it again: python -m re
 
 # The desktop page's routes the server lets a resident call (R-2); nothing else is forwarded.
 FORWARD_GET = ("/pdesk/state", "/pdesk/card")
-FORWARD_POST = ("/pdesk/open", "/pdesk/chat", "/pdesk/sweep", "/pdesk/settings", "/pmedia/music/duck")
+FORWARD_POST = ("/pdesk/open", "/pdesk/chat", "/pdesk/sweep", "/pdesk/settings")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.on_event("startup")
+async def _music_line():
+    import secrets
+
+    cfg = config.load()
+    if config.paired(cfg) and not cfg.get("player_key"):
+        cfg["player_key"] = secrets.token_urlsafe(24)     # what the shell's player shows us
+        config.save(cfg)
+    RELAY.start()                          # the command line from the server to the player
+
+
+@app.websocket("/player/connect")
+async def player_connect(ws: WebSocket):
+    """The shell's music player (desktop/music.py). Loopback only, with the local key from
+    resident.json, so another local program can't pose as the player."""
+    import secrets
+
+    host = (ws.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
+    key = config.load().get("player_key") or ""
+    if host not in ("127.0.0.1", "localhost", "::1") or not key or \
+            not secrets.compare_digest(ws.headers.get("x-player-key", ""), key):
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    try:
+        await RELAY.attach_player(ws.send_text, ws.receive_text)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.on_event("startup")
@@ -188,7 +219,9 @@ async def status(request: Request):
         upstream.reset()
         reachable, me, removed = False, {}, False
     return {"paired": not removed, "host": cfg["host"], "reachable": reachable,
-            "resident": me.get("resident"), "account": me.get("account")}
+            "resident": me.get("resident"), "account": me.get("account"),
+            "music": {"line": RELAY.connected, "player": RELAY.player is not None,
+                      "status": RELAY.player_state.get("status")}}
 
 
 @app.post("/pdesk/chat")
@@ -245,11 +278,11 @@ async def avatar(card_id: str, request: Request):
 
 @app.post("/pmedia/music/duck")
 async def duck(request: Request):
+    """She is speaking or listening: lower this machine's music, here and at once (R-7)."""
     _guard(request, post=True)
-    try:
-        return await _forward(request, "/pmedia/music/duck", await request.body())
-    except HTTPException:
-        return {"ok": False}                 # ducking is best effort; never an error on the page
+    body = await request.json()
+    await RELAY.duck_local(bool(body.get("on")) if isinstance(body, dict) else False)
+    return {"ok": True}
 
 
 @app.post("/pmedia/tts")

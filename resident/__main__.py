@@ -46,9 +46,11 @@ def pair(host: str, name: str, http_port: int, https_port: int, insecure: bool) 
                     return 1
                 got = r.raise_for_status().json()
                 if got.get("status") == "paired":
+                    import secrets
                     config.save({"host": host, "http_port": http_port, "https_port": https_port,
                                  "insecure_http": insecure, "ca_pem": ca_pem,
-                                 "resident_id": got["resident_id"], "token": got["token"], "name": name})
+                                 "resident_id": got["resident_id"], "token": got["token"], "name": name,
+                                 "player_key": secrets.token_urlsafe(24)})
                     print(f"Paired as {name!r}. Start it with: python -m resident serve")
                     return 0
     except httpx.HTTPError as e:

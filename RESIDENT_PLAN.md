@@ -28,7 +28,7 @@ predator (resident)                                   amd-halo (server)         
 │  ├─ /desktop page: wake word, avatar      │  text  │  /pdesk… (bearer)        │ cmds │  :8096  │
 │  │    ↕ http://127.0.0.1:7867 (loopback:  │ ─────► │  chat, memory, DJ        │ ───► │         │
 │  │      the mic works, no HTTPS needed)   │ HTTPS, │  KoboldCPP               │      │         │
-│  └─ Orpheus player view (always on)  ◄────┼─pinned─┼──────────────────────────┼──────┤ control │
+│  └─ music window (GStreamer) ◄── commands ┼─pinned─┼── DJ, music hub          │ ◄────┤ streams │
 │ resident service (container)              │  CA    └──────────────────────────┘      │   WS    │
 │  ├─ local: /pmedia/tts, /pmedia/stt       │                                          └─────────┘
 │  └─ everything else → amd-halo, with the  │
@@ -64,44 +64,37 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
   - Built in R1 (2026-11-23); the first draft had a `/resident/*` copy of every route.
 - **R-3 Resident → amd-halo goes over HTTPS on :7868**, with Cantinero's CA pinned by fingerprint at pairing
   (`pantheon_web/tls.py` already makes it). A plain-HTTP fallback is allowed only if the user turns it on.
-- **R-4 The built-in player is the Orpheus web player in a second WebKit view** of the same shell process:
-  - its own window, hidden by default, shown from the tray;
-  - autoplay allowed by the WebView setting, not a Chromium flag.
-  - **Spike passed on predator, 2026-11-23** (Bazzite, WebKitGTK 6.0 / 2.54, GStreamer with mpg123, flac
-    and libav): the Orpheus player booted Pyodide in 4.6 s and held its control connection. WebAssembly,
-    MediaSource (AAC and H.264), and mp3/flac/ogg `canPlayType` "maybe" were all there. From amd-halo, with
-    no click on the window:
-    - `play` of a track was acked once sound started (413 ms);
-    - `volume 60` set the element to 0.60;
-    - `duck 25` brought it to 0.15 and `unduck` back to 0.60;
-    - `seek` to 60 s landed at 62 s;
-    - `pause` paused.
-
-    So **the second WebKit view is the plan; no Chromium fallback.** One trap found: a process started
-    over SSH dies with the session, so the spike ran as `systemd-run --user` (R4's units are the real
-    answer).
-  - **Built (R3, 2026-11-23):** `desktop/player.py`, a second window of the shell. It is signed in by
-    cookie from `resident.json`, minimized after load, minimized again instead of closing, reloaded if its
-    web process dies or it loses its control connection for 90 s, and listed in the tray as "Music player".
-    - Measured minimized on predator: album 351 ms, next 21 ms, duck 16 ms.
-    - **WebKit needs both autoplay gates:** the gesture setting *and*
-      `WebsitePolicies(autoplay=ALLOW)`. With only the first, media loaded and sat paused, with no error.
-    - `python -m resident pair-orpheus` pairs it with Orpheus as a player (approved there once), and
-      tells Cantinero its id (`PUT /resident/self`, repeated by the service on every start).
-- **R-5 The resident pairs with Orpheus as a `player`** (the Orpheus admin approves the code once). It then
-  signs its player view in by setting the token as the `orpheus_session` cookie, as the Phase 5
-  end-to-end test did. So the resident knows its player's exact device id, sends it to amd-halo
-  (`PUT /resident/self`), and the DJ targets it with no name matching.
-- **R-6 DJ targeting:**
-  - a voice request from a resident plays on its own player;
-  - otherwise a player named in the request;
-  - otherwise the user's **default player** (web chat Settings → Music, from Orpheus's device list,
-    stored in `media/orpheus.json`);
-  - otherwise the only one online;
+- **R-4 The player is Cantinero's own, built for an assistant to drive** (user, 2026-11-23, replacing
+  the Orpheus web player in a WebKit view).
+  - **Cantinero commands it directly.** Orpheus is only the library and the stream source; Orpheus's
+    Phase 5 command relay is not used by it.
+  - **A small window of its own** on the speaker machine: cover, title, artist and album, a seek bar,
+    previous / play-pause / next, volume, and the queue. It is built for glancing at, not browsing.
+  - **Native:** GStreamer `playbin3` in the shell's process (GTK4). Every format the machine decodes
+    plays direct, so there are no transcode sessions for music.
+  - **The superseded first build** (#45, the Orpheus web player in a second WebKit view) proved WebKit
+    plays Orpheus streams from a remote command (album 351 ms, duck 16 ms, minimized). Its lesson, kept
+    for any WebKit media: both autoplay gates (the gesture setting and
+    `WebsitePolicies(autoplay=ALLOW)`) must be open.
+- **R-5 Streams come from Orpheus to the resident as its own `player` device.**
+  `python -m resident pair-orpheus` pairs once (approved on the Orpheus server). The resident reports a
+  GStreamer capability set (`engine: gstreamer`) and asks `POST /items/{id}/playback` for each track's
+  URL, so play counts and progress land on the right device and profile.
+- **R-6 DJ targeting:** the players are the user's **residents**.
+  - a voice request from a resident plays on that resident;
+  - otherwise a resident named in the request;
+  - otherwise the **default resident** (Settings → Music);
+  - otherwise the only one connected;
   - otherwise she asks.
-- **R-7 Ducking stays on amd-halo.** The resident's page posts `music/duck`, which the resident forwards, and
-  amd-halo sends `duck`/`unduck` to that resident's player. The Orpheus controller token never leaves
-  amd-halo.
+- **R-7 The command path is amd-halo → resident → player.**
+  - Each resident holds one WebSocket to amd-halo (`/resident/connect`, bearer token, pinned TLS,
+    reconnect 1 s → 30 s). Commands go down it with ids and come back as acks; state comes up it.
+  - amd-halo's DJ expands what to play (album → tracks, artist → every album, playlist → its entries)
+    through Orpheus's ordinary API and sends the resident a queue of items with titles, artists, albums
+    and artwork ids.
+  - The resident service passes commands to the shell's player over a loopback WebSocket.
+  - **Ducking never leaves the machine:** the resident's own page tells the resident service, which
+    ducks its player directly.
 - **R-8 One image, two roles.** The resident runs the same `companion-assistant` image with
   `PANTHEON_ROLE=resident` (entrypoint `resident/service.py`), which already has Kokoro, Piper and Whisper
   baked in. No KoboldCPP and no library on the resident; its own state is
@@ -121,8 +114,16 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
    - `python -m resident pair <server>`, with CA pinning.
 
    Tests against a fake amd-halo. Runs on amd-halo itself for development (loopback to its own server).
-3. ✅ **R3 — the built-in player** (#39, built 2026-11-23). The WebKit spike (R-4), then a second view in the shell: pairing with
-   Orpheus as a player, the cookie, `PUT /resident/self`, and the tray's Show/Hide player.
+3. **R3 — Cantinero's own player** (#39). Revised 2026-11-23 (R-4 to R-7):
+   - amd-halo's resident hub and DJ retargeting;
+   - the resident's relay and local ducking;
+   - the native player window in the shell;
+   - `pair-orpheus` and the capability report.
+
+   ✅ Built 2026-11-23. The player was verified on predator against a stand-in resident: an album
+   streamed from Orpheus; play, volume, duck/unduck, next, seek, previous, pause, resume and stop were
+   all acked; it reconnected by itself; an unknown command was refused. The full chain (amd-halo → the
+   resident service → the player) is R4's install and R5's acceptance.
 4. **R4 — install** (#40). `resident/install.sh`: build or pull the image, a systemd user unit for the
    service container and for the shell, both pairings walked through, and an uninstall.
 5. **R5 — acceptance on predator** (#41):

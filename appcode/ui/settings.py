@@ -202,11 +202,13 @@ class SettingsView:
             return
         rows = []
         for res in r.get("residents") or []:
-            player = res.get("orpheus_player_name") or ("its player" if res.get("orpheus_player_id") else "no player yet")
+            on = "on" if res.get("online") else "off"
+            music = "" if res.get("orpheus_player_id") else " · no music yet"
             seen = (res.get("last_seen") or "never")[:16].replace("T", " ")
             rows.append(
                 f'<div class="pt-urow"><i class="mdi mdi-speaker"></i><b>{esc(res["name"])}</b>'
-                f'<span class="pt-dim">{esc(player)} · last seen {esc(seen)}</span><span class="pt-flex"></span>'
+                f'<span class="pt-tag">{on}</span>'
+                f'<span class="pt-dim">last seen {esc(seen)}{music}</span><span class="pt-flex"></span>'
                 f'<button class="pt-btn small" data-res-rename="{esc(res["id"])}" data-name="{esc(res["name"])}" type="button">Rename</button>'
                 f'<button class="pt-btn small danger" data-res-revoke="{esc(res["id"])}" data-name="{esc(res["name"])}" type="button">Remove</button>'
                 '</div>')

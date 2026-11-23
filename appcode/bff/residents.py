@@ -29,7 +29,9 @@ class Residents:
         cur = self._cur()
         if cur is None:
             return SIGNED_OUT
-        return {"ok": True, "residents": residents.list_for(cur.user.id),
+        from services.music_hub import HUB
+
+        return {"ok": True, "residents": [dict(r, online=HUB.online(r["id"])) for r in residents.list_for(cur.user.id)],
                 "waiting": len(residents.pending_codes())}
 
     async def approve(self, code: str) -> dict:
@@ -66,7 +68,7 @@ class Residents:
         cur = self._cur()
         if cur is None:
             return SIGNED_OUT
-        return {"ok": True, **await media.players(cur.cards.parent)}
+        return {"ok": True, **await media.players(cur.user.id, cur.cards.parent)}
 
     async def set_default_player(self, player_id: str, name: str = "") -> dict:
         from services.skills import media
