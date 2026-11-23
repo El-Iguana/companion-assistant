@@ -65,7 +65,13 @@ class Studio:
             "voices": await asyncio.to_thread(tts.voices),
             "vrms": await self._vrms(),
             "menu": self._menu(),
+            "vrm_max_bytes": self._vrm_max(),
         }
+
+    @staticmethod
+    def _vrm_max() -> int:
+        from services import vrm
+        return vrm.MAX_BYTES
 
     @staticmethod
     def _menu() -> list:

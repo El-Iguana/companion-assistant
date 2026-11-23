@@ -402,7 +402,14 @@ class StudioView:
             return
         f = inp.files.item(0)
         box = by_id("st-vrm-info")
-        box.textContent = f"Importing {f.name}… (the model is audited before it is kept)"
+        limit = int(self.data.get("vrm_max_bytes") or 0)
+        if limit and int(f.size) > limit:
+            # Said here, before a large file is uploaded only to be refused.
+            box.innerHTML = (f'<span class="pt-bad">{esc(f.name)} is {int(f.size) / 1048576:.0f} MB; '
+                             f'models can be up to {limit // 1048576} MB.</span>')
+            inp.value = ""
+            return
+        box.textContent = f"Importing {f.name} ({int(f.size) / 1048576:.0f} MB)… the model is audited before it is kept"
         fd = js.FormData.new()
         fd.append("file", f)
         r = await self._post_form("/pmedia/vrm", fd)
@@ -452,6 +459,9 @@ class StudioView:
         except Exception as exc:  # noqa: BLE001
             return {"_error": str(exc)}
         if not resp.ok:
+            if int(resp.status) == 413:
+                limit = int(self.data.get("vrm_max_bytes") or 0) // 1048576
+                return {"_error": "the file is too large" + (f" (the limit is {limit} MB)" if limit else "")}
             return {"_error": body.get("detail") or f"HTTP {resp.status}"}
         return body
 
