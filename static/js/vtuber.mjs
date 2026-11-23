@@ -640,33 +640,58 @@ function updateGesture(vrm, dt) {
 // which is how these numbers were picked.
 const ARM_BONES = ["UpperArm", "LowerArm", "Hand"];
 const ARM_CHILD = { UpperArm: "LowerArm", LowerArm: "Hand", Hand: "MiddleProximal" };
+
+// Finger curl. A pose's `curl: [fingers, thumb]` (0 = straight, 1 = a loose fist) bends
+// every joint toward the palm. Which way that is needs no per-model knowledge: the
+// normalized rig's reference pose is a T-pose with the palms DOWN, so in every hand the
+// palm side is local -Y, and each joint turns about (its own direction x palm); the thumb
+// aims between the palm and the little finger, so it closes across rather than down. Degrees
+// at curl 1, per joint, base to tip; three-vrm names VRM 0.x thumbs the VRM 1.0 way.
+const FINGERS = {
+  Thumb: ["Metacarpal", "Proximal", "Distal"],
+  Index: ["Proximal", "Intermediate", "Distal"], Middle: ["Proximal", "Intermediate", "Distal"],
+  Ring: ["Proximal", "Intermediate", "Distal"], Little: ["Proximal", "Intermediate", "Distal"],
+};
+const CURL_DEG = { finger: [70, 95, 60], thumb: [12, 35, 45] };
+const REST_CURL = [0.18, 0.1];          // a relaxed hand is never dead straight
+const PALM = new THREE.Vector3(0, -1, 0);
 const POSES = {
   rest: null,                                   // the rest pose itself
   // Forearms stacked (the right one higher and nearer the chest), hands tucked back
   // toward the opposite upper arm rather than sticking out past it.
   foldedArms: {
-    L: { UpperArm: [0.3, -0.85, 0.42], LowerArm: [-0.85, 0.12, 0.45], Hand: [-0.2, 0.25, -0.9] },
-    R: { UpperArm: [0.3, -0.85, 0.36], LowerArm: [-0.85, 0.28, 0.3], Hand: [-0.2, 0.25, -0.9] },
+    L: { UpperArm: [0.3, -0.85, 0.42], LowerArm: [-0.85, 0.12, 0.45], Hand: [-0.2, 0.25, -0.9],
+         curl: [0.55, 0.35] },
+    R: { UpperArm: [0.3, -0.85, 0.36], LowerArm: [-0.85, 0.28, 0.3], Hand: [-0.2, 0.25, -0.9],
+         curl: [0.55, 0.35] },
   },
   handOnHipL: {
-    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
   },
   handOnHipR: {
-    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
   },
   handsOnHips: {
-    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
-    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6] },
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
   },
   // Hands folded low in front. Forearms forward enough to clear the body.
   handsClasped: {
-    L: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35] },
-    R: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35] },
+    L: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35],
+         curl: [0.4, 0.25] },
+    R: { UpperArm: [0.14, -0.95, 0.24], LowerArm: [-0.45, -0.65, 0.6], Hand: [-0.6, -0.7, 0.35],
+         curl: [0.4, 0.25] },
   },
   // Right hand to the chin, its elbow resting on the left forearm across the waist.
   thinking: {
-    L: { UpperArm: [0.2, -0.88, 0.4], LowerArm: [-0.85, 0.1, 0.5], Hand: [-0.3, 0.3, -0.9] },
-    R: { UpperArm: [0.05, -0.85, 0.52], LowerArm: [-0.28, 0.82, 0.42], Hand: [-0.35, 0.5, -0.75] },
+    L: { UpperArm: [0.2, -0.88, 0.4], LowerArm: [-0.85, 0.1, 0.5], Hand: [-0.3, 0.3, -0.9],
+         curl: [0.45, 0.3] },
+    R: { UpperArm: [0.05, -0.85, 0.52], LowerArm: [-0.28, 0.82, 0.42], Hand: [-0.35, 0.5, -0.75],
+         curl: [0.7, 0.4] },
   },
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
@@ -694,7 +719,7 @@ const armPose = { name: "rest", forced: "", from: null, to: null, t: 1, hold: 4,
 function initArms(vrm) {
   const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
   const hips = bone("hips");
-  const arms = { bones: {}, rest: {}, child: {}, parentRel: {}, frame: null };
+  const arms = { bones: {}, rest: {}, child: {}, curl: {}, parentRel: {}, frame: null };
   if (!hips) { idle.arms = null; return; }
   vrm.scene.updateWorldMatrix(true, true);
   const toHips = hips.getWorldQuaternion(new THREE.Quaternion()).invert();
@@ -718,6 +743,27 @@ function initArms(vrm) {
       arms.rest[side + part] = node.quaternion.clone();
       const c = bone(pre + ARM_CHILD[part]);
       if (c && c.position.lengthSq() > 1e-8) arms.child[side + part] = c.position.clone().normalize();
+    }
+    // A thumb closes across the palm, toward the little finger, not just down into it.
+    const tb = bone(pre + "ThumbMetacarpal"), lb = bone(pre + "LittleProximal");
+    const across = tb && lb ? lb.position.clone().sub(tb.position).normalize() : new THREE.Vector3();
+    const thumbBend = PALM.clone().add(across.multiplyScalar(0.8)).normalize();
+    for (const [finger, segs] of Object.entries(FINGERS)) {
+      segs.forEach((seg, i) => {
+        const node = bone(pre + finger + seg);
+        if (!node) return;
+        // The joint's own direction: toward the next joint, else from the last one.
+        const next = segs[i + 1] && bone(pre + finger + segs[i + 1]);
+        const dir = (next && next.position.lengthSq() > 1e-8 ? next.position : node.position).clone();
+        if (dir.lengthSq() < 1e-8) return;
+        const axis = dir.normalize().cross(finger === "Thumb" ? thumbBend : PALM);
+        if (axis.lengthSq() < 1e-8) return;
+        const key = side + finger + seg;
+        arms.bones[key] = node;
+        arms.rest[key] = node.quaternion.clone();
+        arms.curl[key] = { axis: axis.normalize(), deg: CURL_DEG[finger === "Thumb" ? "thumb" : "finger"][i],
+                           thumb: finger === "Thumb" };
+      });
     }
   }
   idle.arms = arms;
@@ -753,6 +799,13 @@ function targetArms(name) {
       }
       out[key] = q;
       parent = parent.multiply(q);
+    }
+    const [fc, tc] = (sideDef && sideDef.curl) || REST_CURL;
+    for (const key of Object.keys(a.curl)) {
+      if (key[0] !== side) continue;
+      const c = a.curl[key], amount = c.thumb ? tc : fc;
+      out[key] = a.rest[key].clone().multiply(
+        new THREE.Quaternion().setFromAxisAngle(c.axis, (c.deg * amount) * Math.PI / 180));
     }
   }
   return out;

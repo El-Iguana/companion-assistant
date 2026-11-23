@@ -656,8 +656,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   re-posing while she talks; an emotion beat can ask for a fitting one (`POSE_FOR`: anger → folded
   arms, thoughtful → thinking, pride → hands on hips…, 20 s cooldown). `/static/avatar-test.html`
   has a pose picker and a turn slider (`stats.pose`, `stats.turn`); `window.__avatarPoses` is
-  editable live. Picked against screenshots of both models, front and side. Fingers stay at rest
-  (no curl yet). ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  editable live. Picked against screenshots of both models, front and side. **Fingers curl** with
+  the pose (`curl: [fingers, thumb]`, 0 straight to 1 a loose fist; rest keeps a slight 0.18): the
+  normalized rig's reference pose has the palms down, so every hand's palm side is local −Y and
+  each joint turns about (its direction × palm); the thumb aims between the palm and the little
+  finger so it closes across. Checked in close-ups on both models. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone
