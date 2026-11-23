@@ -64,10 +64,10 @@ def test_fast_lane_plays_a_clear_match_without_the_model(tmp_path, monkeypatch):
         seen.append(query)
         return await real(base, token, query, kinds, limit)
     monkeypatch.setattr(om, "resolve", resolve)
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.88)})
+    asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.88)})
     said = asyncio.run(media.fast_play(_ctx(tmp_path), "Mira, can you play some Sigur Ros?", "Mira"))
     assert said == "Playing ( ) by Sigur Rós on Predator." and o.sent[0][1]["type"] == "play"
-    assert seen == ["play some Sigur Ros"]                           # her name and "can you" gone
+    assert seen == asked == ["play some Sigur Ros"]            # her name and "can you" gone, for both
 
 
 @pytest.mark.parametrize("intent,ambiguous", [(("play_music", 0.5), False), (("other", 0.97), False),
