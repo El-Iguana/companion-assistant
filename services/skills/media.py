@@ -19,7 +19,14 @@ from datetime import datetime, timezone
 from services.skills import SkillContext, Skill, Tool, error, register
 from services.skills import orpheus_media as om
 
-KINDS = ["artist", "album", "track", "playlist"]
+# Music only: Orpheus also holds films and shows, and an unrestricted search for a band it
+# doesn't have came back with movies ("sigur ros" -> Shazam!). Playlists join when Orpheus
+# Phase 5 adds them to resolve; today the server refuses the kind (400).
+KINDS = ["artist", "album", "track"]
+# Below this a candidate only sounds a little alike ("sigur ros" -> "Sugar Mama", 0.34;
+# "tom sawyer by rush" -> Tom Petty, 0.42), while real hits scored 0.54-1.0 on the live
+# library (2026-11-23). Under it she says it isn't there rather than offer a lookalike.
+MIN_SCORE = 0.5
 
 
 async def _connect(ctx: SkillContext, args: dict) -> dict:
@@ -59,15 +66,19 @@ async def _find(ctx: SkillContext, args: dict) -> dict:
     if not om.paired(state):
         return error("NOT_PAIRED", "Not connected to the music server yet.")
     try:
-        out = await om.resolve(state["url"], state["token"], args["query"], args.get("kinds"))
+        out = await om.resolve(state["url"], state["token"], args["query"], args.get("kinds") or KINDS)
     except om.OrpheusError as e:
         return error(e.code, str(e))
+    found = out.get("candidates") or []
+    strong = [c for c in found if float(c.get("score") or 0) >= MIN_SCORE
+              and c.get("kind") in KINDS]
     cands = [{"id": c.get("item_id"), "kind": c.get("kind"), "name": c.get("display") or c.get("title"),
-              "playable": c.get("playable", True)} for c in (out.get("candidates") or [])[:5]]
+              "playable": c.get("playable", True)} for c in strong[:5]]
     if not cands:
-        return error("MEDIA_NOT_FOUND", f"Nothing in the library matches {args['query']!r}.")
+        return error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {args['query']!r}.")
     res = {"ok": True, "candidates": cands, "ambiguous": bool(out.get("needs_disambiguation"))}
-    if out.get("disambiguation_prompt"):
+    # The server's own question names its candidates; ask it only if they all survived.
+    if out.get("disambiguation_prompt") and len(strong) == len(found):
         res["ask"] = out["disambiguation_prompt"]
     res["can_play"] = False                        # until Orpheus Phase 5: say so, don't pretend
     return res

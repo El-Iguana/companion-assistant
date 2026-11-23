@@ -210,8 +210,9 @@ def test_find_returns_candidates_and_the_servers_question(tmp_path, monkeypatch)
 
     async def resolve(base, token, query, kinds, limit=5):
         assert (base, token, query) == ("http://o", "t", "sigur ros")
-        return {"candidates": [{"item_id": 9042, "kind": "album", "display": "( ) — Sigur Rós (2002)"},
-                               {"item_id": 9050, "kind": "album", "display": "Ágætis byrjun — Sigur Rós (1999)"}],
+        assert kinds == ["artist", "album", "track"]                   # music only by default
+        return {"candidates": [{"item_id": 9042, "kind": "album", "display": "( ) — Sigur Rós (2002)", "score": 0.83},
+                               {"item_id": 9050, "kind": "album", "display": "Ágætis byrjun — Sigur Rós (1999)", "score": 0.8}],
                 "needs_disambiguation": True, "disambiguation_prompt": "The album ( ), or Ágætis byrjun?"}
     monkeypatch.setattr(om, "resolve", resolve)
     out = asyncio.run(media._find(_ctx(tmp_path), {"query": "sigur ros"}))
@@ -226,3 +227,16 @@ def test_discovery_refuses_a_wide_or_public_network(monkeypatch):
         with pytest.raises(om.OrpheusError) as e:
             asyncio.run(om.discover())
         assert e.value.code == "NOT_CONFIGURED"
+
+
+def test_find_drops_lookalikes_and_never_offers_a_film(tmp_path, monkeypatch):
+    om.save(tmp_path, {"url": "http://o", "device_id": "d", "token": "t"})
+
+    async def resolve(base, token, query, kinds, limit=5):
+        # What the live library answered for a band it doesn't have.
+        return {"candidates": [{"item_id": 1, "kind": "track", "display": "Sugar Mama — John Lee Hooker", "score": 0.34},
+                               {"item_id": 2, "kind": "movie", "display": "Shazam! Fury of the Gods", "score": 0.61}],
+                "needs_disambiguation": True, "disambiguation_prompt": "Sugar Mama, or Shazam?"}
+    monkeypatch.setattr(om, "resolve", resolve)
+    out = asyncio.run(media._find(_ctx(tmp_path), {"query": "sigur ros"}))
+    assert out["ok"] is False and out["error"] == "MEDIA_NOT_FOUND"
