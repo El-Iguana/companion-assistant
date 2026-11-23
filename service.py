@@ -14,8 +14,10 @@ so it answers on every interface at ``http://<host>:7867/``. pytincture's
 ``allow_development_auth_origin`` mode does exactly that (origin taken from the request,
 non-``Secure`` cookies, no host list) but refuses any client that isn't loopback, so
 ``LanAsLoopback`` tells it every client is. ``localhost`` is redirected to ``127.0.0.1``.
-Browsers allow the microphone only on ``localhost``/``127.0.0.1`` or HTTPS, so voice input
-works on this computer, not from other devices over plain HTTP.
+Browsers allow the microphone only on ``localhost``/``127.0.0.1`` or HTTPS, so for voice
+from other devices the same app is also served over **HTTPS** on ``PANTHEON_HTTPS_PORT``,
+with a certificate from Cantinero's own name-constrained local CA (``pantheon_web/tls.py``).
+Each device trusts that CA once; ``/ca`` (public, plain HTTP) hands it out with the steps.
 
 ``main.app`` (the old FastAPI app with its ``/api`` routes) is no longer served; it remains
 the home of the handlers and is what the unit tests exercise.
@@ -27,6 +29,8 @@ Environment:
 | ``PANTHEON_PORT`` | 7867 | listen port, and the port in the browser's address — publish it on the same number |
 | ``PANTHEON_BIND`` | 0.0.0.0 | listen address |
 | ``PANTHEON_DATA_DIR`` | ./data | a throwaway library for dev/test |
+| ``PANTHEON_HTTPS_PORT`` | 0 (off) | HTTPS listener for other devices' microphones; ``run-podman.sh`` sets 7868 |
+| ``PANTHEON_TLS_NAMES`` | (none) | this computer's names and LAN addresses for the certificate, space separated |
 """
 from __future__ import annotations
 
@@ -58,6 +62,8 @@ APPLICATION = "pantheon"
 PORT = int(os.environ.get("PANTHEON_PORT", "7867"))
 BIND = os.environ.get("PANTHEON_BIND", "0.0.0.0")
 ORIGIN = f"http://127.0.0.1:{PORT}"   # what the startup line prints; any host name works
+HTTPS_PORT = int(os.environ.get("PANTHEON_HTTPS_PORT", "0") or 0)   # run-podman.sh sets 7868
+TLS_NAMES = os.environ.get("PANTHEON_TLS_NAMES", "").split()
 
 
 def _session_secret() -> str:
@@ -135,7 +141,8 @@ class LocalhostRedirect:
             if name.lower() == "localhost":
                 path = scope.get("raw_path") or scope.get("path", "/").encode()
                 qs = scope.get("query_string") or b""
-                target = f"http://127.0.0.1:{port or PORT}{path.decode('latin-1')}" + (
+                scheme = scope.get("scheme") or "http"      # an HTTPS visit stays HTTPS
+                target = f"{scheme}://127.0.0.1:{port or PORT}{path.decode('latin-1')}" + (
                     f"?{qs.decode('latin-1')}" if qs else "")
                 await send({"type": "http.response.start", "status": 307,
                             "headers": [(b"location", target.encode("latin-1")),
@@ -170,6 +177,14 @@ def build_web_app():
     # read /desktop as an app called "desktop" and send it to /desktop/login.
     before = len(application.router.routes)
     application.include_router(desktop_router)
+    added = application.router.routes[before:]
+    del application.router.routes[before:]
+    application.router.routes[0:0] = added
+
+    from pantheon_web.tls_page import router as tls_router
+
+    before = len(application.router.routes)
+    application.include_router(tls_router)              # /ca, /ca.crt: public, before login
     added = application.router.routes[before:]
     del application.router.routes[before:]
     application.router.routes[0:0] = added
@@ -220,4 +235,27 @@ if __name__ == "__main__":
     import uvicorn
 
     print(f"Cantinero: {ORIGIN}/", flush=True)
-    uvicorn.run(app, host=BIND, port=PORT, log_level="info")
+    if not HTTPS_PORT:
+        uvicorn.run(app, host=BIND, port=PORT, log_level="info")
+    else:
+        # The same app over HTTPS too, for other devices' microphones. One process, two
+        # listeners; only the first runs the app's startup/shutdown (lifespan).
+        import asyncio
+
+        from pantheon_web import tls
+
+        cert, key = tls.ensure(main.DATA, TLS_NAMES)
+        print(f"Cantinero over HTTPS on port {HTTPS_PORT}"
+              + ("" if TLS_NAMES else " (localhost only: set PANTHEON_TLS_NAMES)")
+              + f"; set up a device at http://<this computer>:{PORT}/ca", flush=True)
+        servers = [
+            uvicorn.Server(uvicorn.Config(app, host=BIND, port=PORT, log_level="info")),
+            uvicorn.Server(uvicorn.Config(app, host=BIND, port=HTTPS_PORT, log_level="info",
+                                          lifespan="off", ssl_certfile=str(cert),
+                                          ssl_keyfile=str(key))),
+        ]
+
+        async def serve_both():
+            await asyncio.gather(*(s.serve() for s in servers))
+
+        asyncio.run(serve_both())

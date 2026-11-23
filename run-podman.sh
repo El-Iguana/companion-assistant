@@ -11,6 +11,15 @@ NETWORK="ai-net"
 # Loopback only: the login (pytincture over plain HTTP) refuses anything else. Container and
 # host use the same number because it is also the page's origin.
 PORT="7867"
+# HTTPS for other devices' microphones (#7): browsers allow the mic only over https:// or on
+# this computer's own address. The certificate covers this computer's name, NAME.local and its
+# private IPv4 addresses (pantheon_web/tls.py drops anything else); devices trust Cantinero's
+# local CA once, from http://NAME.local:7867/ca. HTTPS_PORT=0 turns it off.
+HTTPS_PORT="${HTTPS_PORT:-7868}"
+HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+TLS_NAMES="$HOST_SHORT $HOST_SHORT.local $(hostname -I 2>/dev/null)"
+HTTPS_ARG=()
+[[ "$HTTPS_PORT" != "0" ]] && HTTPS_ARG=(-p "${HTTPS_PORT}:${HTTPS_PORT}")
 
 REBUILD=0
 while [[ $# -gt 0 ]]; do
@@ -95,7 +104,10 @@ podman run -d \
   --restart unless-stopped \
   $NET_ARG \
   -p "${PORT}:${PORT}" \
+  "${HTTPS_ARG[@]}" \
   -e "PANTHEON_PORT=${PORT}" \
+  -e "PANTHEON_HTTPS_PORT=${HTTPS_PORT}" \
+  -e "PANTHEON_TLS_NAMES=${TLS_NAMES}" \
   -e "KOBOLD_URL=${KOBOLD_URL}" \
   -e "COMFYUI_URL=${COMFYUI_URL}" \
   -e "TZ=${TZ_VAL}" \
@@ -107,5 +119,9 @@ podman run -d \
 echo ""
 echo "✓  Cantinero is running."
 echo "   Open: http://127.0.0.1:${PORT}/   (other devices: http://$(hostname -s).local:${PORT}/)"
+if [[ "${HTTPS_PORT}" != "0" ]]; then
+  echo "   Voice on other devices: set each up once at http://$(hostname -s).local:${PORT}/ca,"
+  echo "   then use https://$(hostname -s).local:${HTTPS_PORT}/"
+fi
 echo "   Logs: podman logs -f $CONTAINER"
 echo "   Stop: podman stop $CONTAINER"

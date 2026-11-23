@@ -41,9 +41,9 @@
   function micBlocked() {
     if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return "";
     const port = location.port ? ":" + location.port : "";
-    return "The microphone is blocked at this address. Browsers allow it only over https:// or at " +
-           "the computer's own address: on the computer running Cantinero, open http://127.0.0.1" +
-           port + "/. Other devices can't use the microphone yet.";
+    return "The microphone is blocked at this address: browsers allow it only over https:// or at " +
+           "the computer's own address. On the computer running Cantinero, open http://127.0.0.1" +
+           port + "/. On any other device, set up HTTPS once: " + location.origin + "/ca";
   }
   const micError = (detail) => micBlocked() || ("Microphone unavailable: " + (detail || "permission denied"));
 

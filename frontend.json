@@ -6,5 +6,7 @@
   "health": "http://127.0.0.1:7867/api/health",
   "container": "companion-assistant",
   "start": "run-podman.sh",
-  "icon": "mdi-account-voice"
+  "icon": "mdi-account-voice",
+  "https_port": 7868,
+  "https_setup": "/ca"
 }
