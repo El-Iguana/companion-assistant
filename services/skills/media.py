@@ -402,12 +402,14 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     st = _paired_state(ctx)
     if not st or len(text) > 160:
         return None
-    got = await fortuna.choose(text, "What does the user want the assistant to do?", _LANE_INTENTS)
-    if got is None or got[0] != "play_music" or got[1] < LANE_MIN:
-        return None
     head = re.compile(_HEAD.pattern.replace("{name}", re.escape(name) if name else "(?!)"), re.I)
     query = head.sub("", text).strip().rstrip("?.!")
     if not query:
+        return None
+    # Fortuna is asked about the request itself: "Mira, can you play some Dave Matthews
+    # Band?" scored 0.77, under the bar, where "play some Dave Matthews Band" scored 0.87.
+    got = await fortuna.choose(query, "What does the user want the assistant to do?", _LANE_INTENTS)
+    if got is None or got[0] != "play_music" or got[1] < LANE_MIN:
         return None
     try:
         cands, how = await _search(st, query, None)
