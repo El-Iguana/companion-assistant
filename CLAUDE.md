@@ -646,7 +646,12 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   is what sent the arms wandering, and shoulders must stay in the rest set.
   **All six channels of "fully animated" are now live.** ✅ **3e arm poses** (2026-11-23):
   held poses so a quiet avatar doesn't stand with her arms hanging: `foldedArms`, `handOnHipL`/`R`,
-  `handsOnHips`, `handsClasped`, `thinking` (hand to chin). `POSES` in `vtuber.mjs` are
+  `handsOnHips`, `handsClasped`, `thinking` (hand to chin), `handBehindHead` (sheepish: embarrassment,
+  nervousness), `bothHandsBehindHead` (relief, and now and then at random), and a **`wave`**. The
+  wave is a moving pose (`osc` swings the forearm, `brief` ends it after 2.6 s): hello when a model
+  appears and when the wake word opens a conversation (`avatar:wave` from `voice.js`), goodbye when
+  it ends (`pvoice:asleep`, not for "mic off"); 6 s cooldown, and a beat arriving mid-wave waits
+  for it to finish. `POSES` in `vtuber.mjs` are
   **directions in the body's frame** (`[out, up, forward]` per segment, the same numbers for both
   arms), and `targetArms` turns each bone so its child points that way on *this* model. Euler
   angles were tried first and failed: the two test models (`baseline.vrm`, armSign −1, and a VRoid

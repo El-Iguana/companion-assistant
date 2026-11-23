@@ -693,12 +693,35 @@ const POSES = {
     R: { UpperArm: [0.05, -0.85, 0.52], LowerArm: [-0.28, 0.82, 0.42], Hand: [-0.35, 0.5, -0.75],
          curl: [0.7, 0.4] },
   },
+  // A sheepish scratch: one hand behind the head, elbow out. The forearm runs across
+  // more than back, or from the side the hand sticks out behind the head.
+  handBehindHead: {
+    R: { UpperArm: [0.7, 0.6, 0.05], LowerArm: [-0.8, 0.35, -0.4], Hand: [-0.85, -0.15, -0.3],
+         curl: [0.25, 0.15] },
+  },
+  // Leaning back, both hands behind the head.
+  bothHandsBehindHead: {
+    L: { UpperArm: [0.7, 0.6, 0.05], LowerArm: [-0.8, 0.35, -0.4], Hand: [-0.85, -0.15, -0.3],
+         curl: [0.25, 0.15] },
+    R: { UpperArm: [0.7, 0.6, 0.05], LowerArm: [-0.8, 0.35, -0.4], Hand: [-0.85, -0.15, -0.3],
+         curl: [0.25, 0.15] },
+  },
+  // Hello / goodbye: a moving pose. `osc` swings one segment side to side about the
+  // pose's direction (delta in the same [out, up, forward] terms, `hz` per second), and
+  // `brief` makes it a moment rather than a pose: back to rest after that many seconds.
+  wave: {
+    // Elbow low and forward, hand beside the face: a wider wave leaves a bust frame.
+    R: { UpperArm: [0.4, -0.45, 0.55], LowerArm: [-0.05, 0.95, 0.15], curl: [0.08, 0.05] },
+    osc: { side: "R", part: "LowerArm", delta: [0.25, 0, 0], hz: 1.7 },
+    brief: 2.6,
+  },
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
 
 // How often each is picked when nothing asks for one. Rest stays the most common:
 // a pose is punctuation for a quiet moment, and constant re-posing is a fidget.
 const POSE_WEIGHTS = { rest: 4, foldedArms: 2, handOnHipL: 1.2, handOnHipR: 1.2,
+                       handBehindHead: 0.5, bothHandsBehindHead: 0.5,
                        handsClasped: 2, handsOnHips: 0.6, thinking: 1 };
 const POSE_FOR = {
   angry: "foldedArms", anger: "foldedArms", annoyance: "foldedArms",
@@ -706,15 +729,15 @@ const POSE_FOR = {
   thoughtful: "thinking", curiosity: "thinking", confusion: "thinking",
   realization: "thinking",
   pride: "handsOnHips", excitement: "handOnHipR", amusement: "handOnHipL",
-  caring: "handsClasped", nervousness: "handsClasped", embarrassed: "handsClasped",
-  embarrassment: "handsClasped", gratitude: "handsClasped",
+  caring: "handsClasped", nervousness: "handBehindHead", embarrassed: "handBehindHead",
+  embarrassment: "handBehindHead", gratitude: "handsClasped", relief: "bothHandsBehindHead",
 };
 const POSE_EASE_S = 0.9;                 // seconds to move into or out of a pose
 const POSE_HOLD = [7, 16];               // a pose is held this long (s), at random
 const POSE_REST = [6, 14];               // and rest between poses this long
 
 const armPose = { name: "rest", forced: "", from: null, to: null, t: 1, hold: 4,
-                  beatCooldown: 0 };
+                  beatCooldown: 0, phase: 0, waveIn: -1, waveCooldown: 0, next: "" };
 
 function initArms(vrm) {
   const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
@@ -770,15 +793,17 @@ function initArms(vrm) {
   armPose.name = "rest"; armPose.t = 1; armPose.hold = 3 + Math.random() * 5;
   stats.armPose = "rest";
   armPose.from = snapshotArms(); armPose.to = targetArms("rest");
+  armPose.waveIn = 0.8;                          // hello, once she has settled on screen
 }
 
 // The pose's rotation for every arm bone: each segment turned so its child bone points
 // the way the pose says, worked down the chain (upper arm, then forearm, then hand) so
 // every step knows where its parent ended up.
-function targetArms(name) {
+function targetArms(name, phase = 0) {
   const a = idle && idle.arms, out = {};
   if (!a) return out;
   const { L, U, F } = a.frame, def = POSES[name];
+  const osc = def && def.osc, swing = Math.sin(phase);
   for (const side of ["L", "R"]) {
     const sideDef = def && def[side];
     const out_ = side === "L" ? 1 : -1;               // "out" is +left for the left arm
@@ -786,7 +811,9 @@ function targetArms(name) {
     for (const part of ARM_BONES) {
       const key = side + part;
       if (!a.bones[key]) continue;
-      const v = sideDef && sideDef[part];
+      let v = sideDef && sideDef[part];
+      if (v && osc && osc.side === side && osc.part === part)
+        v = v.map((x, i) => (i < 3 ? x + osc.delta[i] * swing : x));
       let q;
       if (!v || !a.child[key]) {
         q = a.rest[key].clone();
@@ -822,10 +849,19 @@ function startArmPose(name) {
   if (name === armPose.name && armPose.t >= 1) return;
   armPose.from = snapshotArms();                     // from wherever the arms are now
   armPose.to = targetArms(name);
-  armPose.name = name; armPose.t = 0;
+  armPose.name = name; armPose.t = 0; armPose.phase = 0;
   const [lo, hi] = name === "rest" ? POSE_REST : POSE_HOLD;
-  armPose.hold = lo + Math.random() * (hi - lo);
+  armPose.hold = POSES[name] && POSES[name].brief ? POSES[name].brief : lo + Math.random() * (hi - lo);
   stats.armPose = name;
+}
+
+// Hello and goodbye. Not while a pose is forced from the harness, and not twice in a
+// row (a model load and a wake word can arrive together).
+function wave() {
+  if (!idle || !idle.arms || armPose.forced || armPose.waveCooldown > 0) return;
+  armPose.waveCooldown = 6;
+  armPose.name = "";                              // restart even if already waving
+  startArmPose("wave");
 }
 
 function forceArmPose(name) {
@@ -844,23 +880,35 @@ function armPoseForBeat(label) {
   const want = POSE_FOR[String(label || "").toLowerCase()];
   if (!want || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name) return;
   armPose.beatCooldown = 20;                         // a beat may re-pose her now and then
-  startArmPose(want);
+  if (POSES[armPose.name] && POSES[armPose.name].brief) armPose.next = want;   // let a wave finish
+  else startArmPose(want);
 }
 
 function updateArms(vrm, dt) {
   const a = idle && idle.arms;
   if (!a || !armPose.to) return;
   if (armPose.beatCooldown > 0) armPose.beatCooldown -= dt;
-  armPose.t = Math.min(1, armPose.t + dt / POSE_EASE_S);
+  if (armPose.waveCooldown > 0) armPose.waveCooldown -= dt;
+  if (armPose.waveIn >= 0 && (armPose.waveIn -= dt) < 0) wave();
+  const def = POSES[armPose.name];
+  if (def && def.osc) {                           // a moving pose: re-aim every frame
+    armPose.phase += dt * Math.PI * 2 * def.osc.hz;
+    armPose.to = targetArms(armPose.name, armPose.phase);
+  }
+  armPose.t = Math.min(1, armPose.t + dt / (def && def.brief ? POSE_EASE_S * 0.6 : POSE_EASE_S));
   const k = armPose.t * armPose.t * (3 - 2 * armPose.t);         // smoothstep
   for (const key of Object.keys(a.bones)) {
     const from = armPose.from[key] || a.rest[key], to = armPose.to[key] || a.rest[key];
     a.bones[key].quaternion.slerpQuaternions(from, to, k);
   }
   if (armPose.forced || armPose.t < 1) return;
+  armPose.hold -= dt;
+  if (def && def.brief) {                         // a wave ends on time, talking or not
+    if (armPose.hold <= 0) { startArmPose(armPose.next || "rest"); armPose.next = ""; }
+    return;
+  }
   // Held long enough: move on, but not mid-sentence: re-posing while she talks reads
   // as fidgeting. A beat (above) is the exception, since it is the reply's own cue.
-  armPose.hold -= dt;
   if (armPose.hold <= 0 && speech.env < 0.05)
     startArmPose(armPose.name === "rest" ? pickArmPose() : "rest");
 }
@@ -1062,6 +1110,12 @@ export function boot() {
   });
   window.addEventListener("avatar:expr", (e) => {
     if (currentVrm) setBeat(e.detail && e.detail.label);
+  });
+  // Hello when the wake word opens a conversation (voice.js), goodbye when it ends;
+  // not when the mic is merely switched off, as with the spoken farewell.
+  window.addEventListener("avatar:wave", () => { if (currentVrm) wave(); });
+  window.addEventListener("pvoice:asleep", (e) => {
+    if (currentVrm && !(e.detail && e.detail.why === "mic off")) wave();
   });
   window.addEventListener("avatar:mood", (e) => {
     const d = e.detail || {};
