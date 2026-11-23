@@ -74,6 +74,12 @@ def strip_bare_labels(text: str, labels) -> str:
 # ---------------------------------------------------------------------------
 # Emotion classification (KoboldCPP)
 # ---------------------------------------------------------------------------
+# Fortuna's confidence below which a reply's emotion reads as neutral. On four test replies it
+# was 0.84 for a clear "thoughtful", 0.38-0.40 for clear sympathy and amusement, and 0.24
+# for a flat "Playing … on Predator."
+FORTUNA_EMOTION_MIN = 0.3
+
+
 async def classify(kobold: KoboldClient, reply: str, labels: list[str] | None = None) -> str:
     """Return one label describing the emotion of `reply`.
 
@@ -83,6 +89,14 @@ async def classify(kobold: KoboldClient, reply: str, labels: list[str] | None = 
     default = "neutral" if "neutral" in labels else labels[0]
     if not reply.strip():
         return default
+    # Fortuna first: 0.23 s against ~7 s here. Under FORTUNA_EMOTION_MIN it isn't sure, and
+    # an unsure face is a neutral one. Fortuna off or down: KoboldCPP, as before.
+    from services import fortuna
+    got = await fortuna.choose(reply[:1500], "Which emotion does the assistant's reply express?",
+                               {e: e for e in labels})
+    if got is not None:
+        label, conf = got
+        return label if conf >= FORTUNA_EMOTION_MIN else default
     options = ", ".join(labels)
     prompt = (
         "You are an emotion classifier. Read the character's reply and choose the single "

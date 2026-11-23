@@ -22,6 +22,8 @@ _data = os.environ.get("PANTHEON_DATA_DIR") or tempfile.mkdtemp(prefix="pantheon
 if Path(_data).resolve() == (ROOT / "data").resolve():
     raise pytest.UsageError("tests must not run against the real library (PANTHEON_DATA_DIR=./data)")
 os.environ["PANTHEON_DATA_DIR"] = _data
+# No test reaches a real Fortuna either; a test that wants one fakes services.fortuna.choose.
+os.environ["FORTUNA"] = "off"
 
 
 def pytest_sessionstart(session):
