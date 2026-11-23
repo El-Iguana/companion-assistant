@@ -762,6 +762,17 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   `cantinero-shell` (the avatar, the tray and the music window, in the graphical session).
   `--update` pulls and rebuilds. Predator is the first resident; its data is
   `~/.local/share/cantinero-resident/`.
+- **Fortuna** (2026-11-23, `services/fortuna.py`): ai-stack's typed-decision backend
+  (`http://fortuna:8009` on ai-net; `FORTUNA_URL`, `FORTUNA=off`). It answers "pick one of these" in
+  0.15–0.25 s, against 7–12 s for a KoboldCPP generation.
+  - **The reply's emotion:** `expressions.classify` asks Fortuna first. Under
+    `FORTUNA_EMOTION_MIN` (0.3) the face stays neutral. If Fortuna is off or down, KoboldCPP as before.
+  - **The music fast lane:** `media.fast_play`. Fortuna says `play_music` at `LANE_MIN` (0.8) or
+    more, the name and "can you" are stripped, and Orpheus returns one clear match: it plays with no
+    model turn. Anything unsure goes to her as before.
+  - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
+  - Each turn logs `[turn] <session> <s>: …` with where the time went.
+  - Next: memory decisions, after their eval (Memory Phase 7 #15).
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the

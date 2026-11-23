@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -1500,17 +1501,32 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         acc = ""
         used_skill = False
         convo = list(messages)
+        t_turn = time.monotonic()
+        timing: list[str] = []                    # one log line per turn: where the time went
         try:
+            answered = False
             if fast is not None:
                 yield _sse({"skill": {"tool": "media_control", "status": "On it…"}})
                 acc = await media_skill.fast_control(skill_ctx, fast)
+                answered = True
+                timing.append(f"fast {time.monotonic() - t_turn:.2f}s")
+            elif not req.regenerate and "dj" in (card.skills or []):
+                # "Play …" with one clear match: Fortuna + Orpheus, no model turn (~1 s).
+                t = time.monotonic()
+                lane = await media_skill.fast_play(skill_ctx, req.input_text, card.name)
+                timing.append(f"lane {time.monotonic() - t:.2f}s{'' if lane else ' (no)'}")
+                if lane:
+                    yield _sse({"skill": {"tool": "media_play", "status": "Finding the music…"}})
+                    acc, answered = lane, True
+            if answered:
                 used_skill = True
                 if "neutral" in known:
                     tagged.append("neutral")      # no classifier round-trip for "Paused."
                 yield _sse({"token": acc})
             # A turn may take several passes: the model asks for tools, they run, and it
             # answers with their results (SKILLS_PLAN.md, "Chat-flow change").
-            for _pass in range(0 if fast is not None else MAX_TOOL_ROUNDS + 1):
+            for _pass in range(0 if answered else MAX_TOOL_ROUNDS + 1):
+                t_pass = time.monotonic()
                 calls = None
                 async for tok in kobold.chat_generate_stream(convo, params):
                     if isinstance(tok, ToolCallsEvent):
@@ -1524,6 +1540,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                         continue          # never reaches the transcript or the TTS text
                     acc += tok
                     yield _sse({"token": tok})
+                timing.append(f"model {time.monotonic() - t_pass:.1f}s")
                 if not calls:
                     break
                 used_skill = True
@@ -1532,7 +1549,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                     tool = next((t for t in tools if t.name == call["name"]), None)
                     yield _sse({"skill": {"tool": call["name"],
                                           "status": (tool.status if tool else "") or "Working on it…"}})
+                    t_tool = time.monotonic()
                     results.append((call, await skills_rt.run(call, tools, skill_ctx)))
+                    timing.append(f"{call['name']} {time.monotonic() - t_tool:.2f}s")
                 # A tool that finished the job can say so itself ("Playing Rush on Predator."):
                 # no second pass, which costs ~15 s on the local model and was where she
                 # once contradicted a play that had worked.
@@ -1582,6 +1601,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                 except Exception:
                     new_expr = "neutral"
         msg.expression = new_expr or None
+        if used_skill or timing:
+            print(f"[turn] {session.id[:8]} {time.monotonic() - t_turn:.1f}s: " + ", ".join(timing), flush=True)
 
         # Update the running valence/mood (inertia): neutral holds; a clear emotion
         # advances the mood and nudges valence via EMA. Driven by the sprite label, so a

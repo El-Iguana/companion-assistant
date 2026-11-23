@@ -381,6 +381,52 @@ def fast_command(text: str) -> dict | None:
 
 _SAID = {"pause": "Paused.", "resume": "Playing.", "next": "Skipping.", "previous": "Going back."}
 
+# The fast lane for "play …": Fortuna says it's a play at this confidence or more, and Orpheus
+# finds one clear match, so it plays with no model turn (~1 s, not ~15 s). Anything less
+# sure goes to her as before, where she can ask.
+LANE_MIN = 0.8
+_LANE_INTENTS = {
+    "play_music": "start playing a song, album, artist or playlist",
+    "control_music": "pause, resume, skip, go back or change the volume of music already playing",
+    "music_question": "ask what is playing, or what music there is",
+    "other": "anything else: conversation, questions, tasks",
+}
+_HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?(?:(?:can|could|would|will) you\b[ ,]*)?"
+                   r"(?:please\b[ ,]*)?", re.I)
+
+
+async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
+    """A plain "play …" done without the model: what she says, or None to hand it to her."""
+    from services import fortuna
+
+    st = _paired_state(ctx)
+    if not st or len(text) > 160:
+        return None
+    got = await fortuna.choose(text, "What does the user want the assistant to do?", _LANE_INTENTS)
+    if got is None or got[0] != "play_music" or got[1] < LANE_MIN:
+        return None
+    head = re.compile(_HEAD.pattern.replace("{name}", re.escape(name) if name else "(?!)"), re.I)
+    query = head.sub("", text).strip().rstrip("?.!")
+    if not query:
+        return None
+    try:
+        cands, how = await _search(st, query, None)
+        if not cands or how["ambiguous"] or not cands[0].get("playable", True):
+            return None                               # she asks, or says it isn't there
+        pick = cands[0]
+        dev = await _target(ctx, st)
+        if _just_played(ctx, query, dev["id"]):
+            return "It's playing."
+        queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
+                                playlist_id="" if pick["id"].isdigit() else pick["id"])
+        if not queue:
+            return None
+        await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
+    except om.OrpheusError:
+        return None                                   # let her explain it
+    _remember_play(ctx, query, dev["id"])
+    return f"Playing {_spoken(pick['name'])} on {dev.get('name')}."
+
 
 async def fast_control(ctx: SkillContext, cmd: dict) -> str:
     """Do a fast_command; what she says back, never an exception."""
