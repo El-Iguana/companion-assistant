@@ -164,6 +164,9 @@ class CharacterCard(BaseModel):
     # stored explicitly so a character can keep a model assigned while showing
     # sprites -- switching back and forth must not throw the other away.
     avatar_mode: str = "sprite"          # "sprite" | "vrm"
+    # The figure the 3D avatar stands as: which poses she uses and how she stands in them
+    # (vtuber.mjs POSE_SETS). "" = not set, the shared set every card had before.
+    figure: str = ""                     # "" | "female" | "male"
     # Profile picture: where the card's picture comes from (cards, rail, chat header).
     # "" = automatic, the behaviour before this field: uploaded portrait, else the
     # neutral sprite. "image" = the uploaded portrait, "sprite" = one expression sprite
@@ -209,6 +212,14 @@ class CharacterCard(BaseModel):
     @classmethod
     def _speakable_voice(cls, v: str) -> str:
         return current_voice_id(v)
+
+    @field_validator("figure", mode="before")
+    @classmethod
+    def _known_figure(cls, v) -> str:
+        # Anything else (a typo in hand-edited JSON) reads as "not set" rather than
+        # failing to load the card.
+        v = str(v or "").strip().lower()
+        return v if v in ("female", "male") else ""
 
 
 # ---------------------------------------------------------------------------

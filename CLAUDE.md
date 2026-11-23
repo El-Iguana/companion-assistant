@@ -651,7 +651,14 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   wave is a moving pose (`osc` swings the forearm, `brief` ends it after 2.6 s): hello when a model
   appears and when the wake word opens a conversation (`avatar:wave` from `voice.js`), goodbye when
   it ends (`pvoice:asleep`, not for "mic off"); 6 s cooldown, and a beat arriving mid-wave waits
-  for it to finish. `POSES` in `vtuber.mjs` are
+  for it to finish. **Figure** (2026-11-23): `CharacterCard.figure` (`""` | `female` | `male`,
+  anything else reads as `""`), set in the Studio under the name, sent with the card to the avatar
+  (`avatar:card` `figure`). `POSE_SETS` picks the poses, their weights and the beat mapping per
+  figure: **female** hip poses lean (`handOnHipLLean`…: contrapposto, `body: {shift, tilt, turn,
+  arch}` moves the hips sideways and up and the spine/chest slope the shoulders back against them,
+  `bodyLean`, `LEAN`), **male** stands square (`handsOnHipsSquare`, `handsBehindBack`, no hands
+  behind the head; a beat for a pose outside the set is skipped), **not set** is the shared set
+  every card had before. Mira is seeded female. `POSES` in `vtuber.mjs` are
   **directions in the body's frame** (`[out, up, forward]` per segment, the same numbers for both
   arms), and `targetArms` turns each bone so its child points that way on *this* model. Euler
   angles were tried first and failed: the two test models (`baseline.vrm`, armSign −1, and a VRoid

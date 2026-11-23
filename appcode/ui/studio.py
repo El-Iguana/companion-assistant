@@ -186,6 +186,9 @@ class StudioView:
             + self._inp("Name", "name", c.get("name"), ph="Who are they?")
             + self._inp("Nickname", "nickname", c.get("nickname"))
             + '</div>'
+            + self._sel("Figure", "figure", [("", "Not set"), ("female", "Female"), ("male", "Male")],
+                        c.get("figure") or "",
+                        "How the 3D avatar carries herself: which poses she uses and how she stands in them.")
             + self._inp("Tagline", "creator_notes", c.get("creator_notes"),
                         "One line under their name on cards and the profile (the card's creator notes).",
                         "Noir detective who reads you instantly")

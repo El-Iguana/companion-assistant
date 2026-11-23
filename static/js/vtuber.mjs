@@ -49,6 +49,8 @@ const stats = { frames: 0, lastRender: 0,
   // Harness override: a pose name holds that pose; "" hands it back to the scheduler.
   get pose() { return armPose.forced; },
   set pose(v) { forceArmPose(String(v || "")); },
+  get figure() { return figure; },
+  set figure(v) { setFigure(v); },
   // Harness only: turn the model (degrees) to check a pose from the side.
   set turn(deg) { if (currentVrm) currentVrm.scene.rotation.y = (Number(deg) || 0) * Math.PI / 180 + (currentVrm.meta?.metaVersion === "0" ? Math.PI : 0); },
   shoulderDeg: 0,
@@ -693,6 +695,40 @@ const POSES = {
     R: { UpperArm: [0.05, -0.85, 0.52], LowerArm: [-0.28, 0.82, 0.42], Hand: [-0.35, 0.5, -0.75],
          curl: [0.7, 0.4] },
   },
+  // Standing at ease: hands together behind the back, elbows back. Mostly the male set.
+  handsBehindBack: {
+    L: { UpperArm: [0.12, -0.93, -0.25], LowerArm: [-0.88, -0.35, -0.2], Hand: [-0.85, -0.45, 0.05],
+         curl: [0.35, 0.25] },
+    R: { UpperArm: [0.12, -0.93, -0.25], LowerArm: [-0.88, -0.35, -0.2], Hand: [-0.85, -0.45, 0.05],
+         curl: [0.35, 0.25] },
+  },
+  // Male hands on hips: elbows wider, chest up, standing square.
+  handsOnHipsSquare: {
+    L: { UpperArm: [0.75, -0.62, -0.2], LowerArm: [-0.72, -0.62, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.35, 0.2] },
+    R: { UpperArm: [0.75, -0.62, -0.2], LowerArm: [-0.72, -0.62, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.35, 0.2] },
+    body: { arch: 0.04 },
+  },
+  // Female hip poses: the weight on one leg, so that hip rises and the upper body
+  // counter-tilts (contrapposto). `body` is applied to the hips and spine; see bodyLean.
+  handOnHipLLean: {
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
+    body: { shift: 0.045, tilt: 0.1, turn: 0.06, arch: 0.03 },
+  },
+  handOnHipRLean: {
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
+    body: { shift: -0.045, tilt: -0.1, turn: -0.06, arch: 0.03 },
+  },
+  handsOnHipsLean: {
+    L: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
+    R: { UpperArm: [0.6, -0.75, -0.25], LowerArm: [-0.7, -0.6, 0.1], Hand: [-0.3, -0.6, 0.6],
+         curl: [0.3, 0.15] },
+    body: { shift: -0.05, tilt: -0.11, turn: -0.05, arch: 0.05 },
+  },
   // A sheepish scratch: one hand behind the head, elbow out. The forearm runs across
   // more than back, or from the side the hand sticks out behind the head.
   handBehindHead: {
@@ -718,12 +754,11 @@ const POSES = {
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
 
-// How often each is picked when nothing asks for one. Rest stays the most common:
-// a pose is punctuation for a quiet moment, and constant re-posing is a fidget.
-const POSE_WEIGHTS = { rest: 4, foldedArms: 2, handOnHipL: 1.2, handOnHipR: 1.2,
-                       handBehindHead: 0.5, bothHandsBehindHead: 0.5,
-                       handsClasped: 2, handsOnHips: 0.6, thinking: 1 };
-const POSE_FOR = {
+// Which poses a figure uses, how often each is picked when nothing asks for one, and
+// which pose an emotion beat asks for. Rest stays the most common in every set: a pose
+// is punctuation for a quiet moment, and constant re-posing is a fidget. A figure is the
+// card's `figure` ("" = not set: the shared set every card had before figures).
+const BEAT_POSE = {
   angry: "foldedArms", anger: "foldedArms", annoyance: "foldedArms",
   disapproval: "foldedArms", disgust: "foldedArms",
   thoughtful: "thinking", curiosity: "thinking", confusion: "thinking",
@@ -732,12 +767,38 @@ const POSE_FOR = {
   caring: "handsClasped", nervousness: "handBehindHead", embarrassed: "handBehindHead",
   embarrassment: "handBehindHead", gratitude: "handsClasped", relief: "bothHandsBehindHead",
 };
+const POSE_SETS = {
+  "": {
+    weights: { rest: 4, foldedArms: 2, handOnHipL: 1.2, handOnHipR: 1.2, handsOnHips: 0.6,
+               handsClasped: 2, thinking: 1, handBehindHead: 0.5, bothHandsBehindHead: 0.5 },
+    beats: {},
+  },
+  // Hip poses lean, with the weight on one leg; the clasped and behind-the-head poses stay.
+  female: {
+    weights: { rest: 4, foldedArms: 1.5, handOnHipLLean: 1.4, handOnHipRLean: 1.4,
+               handsOnHipsLean: 0.8, handsClasped: 2, thinking: 1, handBehindHead: 0.5,
+               bothHandsBehindHead: 0.6, handsBehindBack: 0.4 },
+    beats: { pride: "handsOnHipsLean", excitement: "handOnHipRLean", amusement: "handOnHipLLean" },
+  },
+  // Square: folded arms and hands behind the back; no hands behind the head.
+  male: {
+    weights: { rest: 4, foldedArms: 2.5, handOnHipL: 0.6, handOnHipR: 0.6, handsOnHipsSquare: 1,
+               handsBehindBack: 2, thinking: 1, handsClasped: 0.5 },
+    beats: { pride: "handsOnHipsSquare", nervousness: "handsBehindBack", embarrassed: "handsBehindBack",
+             embarrassment: "handsBehindBack", relief: "handsBehindBack", caring: "handsBehindBack" },
+  },
+};
+let figure = "";                         // this model's card's figure, from avatar:card
+const poseSet = () => POSE_SETS[figure] || POSE_SETS[""];
+
 const POSE_EASE_S = 0.9;                 // seconds to move into or out of a pose
 const POSE_HOLD = [7, 16];               // a pose is held this long (s), at random
 const POSE_REST = [6, 14];               // and rest between poses this long
 
 const armPose = { name: "rest", forced: "", from: null, to: null, t: 1, hold: 4,
-                  beatCooldown: 0, phase: 0, waveIn: -1, waveCooldown: 0, next: "" };
+                  beatCooldown: 0, phase: 0, waveIn: -1, waveCooldown: 0, next: "",
+                  body: { tilt: 0, turn: 0, arch: 0, shift: 0 }, bodyFrom: null, bodyTo: null };
+const NO_LEAN = { tilt: 0, turn: 0, arch: 0, shift: 0 };
 
 function initArms(vrm) {
   const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
@@ -789,6 +850,21 @@ function initArms(vrm) {
       });
     }
   }
+  // The lean's bones, with the body's forward/up/left axes in each one's own space.
+  const lean = { axes: {} };
+  for (const [key, name] of [["hips", "hips"], ["spine", "spine"], ["chest", "chest"], ["head", "head"]]) {
+    const node = bone(name) || (key === "chest" ? bone("upperChest") : null);
+    if (!node) continue;
+    const inv = toHips.clone().multiply(node.getWorldQuaternion(new THREE.Quaternion())).invert();
+    lean[key] = node;
+    lean.axes[key] = { F: F.clone().applyQuaternion(inv), U: U.clone().applyQuaternion(inv),
+                       L: L.clone().applyQuaternion(inv) };
+  }
+  const hips_ = bone("hips");
+  lean.hipsPos = hips_.position.clone();
+  lean.shiftDir = L.clone().applyQuaternion(hips_.quaternion);       // "left", in the hips' parent space
+  arms.lean = lean;
+  armPose.body = { ...NO_LEAN }; armPose.bodyFrom = null; armPose.bodyTo = null;
   idle.arms = arms;
   armPose.name = "rest"; armPose.t = 1; armPose.hold = 3 + Math.random() * 5;
   stats.armPose = "rest";
@@ -850,9 +926,18 @@ function startArmPose(name) {
   armPose.from = snapshotArms();                     // from wherever the arms are now
   armPose.to = targetArms(name);
   armPose.name = name; armPose.t = 0; armPose.phase = 0;
+  armPose.bodyFrom = { ...armPose.body };
+  armPose.bodyTo = { ...NO_LEAN, ...((POSES[name] && POSES[name].body) || {}) };
   const [lo, hi] = name === "rest" ? POSE_REST : POSE_HOLD;
   armPose.hold = POSES[name] && POSES[name].brief ? POSES[name].brief : lo + Math.random() * (hi - lo);
   stats.armPose = name;
+}
+
+// A different figure: drop a pose that isn't in the new set, back to rest.
+function setFigure(v) {
+  figure = v === "female" || v === "male" ? v : "";
+  if (armPose.name && armPose.name !== "rest" && !POSES[armPose.name]?.brief
+      && !(armPose.name in poseSet().weights) && !armPose.forced) startArmPose("rest");
 }
 
 // Hello and goodbye. Not while a pose is forced from the harness, and not twice in a
@@ -870,18 +955,56 @@ function forceArmPose(name) {
 }
 
 function pickArmPose() {
-  const names = Object.keys(POSE_WEIGHTS).filter((n) => n !== armPose.name);
-  let r = Math.random() * names.reduce((s, n) => s + POSE_WEIGHTS[n], 0);
-  for (const n of names) { r -= POSE_WEIGHTS[n]; if (r <= 0) return n; }
+  const w = poseSet().weights;
+  const names = Object.keys(w).filter((n) => n !== armPose.name && n in POSES);
+  let r = Math.random() * names.reduce((s, n) => s + w[n], 0);
+  for (const n of names) { r -= w[n]; if (r <= 0) return n; }
   return "rest";
 }
 
 function armPoseForBeat(label) {
-  const want = POSE_FOR[String(label || "").toLowerCase()];
-  if (!want || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name) return;
+  const key = String(label || "").toLowerCase(), set = poseSet();
+  const want = set.beats[key] || BEAT_POSE[key];
+  // A pose outside this figure's set (a male card is never asked for hands behind the
+  // head) is skipped, not substituted: the beat still plays on the face and the gesture.
+  if (!want || !(want in set.weights) || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name) return;
   armPose.beatCooldown = 20;                         // a beat may re-pose her now and then
   if (POSES[armPose.name] && POSES[armPose.name].brief) armPose.next = want;   // let a wave finish
   else startArmPose(want);
+}
+
+// The pose's lean, on top of idle/posture/gesture (which already reset these bones this
+// frame): contrapposto, the S-curve of standing with the weight on one leg.
+//   shift  the pelvis moves sideways over the standing leg (metres, + = to her left);
+//   tilt   that hip rises (radians about the body's forward axis, + raises the left);
+//   the spine carries the trunk back over the centre, the chest slopes the shoulders
+//   against the hips, and the head stays near upright (LEAN: each one's share);
+//   turn   the hips twist a little toward the raised side; arch: the chest lifts.
+// Axes come from the body frame (initArms), so the lean goes the same way on any rig.
+// Picked against screenshots: the lower spine keeps leaning away from the raised hip
+// (negative: it adds to the hips' tilt) so the trunk comes back over the centre, and the
+// chest more than undoes it, which slopes the shoulders against the hips.
+const LEAN = { spine: -0.8, chest: 2.2, head: 0.3 };
+if (typeof window !== "undefined") window.__avatarLean = LEAN;
+
+function bodyLean(a, b) {
+  const lean = a.lean;
+  if (!lean) return;
+  if (lean.hips && lean.hipsPos)                   // position isn't reset by resetPose
+    lean.hips.position.copy(lean.hipsPos).addScaledVector(lean.shiftDir, b.shift || 0);
+  if (!(b.tilt || b.turn || b.arch)) return;
+  const rot = (key, axisName, angle) => {
+    const node = lean[key];
+    if (node && angle) node.quaternion.multiply(
+      new THREE.Quaternion().setFromAxisAngle(lean.axes[key][axisName], angle));
+  };
+  rot("hips", "F", b.tilt);
+  rot("hips", "U", b.turn);
+  rot("spine", "F", -b.tilt * LEAN.spine);
+  rot("chest", "F", -b.tilt * LEAN.chest);
+  rot("head", "F", b.tilt * LEAN.head);
+  rot("spine", "L", -b.arch);
+  rot("chest", "L", -b.arch * 0.7);
 }
 
 function updateArms(vrm, dt) {
@@ -901,6 +1024,10 @@ function updateArms(vrm, dt) {
     const from = armPose.from[key] || a.rest[key], to = armPose.to[key] || a.rest[key];
     a.bones[key].quaternion.slerpQuaternions(from, to, k);
   }
+  if (armPose.bodyFrom && armPose.bodyTo)
+    for (const c of ["tilt", "turn", "arch", "shift"])
+      armPose.body[c] = armPose.bodyFrom[c] + (armPose.bodyTo[c] - armPose.bodyFrom[c]) * k;
+  bodyLean(a, armPose.body);
   if (armPose.forced || armPose.t < 1) return;
   armPose.hold -= dt;
   if (def && def.brief) {                         // a wave ends on time, talking or not
@@ -1100,7 +1227,8 @@ export function boot() {
   initScene(canvas);
 
   window.addEventListener("avatar:card", (e) => {
-    const { id, hasVrm, placeholder: ph, url, rev } = e.detail || {};
+    const { id, hasVrm, placeholder: ph, url, rev, figure: fig } = e.detail || {};
+    setFigure(fig || "");
     loadCard(id || null, !!hasVrm, !!ph, url || null, rev || "");
   });
 

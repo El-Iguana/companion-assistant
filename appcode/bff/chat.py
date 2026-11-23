@@ -57,6 +57,7 @@ class Chat:
                 "has_portrait": has_portrait(card), "updated_at": card.updated_at,
                 "expressions": sorted(card.expressions.keys()),
                 "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
+                "figure": card.figure,
                 "starters": starters(card),
                 # The voice island's per-character knobs (empty = the global setting).
                 "tts_voice": card.tts_voice, "tts_speed": card.tts_speed,
