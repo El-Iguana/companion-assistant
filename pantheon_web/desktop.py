@@ -81,6 +81,20 @@ async def state(request: Request):
     }
 
 
+@router.get("/pdesk/card")
+async def card(request: Request, id: str = ""):
+    """The on-screen character's card, for the window to notice an edit made in the
+    Studio (it stays open for hours and otherwise read the card once, at open)."""
+    import main
+    from models.schema import CharacterCard
+
+    cur = _ctx(request)
+    c = main._load(cur.cards, id, CharacterCard) if id else None
+    if c is None:
+        raise HTTPException(status_code=404, detail="no such character")
+    return _card_info(c)
+
+
 @router.post("/pdesk/open")
 async def open_chat(request: Request):
     """Her most recent chat, or a new one. Continuing rather than starting

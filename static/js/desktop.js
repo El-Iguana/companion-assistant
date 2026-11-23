@@ -107,6 +107,25 @@
     return true;
   }
 
+  let cardCheck = false;
+  async function refreshCard() {
+    if (!card || cardCheck || streaming || V.state().speaking) return;
+    cardCheck = true;
+    try {
+      const fresh = await api(`/pdesk/card?id=${encodeURIComponent(card.id)}`);
+      if (fresh && fresh.updated_at !== card.updated_at && !streaming) {
+        card = fresh;
+        V.attach(card, settings);           // voice.js reloads the model if it changed
+        portrait();
+        paint();
+      }
+    } catch (e) {
+      // A deleted card or a restart: nothing to change; the next open picks it up.
+    } finally {
+      cardCheck = false;
+    }
+  }
+
   // ?card= override, then the configured desktop character, then the most recent chat.
   async function pickCharacter() {
     const want = new URLSearchParams(location.search).get("card") || settings.desktop_card_id || "";
@@ -242,6 +261,10 @@
       caption("Could not load — is Cantinero running?", 0);
     }
     setInterval(paint, 500);
+    // The window stays open for hours and read the card once: pick up a Studio edit (a
+    // new 3D model, figure, voice) every 30 s and on focus, never mid-reply.
+    setInterval(refreshCard, 30000);
+    window.addEventListener("focus", refreshCard);
     window.__desktopReady = true;
   })();
 })();
