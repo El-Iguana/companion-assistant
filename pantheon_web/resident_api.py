@@ -7,11 +7,12 @@ is the desktop page's routes (``/pdesk/*``, a card's PNG and ``avatar.vrm``,
 | ``POST /resident/pair`` | public: ``{name}`` -> ``{pairing_id, code, expires_in}`` |
 | ``GET /resident/pair/{pairing_id}`` | public: pending, or the token, once |
 | ``GET /resident/self`` | bearer: this resident and its account |
-| ``PUT /resident/self`` | bearer: ``{orpheus_player_id, orpheus_player_name}`` (its built-in player) |
+| ``PUT /resident/self`` | bearer: ``{orpheus_player_id, orpheus_player_name}`` (its Orpheus device) |
+| ``WS /resident/connect`` | bearer: the command line to its music player (services/music_hub.py) |
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from pantheon_web.media import _ctx
 
@@ -48,7 +49,12 @@ async def whoami(request: Request):
     rec = getattr(request.state, "resident", None)
     if rec is None:
         raise HTTPException(status_code=401, detail="residents only")
-    return {"resident": residents.public(rec), "account": cur.user.username}
+    from services.skills import orpheus_media as om
+
+    # Where the account's music server is, so the resident can pair its player with it.
+    music = om.load(cur.cards.parent)
+    return {"resident": residents.public(rec), "account": cur.user.username,
+            "orpheus_url": music.get("url", "") if om.paired(music) else ""}
 
 
 @router.put("/self")
@@ -64,3 +70,27 @@ async def register_player(request: Request):
                            orpheus_player_id=str(body.get("orpheus_player_id") or ""),
                            orpheus_player_name=str(body.get("orpheus_player_name") or ""))
     return {"resident": out}
+
+
+@router.websocket("/connect")
+async def connect(ws: WebSocket):
+    """A resident's command line (R-7). Bearer token in the handshake's Authorization."""
+    from services import residents
+    from services.music_hub import HUB
+
+    auth = ws.headers.get("authorization", "")
+    rec = residents.authenticate(auth[7:].strip()) if auth[:7].lower() == "bearer " else None
+    if rec is None:
+        await ws.close(code=1008, reason="unknown or revoked resident")
+        return
+    await ws.accept()
+
+    async def recv():
+        return await ws.receive_text()
+
+    async def close(code, reason):
+        await ws.close(code=code, reason=reason)
+    try:
+        await HUB.serve(rec["id"], rec["user_id"], recv, ws.send_text, close)
+    except WebSocketDisconnect:
+        pass

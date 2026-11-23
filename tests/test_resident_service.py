@@ -60,10 +60,9 @@ def test_the_desktop_page_and_its_routes_forward_with_the_token(server, client):
     assert client.get("/static/js/voice.js").status_code == 200
     assert client.get("/pdesk/state").json()["path"] == "/pdesk/state"
     client.post("/pdesk/open", json={"character_id": "mira"}, headers=H)
-    client.post("/pmedia/music/duck", json={"on": True}, headers=H)
+    client.post("/pmedia/music/duck", json={"on": True}, headers=H)                 # local: never forwarded
     assert [(m, p, a) for m, p, a, _ in seen] == [("GET", "/pdesk/state", "Bearer TOK"),
-                                                  ("POST", "/pdesk/open", "Bearer TOK"),
-                                                  ("POST", "/pmedia/music/duck", "Bearer TOK")]
+                                                  ("POST", "/pdesk/open", "Bearer TOK")]
     assert json.loads(seen[1][3]) == {"character_id": "mira"}
 
 
@@ -95,7 +94,7 @@ def test_server_down_she_says_so_and_nothing_hangs(server, client):
     assert client.get("/pdesk/state").status_code == 502
     said = client.post("/pdesk/chat", json={"session_id": "s", "text": "hi"}, headers=H).text
     assert "can't reach the bar" in said and '"done": true' in said             # spoken, then done
-    assert client.post("/pmedia/music/duck", json={"on": True}, headers=H).json() == {"ok": False}
+    assert client.post("/pmedia/music/duck", json={"on": True}, headers=H).json() == {"ok": True}  # local
 
 
 def test_a_removed_resident_doesnt_reload_forever(server, client):
@@ -150,3 +149,41 @@ def test_pairing_pins_the_servers_ca_and_saves_the_token(tmp_path, monkeypatch, 
     cfg = config.load()
     assert cfg["token"] == "SECRET" and cfg["ca_pem"] == pem and cfg["host"] == "halo.test"
     assert (tmp_path / "resident.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_pair_orpheus_pairs_a_player_and_tells_cantinero(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("RESIDENT_DATA", str(tmp_path))
+    config.save({"host": "halo.test", "token": "TOK", "ca_pem": "", "insecure_http": True, "name": "Predator"})
+    told, polls = [], {"n": 0}
+
+    def handle(req: httpx.Request):
+        if req.url.host == "halo.test" or req.url.host == "10.0.0.5":
+            if req.method == "GET":
+                return httpx.Response(200, json={"resident": {"id": "R"}, "account": "eli",
+                                                 "orpheus_url": "http://homelab:8096"})
+            told.append(json.loads(req.content))
+            return httpx.Response(200, json={"resident": {}})
+        if req.url.path == "/api/v1/pair":
+            body = json.loads(req.content)
+            assert body["role"] == "player" and body["name"] == "Predator (Cantinero resident)"
+            return httpx.Response(200, json={"pairing_id": "P", "code": "654321"})
+        polls["n"] += 1
+        return httpx.Response(200, json={"status": "pending"} if polls["n"] < 2 else
+                              {"device_id": "dev-9", "token": "OTOKEN"})
+    transport = httpx.MockTransport(handle)
+    real_client = httpx.Client
+
+    def via(method):
+        return lambda url, **kw: real_client(transport=transport).request(method, url, json=kw.get("json"))
+    monkeypatch.setattr(httpx, "get", via("GET"))
+    monkeypatch.setattr(httpx, "post", via("POST"))
+    monkeypatch.setattr(httpx, "put", via("PUT"))
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    monkeypatch.setattr(cli.mdns, "resolve", lambda h: "10.0.0.5")
+    assert cli.pair_orpheus("") == 0
+    out = capsys.readouterr().out
+    assert "pair approve 654321" in out and "OTOKEN" not in out
+    cfg = config.load()
+    assert (cfg["orpheus_url"], cfg["orpheus_device_id"], cfg["orpheus_token"]) == ("http://homelab:8096", "dev-9", "OTOKEN")
+    assert cfg["token"] == "TOK"                                         # the Cantinero pairing is kept
+    assert told == [{"orpheus_player_id": "dev-9", "orpheus_player_name": "Predator"}]

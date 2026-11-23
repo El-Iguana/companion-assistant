@@ -68,7 +68,8 @@ def test_a_resident_reaches_the_desktop_routes_and_nothing_else(client, cur, ses
     # A POST with no CSRF token: a bearer call needs none.
     opened = client.post("/pdesk/open", json={"character_id": session.character_id}, headers=auth)
     assert opened.status_code == 200 and opened.json()["session_id"] == session.id
-    assert client.get("/resident/self", headers=auth).json()["account"] == cur.user.username
+    me = client.get("/resident/self", headers=auth).json()
+    assert me["account"] == cur.user.username and me["orpheus_url"] == ""     # no music server yet
     # Not on its allowlist: importing cards, uploading models, listing models.
     assert client.post("/pmedia/import", files={"file": ("x.json", b"{}")}, headers=auth).status_code == 401
     assert client.get("/pmedia/vrm", headers=auth).status_code == 401
@@ -105,13 +106,14 @@ def test_chat_from_a_resident_targets_its_player(client, cur, session, monkeypat
         return JSONResponse({"ok": True})
     monkeypatch.setattr(main, "chat", fake_chat)
     client.post("/pdesk/chat", json={"session_id": session.id, "text": "play rush"}, headers=auth)
-    assert seen == {"text": "play rush", "player": "p-predator"}
+    assert seen == {"text": "play rush", "player": rec["id"]}          # plays on this resident (R-6)
 
     ducks = []
 
-    async def fake_duck(root, on, player_id=""):
-        ducks.append((on, player_id))
+    async def fake_duck(user_id, root, on):
+        ducks.append(on)
     from services.skills import media
     monkeypatch.setattr(media, "duck", fake_duck)
     client.post("/pmedia/music/duck", json={"on": True}, headers=auth)
-    assert ducks == [(True, "p-predator")]
+    assert ducks == []                                                  # a resident ducks locally
+    client.cookies.clear()

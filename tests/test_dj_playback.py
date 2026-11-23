@@ -1,5 +1,5 @@
-"""The DJ's playback (Orpheus Phase 5): media_play, media_control, choosing and opening a
-player, the pending choice, the fast path and ducking. Orpheus is faked.
+"""The DJ's playback on Cantinero's own player (RESIDENT_PLAN.md R-4–R-7): media_play,
+media_control, choosing the resident, the pending choice, the fast path and ducking. Orpheus is faked.
 
     .venv/bin/python -m pytest -q tests/test_dj_playback.py
 """
@@ -21,31 +21,37 @@ SIGUR = [{"item_id": 9042, "kind": "album", "display": "( ) — Sigur Rós", "sc
 
 
 class FakeOrpheus:
-    """devices, resolve and command, recorded."""
+    """The DJ's world, faked: Orpheus's resolve and queue expansion, and the user's residents
+    on the hub (RESIDENT_PLAN.md R-6, R-7). Commands to residents are recorded in ``sent``."""
 
     def __init__(self, monkeypatch, players=(), candidates=(), ambiguous=False):
         self.players = [dict(p) for p in players]
         self.candidates, self.ambiguous = list(candidates), ambiguous
-        self.sent, self.refuse = [], None
-        self.on_poll = None
-        monkeypatch.setattr(om, "devices", self.devices)
+        self.sent, self.refuse, self.expanded = [], None, []
         monkeypatch.setattr(om, "resolve", self.resolve)
-        monkeypatch.setattr(om, "command", self.command)
-
-    async def devices(self, base, token):
-        if self.on_poll:
-            self.on_poll()
-        return [{"id": "ctl", "name": "Cantinero", "role": "controller", "online": False}] + self.players
+        monkeypatch.setattr(om, "expand", self.expand)
+        monkeypatch.setattr(media, "_residents", lambda user_id: [dict(p, state=p.get("state") or {})
+                                                                  for p in self.players])
+        monkeypatch.setattr(media, "_send", self.send)
 
     async def resolve(self, base, token, query, kinds, limit=5):
         return {"candidates": self.candidates, "needs_disambiguation": self.ambiguous,
                 "disambiguation_prompt": "( ), or Ágætis byrjun?" if self.ambiguous else ""}
 
-    async def command(self, base, token, device_id, body):
+    async def expand(self, base, token, *, item_id=None, playlist_id=""):
+        self.expanded.append(item_id or playlist_id)
+        return [{"id": 1000 + n, "title": f"t{n}", "artist": "a", "album": "b"} for n in range(3)]
+
+    async def send(self, resident_id, body):
         if self.refuse:
             raise om.OrpheusError(self.refuse, self.refuse.lower())
-        self.sent.append((device_id, body))
-        return {"ok": True}
+        self.sent.append((resident_id, body))
+
+
+def _plays(o):
+    """What was played where: (resident, what was expanded) per play command."""
+    plays = [(d, b) for d, b in o.sent if b["type"] == "play"]
+    return [(d, e) for (d, _), e in zip(plays, o.expanded)]
 
 
 def _ctx(tmp_path, **kw):
@@ -61,7 +67,8 @@ def test_a_clear_match_plays_at_once(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path)
     out = asyncio.run(media._play(ctx, {"query": "sigur ros", "shuffle": True}))
     assert out == {"ok": True, "played": True, "playing": "( ) — Sigur Rós", "player": "Predator"}
-    assert o.sent == [("p1", {"type": "play", "item_id": 9042, "shuffle": True})]
+    assert _plays(o) == [("p1", 9042)] and len(o.sent[0][1]["queue"]) == 3
+    assert o.sent[0][1]["start_index"] == 0
 
 
 def test_an_ambiguous_match_asks_and_the_choice_survives_the_turn(tmp_path, monkeypatch):
@@ -73,7 +80,7 @@ def test_an_ambiguous_match_asks_and_the_choice_survives_the_turn(tmp_path, monk
     assert "Ágætis byrjun" in note and "[id 9050]" in note              # the next turn knows the choices
     picked = asyncio.run(media._play(ctx, {"id": "9050"}))
     assert picked["playing"] == "Ágætis byrjun — Sigur Rós"
-    assert o.sent == [("p1", {"type": "play", "item_id": 9050})]
+    assert _plays(o) == [("p1", 9050)]
     assert "waiting" not in skills.REGISTRY["dj"].note(ctx)            # answered: forgotten
 
 
@@ -81,7 +88,7 @@ def test_a_playlist_plays_by_its_id(tmp_path, monkeypatch):
     pl = {"playlist_id": "4b8e-uuid", "kind": "playlist", "display": "Road Trip — playlist", "score": 1.0}
     o = FakeOrpheus(monkeypatch, [PREDATOR], [pl])
     asyncio.run(media._play(_ctx(tmp_path), {"query": "my road trip playlist"}))
-    assert o.sent == [("p1", {"type": "play", "playlist_id": "4b8e-uuid"})]
+    assert _plays(o) == [("p1", "4b8e-uuid")]
 
 
 def test_where_it_plays(tmp_path, monkeypatch):
@@ -115,9 +122,9 @@ def test_control_and_its_refusals(tmp_path, monkeypatch):
     assert asyncio.run(media._control(ctx, {"action": "volume", "level": 30}))["ok"]
     assert o.sent == [("p1", {"type": "seek", "position_ms": 90000}), ("p1", {"type": "volume", "level": 30})]
     assert asyncio.run(media._control(ctx, {"action": "seek"}))["error"] == "BAD_ARGUMENTS"
-    o.refuse = "AUTOPLAY_BLOCKED"
+    o.refuse = "PLAYER_CLOSED"
     out = asyncio.run(media._control(ctx, {"action": "resume"}))
-    assert out["error"] == "AUTOPLAY_BLOCKED" and "click" in out["message"]
+    assert out["error"] == "PLAYER_CLOSED"
 
 
 @pytest.mark.parametrize("said,cmd", [
@@ -146,20 +153,35 @@ def test_fast_control_answers_in_words(tmp_path, monkeypatch):
     o.refuse = "NOTHING_PLAYING"
     assert asyncio.run(media.fast_control(ctx, {"type": "next"})) == "Nothing's playing."
     o.players[0]["online"] = False
-    assert asyncio.run(media.fast_control(ctx, {"type": "pause"})) == "The music player isn't open."
+    assert asyncio.run(media.fast_control(ctx, {"type": "pause"})) == "The music player isn't on."
 
 
-def test_duck_goes_to_the_residents_player_else_the_default_and_never_raises(tmp_path, monkeypatch):
+def test_the_web_pages_duck_goes_to_the_default_resident_and_never_raises(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR])
     om.save(tmp_path, {"url": "http://o", "device_id": "ctl", "token": "t"})
-    asyncio.run(media.duck(tmp_path, True))
-    assert not o.sent                                                  # no resident, no default: nothing
-    asyncio.run(media.duck(tmp_path, True, "p9"))
+    asyncio.run(media.duck("u1", tmp_path, True))
+    assert not o.sent                                                  # no default: nothing
     media.set_default_player(tmp_path, "p1", "Predator")
-    asyncio.run(media.duck(tmp_path, False))
-    assert o.sent == [("p9", {"type": "duck", "level": 25}), ("p1", {"type": "unduck"})]
-    o.refuse = "OFFLINE"
-    asyncio.run(media.duck(tmp_path, True))                            # silent
+    asyncio.run(media.duck("u1", tmp_path, True))
+    asyncio.run(media.duck("u1", tmp_path, False))
+    assert o.sent == [("p1", {"type": "duck", "level": 25}), ("p1", {"type": "unduck"})]
+    o.refuse = "PLAYER_OFFLINE"
+    asyncio.run(media.duck("u1", tmp_path, True))                      # silent
+
+
+def test_status_says_whats_playing_and_whats_next(tmp_path, monkeypatch):
+    now = {"status": "playing", "index": 1, "length": 12, "volume": 60,
+           "now": {"title": "Tom Sawyer", "artist": "Rush"}, "upcoming": [{"title": "Red Barchetta", "artist": "Rush"}]}
+    FakeOrpheus(monkeypatch, [dict(PREDATOR, state=now), dict(PREDATOR, id="p2", name="Lounge", online=False)])
+    out = asyncio.run(media._status(_ctx(tmp_path), {}))
+    assert out["players"][0] == {"name": "Predator", "on": True, "status": "playing", "playing": "Tom Sawyer by Rush",
+                                 "up_next": ["Red Barchetta by Rush"], "volume": 60, "track": 2, "of": 12}
+    assert out["players"][1]["status"] == "off"
+
+
+def test_no_residents_means_nowhere_to_play(tmp_path, monkeypatch):
+    FakeOrpheus(monkeypatch, [], SIGUR[:1])
+    assert asyncio.run(media._play(_ctx(tmp_path), {"query": "x"}))["error"] == "NO_PLAYERS"
 
 
 def test_a_fast_command_never_reaches_the_model(cur, session, monkeypatch):

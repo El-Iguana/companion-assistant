@@ -47,7 +47,7 @@ class SkillContext:
     root: Path                 # the user's library folder, data/u/<uid>
     card_id: str = ""
     session_id: str = ""
-    # The Orpheus player of the resident this request came from ("" from the web chat).
+    # The resident this request came from ("" from the web chat): music plays on its player.
     player_id: str = ""
 
 

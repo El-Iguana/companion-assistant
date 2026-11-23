@@ -175,3 +175,57 @@ async def command(base: str, token: str, device_id: str, body: dict) -> dict:
 async def devices(base: str, token: str) -> list[dict]:
     out = await _request("GET", f"{base}/api/v1/devices", token=token)
     return out.get("devices", out) if isinstance(out, dict) else out
+
+
+# --- what a play expands to (RESIDENT_PLAN.md R-7: Cantinero's own player) ---------------------
+
+QUEUE_MAX = 500
+
+
+def _entry(item: dict, artist: str = "", album: str = "") -> dict:
+    return {"id": int(item["id"]), "title": item.get("title") or "", "artist": artist, "album": album,
+            "artwork_id": item.get("artwork_id"), "duration_ms": item.get("duration_ms")}
+
+
+async def expand(base: str, token: str, *, item_id: int | None = None, playlist_id: str = "") -> list[dict]:
+    """What a play of this item or playlist means, in order: a track, an album's tracks, an
+    artist's albums' tracks, a playlist's present entries. Each entry carries what the player
+    shows (title, artist, album, artwork id, duration). Unplayable tracks are left out."""
+    if playlist_id:
+        pl = await _request("GET", f"{base}/api/v1/playlists/{playlist_id}", token=token)
+        out = []
+        for e in pl.get("entries") or []:
+            t = e.get("track")
+            if t and not e.get("missing") and t.get("playable", True):
+                out.append(_entry(t, e.get("artist") or t.get("artist", ""), e.get("album") or t.get("album", "")))
+        return out[:QUEUE_MAX]
+    item = await _request("GET", f"{base}/api/v1/items/{item_id}", token=token)
+    kind = item.get("kind")
+
+    async def album_tracks(album: dict, artist: str = "") -> list[dict]:
+        if not artist:
+            artist = ((album.get("album") or {}).get("album_artist") or {}).get("title", "")
+        kids = (await _request("GET", f"{base}/api/v1/items/{album['id']}/children", token=token)).get("items") or []
+        kids = sorted((k for k in kids if k.get("kind") == "track" and k.get("playable")),
+                      key=lambda k: (k.get("disc_number") or 0, k.get("track_number") or 0, k.get("sort_title") or ""))
+        return [_entry(k, artist, album.get("title", "")) for k in kids]
+
+    if kind == "track":
+        album = item.get("parent") or {}
+        artist = ""
+        if album.get("id"):
+            full = await _request("GET", f"{base}/api/v1/items/{album['id']}", token=token)
+            artist = ((full.get("album") or {}).get("album_artist") or {}).get("title", "")
+        return [_entry(item, artist, album.get("title", ""))] if item.get("playable") else []
+    if kind == "album":
+        return (await album_tracks(item))[:QUEUE_MAX]
+    if kind == "artist":
+        albums = (await _request("GET", f"{base}/api/v1/items/{item_id}/children", token=token)).get("items") or []
+        out: list[dict] = []
+        for a in albums:
+            if a.get("kind") == "album":
+                out += await album_tracks(a, item.get("title", ""))
+            if len(out) >= QUEUE_MAX:
+                break
+        return out[:QUEUE_MAX]
+    raise OrpheusError("NOT_MUSIC", "that isn't music")
