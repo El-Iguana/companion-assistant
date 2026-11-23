@@ -125,16 +125,34 @@ def _load_pending(ctx: SkillContext) -> list[dict]:
     return p.get("candidates") or [] if time.time() - float(p.get("at") or 0) < PENDING_TTL_S else []
 
 
-def _save_pending(ctx: SkillContext, cands: list[dict] | None) -> None:
+def _save_pending(ctx: SkillContext, cands: list[dict] | None, query: str = "") -> None:
     path = _pending_path(ctx)
     try:
         if not cands:
             path.unlink(missing_ok=True)
             return
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"at": time.time(), "candidates": cands}))
+        path.write_text(json.dumps({"at": time.time(), "candidates": cands, "query": query.strip().lower()}))
     except OSError:
         pass
+
+
+def _pending_query(ctx: SkillContext) -> str:
+    try:
+        p = json.loads(_pending_path(ctx).read_text())
+    except (OSError, ValueError):
+        return ""
+    return p.get("query", "") if time.time() - float(p.get("at") or 0) < PENDING_TTL_S else ""
+
+
+def _choices(cands: list[dict], ask: str) -> dict:
+    """An ambiguous play, worded so the model can't mistake it (it once repeated the same
+    call three times, then told the user the player wasn't running)."""
+    return {"ok": True, "played": False, "nothing_is_wrong": True,
+            "say": ask or "Ask which one they meant.",
+            "choices": [{"id": c["id"], "name": c["name"]} for c in cands],
+            "next": "Ask the user which one, and stop. When they answer, call media_play with that "
+                    "choice's id. Don't call media_play with the same query again."}
 
 
 # --- searching -----------------------------------------------------------------------------
@@ -221,13 +239,16 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
             pick = known.get(choice_id) or {"id": choice_id, "kind": "playlist" if not choice_id.isdigit()
                                             else "", "name": ""}
         else:
+            pending = _load_pending(ctx)
+            if pending and _pending_query(ctx) == query.strip().lower():
+                # The same question again in the same turn: answer with the choices, not a search.
+                return dict(_choices(pending, ""), ok=False, error="ASK_FIRST")
             cands, how = await _search(st, query, args.get("kinds"))
             if not cands:
                 return error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {query!r}.")
             if how["ambiguous"] and len(cands) > 1:
-                _save_pending(ctx, cands[:3])
-                return {"ok": True, "played": False, "candidates": cands[:3],
-                        "ask": how["ask"] or "Ask which one they meant."}
+                _save_pending(ctx, cands[:3], query)
+                return _choices(cands[:3], how["ask"])
             pick = cands[0]
         dev = await _target(ctx, st, args.get("player", ""))
         queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
