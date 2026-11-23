@@ -43,6 +43,7 @@ def _card_info(card) -> dict:
             "updated_at": card.updated_at, "has_portrait": has_portrait(card),
             "expressions": sorted(card.expressions.keys()),
             "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm", "vrm": card.vrm,
+            "figure": card.figure,
             "tts_voice": card.tts_voice, "tts_speed": card.tts_speed,
             "wake_word": card.wake_word, "sleep_phrase": card.sleep_phrase,
             "farewell": card.farewell}

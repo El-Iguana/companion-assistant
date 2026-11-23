@@ -850,7 +850,7 @@
   // the same character must reload.
   async function syncAvatar() {
     const want = attached && card && card.has_vrm;
-    const key = want ? [card.id, card.vrm || ""].join("|") : "";
+    const key = want ? [card.id, card.vrm || "", card.figure || ""].join("|") : "";
     const slot = document.getElementById("ch-avatar-slot");
     if (canvas) {
       if (want && slot && canvas.parentNode !== slot) slot.appendChild(canvas);
@@ -868,7 +868,7 @@
     if (s && canvas.parentNode !== s) s.appendChild(canvas);
     const url = `/pmedia/card/${encodeURIComponent(card.id)}/avatar.vrm?v=${encodeURIComponent(card.vrm || "")}`;
     window.dispatchEvent(new CustomEvent("avatar:card", {
-      detail: { id: card.id, hasVrm: true, url, rev: card.vrm || "" } }));
+      detail: { id: card.id, hasVrm: true, url, rev: card.vrm || "", figure: card.figure || "" } }));
   }
 
   // ---- the API --------------------------------------------------------------------

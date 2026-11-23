@@ -25,7 +25,7 @@ EDITABLE = (
     "description", "personality", "scenario", "first_mes", "mes_example",
     "alternate_greetings", "system_prompt", "post_history_instructions",
     "tags", "appearance",
-    "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode",
+    "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode", "figure",
     "portrait_source", "portrait_sprite",
 )
 
