@@ -244,11 +244,13 @@ def test_a_finished_tool_ends_the_turn_without_a_second_pass(cur, session, monke
         passes.append(1)
         yield main.ToolCallsEvent([{"id": "c1", "name": "media_play", "arguments": '{"query": "sigur ros"}'}])
 
-    async def neutral(*a, **k):
-        return "neutral"
+    async def no_classifier(*a, **k):
+        raise AssertionError("a fixed line was sent to the classifier")
     monkeypatch.setattr(main.kobold, "chat_generate_stream", stream)
-    monkeypatch.setattr(main.expressions, "classify", neutral)
+    monkeypatch.setattr(main.expressions, "classify", no_classifier)
     monkeypatch.setattr(main.assistant_memory, "fold", lambda *a, **k: asyncio.sleep(0, False))
+    card.vrm, card.avatar_mode = "baseline.vrm", "vrm"     # a card whose face would be classified
+    main._save(card, cur.cards)
 
     async def go():
         resp = await main.chat(main.ChatRequest(session_id=session.id, input_text="play sigur ros"), cur=cur)
