@@ -129,7 +129,9 @@ async def chat(request: Request):
     _require_csrf(request)
     body = await request.json() or {}
     return await main.chat(ChatRequest(session_id=str(body.get("session_id") or ""),
-                                       input_text=str(body.get("text") or "")), cur=cur)
+                                       input_text=str(body.get("text") or ""),
+                                       # the desktop shell can open the Orpheus player
+                                       can_launch=bool(body.get("can_launch"))), cur=cur)
 
 
 @router.post("/pdesk/sweep")

@@ -211,3 +211,21 @@ def help_page(request: Request):
     raw = (Path(__file__).resolve().parent / "assets" / "help.html").read_text(encoding="utf-8")
     return Response(content=raw, media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
+
+
+# --- the DJ: music under her voice ----------------------------------------------------
+@router.post("/music/duck")
+async def music_duck(request: Request):
+    """voice.js: she started speaking or listening ({"on": true}), or stopped. Lowers the
+    Orpheus player's music while she does (Phase 5 duck/unduck). The device token stays
+    here; the page only says when. Answers at once; the command runs in the background."""
+    import asyncio
+
+    from services.skills import media as dj
+
+    cur = _ctx(request)
+    _require_csrf(request)
+    body = await request.json()
+    on = bool(body.get("on")) if isinstance(body, dict) else False
+    asyncio.ensure_future(dj.duck(cur.cards.parent, on))
+    return {"ok": True}

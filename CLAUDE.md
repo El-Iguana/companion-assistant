@@ -703,8 +703,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   ✅ **Phase 0b done (2026-11-23):** runtime `services/skills/` (registry, strict validation,
   timeouts, typed errors, audit log), the tool loop in `main.chat()` (`ToolCallsEvent`, up to 3
   rounds, `tool` messages before the trailing note, `skill` SSE event), `CharacterCard.skills` +
-  the Studio's Menu section. ✅ **DJ, read-only:** `media_connect` / `media_find` / `media_status`
-  on Orpheus (Homelab); playback waits for Orpheus Phase 5. See the status block at the top of
+  the Studio's Menu section. ✅ **DJ:** `media_connect` / `media_play` / `media_control` /
+  `media_find` / `media_status` on Orpheus (Homelab, Phase 5 remote control), a model-free fast
+  path for pause/next/volume (`media.fast_command`), music ducked while she speaks or listens
+  (`/pmedia/music/duck`), and the desktop shell opening the Orpheus player when none is open (its
+  page → shell channel `cantinero`, one fixed message). See the status block at the top of
   `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).

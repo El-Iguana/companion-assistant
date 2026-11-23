@@ -74,7 +74,33 @@
     return { speaker: ttsEnabled, handsFree: !!settings.hands_free, hfActive, listening: hfCapturing,
              awake, recording, busy: pttBusy, speaking: !!ttsSource, avatar: avatarActive };
   }
-  const repaint = () => emit("state", state());
+  const repaint = () => { emit("state", state()); syncDuck(); };
+
+  // The DJ: music on the Orpheus player is lowered while she speaks or is listening
+  // after her wake word, and restored after (POST /pmedia/music/duck; the server sends
+  // duck/unduck, and does nothing unless the DJ is paired and has played somewhere).
+  // Down at once; back up only after 1.5 s quiet, so the gaps between her sentences
+  // don't pump the music.
+  let ducked = false, unduckTimer = null;
+  function sendDuck(on) {
+    ducked = on;
+    fetch("/pmedia/music/duck", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+      body: JSON.stringify({ on }) }).catch(() => {});
+  }
+  function syncDuck() {
+    let want;
+    try { want = !!ttsSource || speechConsuming || awake; } catch { return; }   // before init
+    if (want) {
+      if (unduckTimer) { clearTimeout(unduckTimer); unduckTimer = null; }
+      if (!ducked) sendDuck(true);
+    } else if (ducked && !unduckTimer) {
+      unduckTimer = setTimeout(() => {
+        unduckTimer = null;
+        if (!ttsSource && !speechConsuming && !awake) sendDuck(false);
+      }, 1500);
+    }
+  }
 
   // ---- TTS --------------------------------------------------------------------
   let audioCtx = null, ttsSource = null, ttsLevel = 0, ttsHangoverUntil = 0, mouthRAF = null;
