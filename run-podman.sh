@@ -80,6 +80,15 @@ echo "==> Timezone: $TZ_VAL"
 
 # Piper TTS voices (shared, read-only) — skipped if the dir isn't there.
 PIPER_SRC="$(dirname "$SCRIPT_DIR")/jarvis"
+# The DJ skill finds the Orpheus media server on the LAN. The container can't see the
+# host's network, so pass the LAN range (as TZ is derived from the host), and
+# ORPHEUS_MEDIA_URL if it's set here, to skip the scan.
+LAN_CIDR="$(ip -o -f inet addr show scope global 2>/dev/null | awk '{print $4; exit}')"
+MEDIA_ARG=(-e "ORPHEUS_MEDIA_SCAN_CIDR=${ORPHEUS_MEDIA_SCAN_CIDR:-$LAN_CIDR}")
+if [[ -n "${ORPHEUS_MEDIA_URL:-}" ]]; then
+  MEDIA_ARG+=(-e "ORPHEUS_MEDIA_URL=${ORPHEUS_MEDIA_URL}")
+fi
+
 PIPER_ARG=()
 if [[ -d "$PIPER_SRC" ]]; then
   PIPER_ARG=(-v "$PIPER_SRC:/app/models/piper:ro,z")
@@ -101,6 +110,7 @@ podman run -d \
   -v "$SCRIPT_DIR/data:/app/data:z" \
   "${SEED_ARG[@]}" \
   "${PIPER_ARG[@]}" \
+  "${MEDIA_ARG[@]}" \
   "$IMAGE"
 
 echo ""

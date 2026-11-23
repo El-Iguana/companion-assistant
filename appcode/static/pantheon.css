@@ -679,3 +679,8 @@ body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px;
 .pt-tone-row input[type="range"] { flex: 1; min-width: 0; }
 .pt-tone-row small { width: 74px; color: var(--mut); }
 .pt-tone-row small:last-child { text-align: right; }
+
+/* A Menu tool running in the live reply bubble ("🎵 Searching the library…"). */
+.pt-skill { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pt-menu-item { display: flex; align-items: flex-start; gap: 10px; margin: 8px 0; }
+.pt-menu-item span { display: flex; flex-direction: column; gap: 2px; }

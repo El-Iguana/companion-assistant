@@ -76,6 +76,16 @@ _EXPR_CLOSE = "]"
 _EXPR_MAX_LABEL = 32
 
 
+class ToolCallsEvent(list):
+    """The model asked for tools instead of (or after) speaking: a list of
+    ``{"id", "name", "arguments"}`` with ``arguments`` the raw JSON string, assembled
+    from the streamed ``delta.tool_calls`` pieces. Yielded once, at the end of a round
+    that finished with ``finish_reason == "tool_calls"``; the caller runs the tools and
+    starts the next pass (main.chat). Before this existed that finish was read as a
+    natural stop and the turn came back empty (SKILLS_PLAN.md, Phase 0b)."""
+    __slots__ = ()
+
+
 class ExprEvent(str):
     """An expression beat parsed out of the stream.
 
@@ -251,6 +261,7 @@ class KoboldClient:
         for _round in range(2):  # initial + up to 1 continuation (avoids rambling/repetition)
             finish_reason = None
             round_text = ""
+            calls: dict[int, dict] = {}       # tool_calls by index, assembled from deltas
             payload = {"messages": current_messages, "stream": True, **params}
 
             try:
@@ -274,6 +285,13 @@ class KoboldClient:
                             if not choices:
                                 continue
                             delta = choices[0].get("delta", {})
+                            for tc in delta.get("tool_calls") or []:
+                                c = calls.setdefault(int(tc.get("index", 0) or 0),
+                                                     {"id": "", "name": "", "arguments": ""})
+                                c["id"] = tc.get("id") or c["id"]
+                                fn = tc.get("function") or {}
+                                c["name"] += fn.get("name") or ""
+                                c["arguments"] += fn.get("arguments") or ""
                             token = delta.get("content", "")
                             if token:
                                 round_text += token
@@ -298,7 +316,12 @@ class KoboldClient:
                         json=ns_payload,
                     )
                     resp.raise_for_status()
-                    text = resp.json()["choices"][0]["message"]["content"]
+                    msg = resp.json()["choices"][0]["message"]
+                    for i, tc in enumerate(msg.get("tool_calls") or []):
+                        fn = tc.get("function") or {}
+                        calls[i] = {"id": tc.get("id") or "", "name": fn.get("name") or "",
+                                    "arguments": fn.get("arguments") or ""}
+                    text = msg.get("content") or ""
                     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
                     round_text = text
                     buf += text
@@ -312,6 +335,19 @@ class KoboldClient:
                     raise RuntimeError(f"Chat generation failed: {e}") from e
 
             full_text += round_text
+
+            # Tools requested: flush what was said, hand the calls over, and stop. No
+            # continuation round: the reply comes from the next pass, with the results.
+            if calls and (finish_reason in ("tool_calls", "function_call", None, "stop")):
+                if buf and not in_think:
+                    items, ebuf, in_expr = _strip_expr(ebuf + buf, in_expr)
+                    for it in items:
+                        yield it
+                    buf = ""
+                yield ToolCallsEvent(
+                    {"id": c["id"] or f"call_{i}", "name": c["name"].strip(), "arguments": c["arguments"]}
+                    for i, c in sorted(calls.items()) if c["name"].strip())
+                break
 
             # Natural stop — flush buffer and we're done
             if finish_reason != "length":

@@ -16,7 +16,32 @@ First two on the menu: **System Info** (host date/time + machine status) and **M
 media server — find music and video by voice and play them on any Orpheus player; the DJ). *Media was the "DJ"
 skill, built on Navidrome, until 2026-09-15 — see Skill 2.*
 
-Status: **mostly not built.** The date/time half of System Info shipped early (2026-08-17) without
+> **Status 2026-11-23 — Phase 0b built, DJ read-only.** Built against
+> `AGENTIC_SKILLS_MEDIA_ARCHITECTURE.md` (the general architecture brief), reconciled with this plan:
+> - **Runtime in-process** (`services/skills/__init__.py`), not a separate service: registry,
+>   strict argument validation (unknown keys refused), 20 s timeout, typed errors
+>   (`UNKNOWN_TOOL`, `BAD_ARGUMENTS`, `TIMEOUT`, `TOOL_FAILED`, the skill's own), operation ids and
+>   a per-user audit log (`data/u/<uid>/skills/audit.jsonl`). MCP adapters: later.
+> - **Tool loop** in `main.chat()`: `kobold.chat_generate_stream` yields a `ToolCallsEvent`; up to
+>   3 tool rounds; results go back as OpenAI `tool` messages *before* the trailing note, which
+>   stays last; a `skill` SSE event shows "🎵 Searching the library…" on the page and desktop;
+>   schema tokens come off the context window; a tool turn keeps its clarifying question.
+> - **`CharacterCard.skills`** and the Studio's **Menu** section.
+> - **The DJ** (`services/skills/media.py`, client `orpheus_media.py`) against the live Orpheus on
+>   Homelab: `media_connect` (LAN discovery via `ORPHEUS_MEDIA_SCAN_CIDR`, or `ORPHEUS_MEDIA_URL`;
+>   pairing as a controller, approved on the server), then `media_find` + `media_status`.
+>   `media_play` / `media_control` wait for **Orpheus Phase 5**, which is still a draft spec.
+> - **Model re-verified 2026-11-23:** Cydonia-24B (Mistral-based) made 21/21 correct streaming tool
+>   calls (right tool, valid arguments, none for non-music questions), and KoboldCPP accepts the
+>   `tool` result messages for the second pass. **Latency is the cost: ~12–14 s per pass, ~25 s for
+>   a tool turn**, which is why the deterministic fast path (pause/skip/volume without the model,
+>   from the brief) is planned with playback, and the tool list stays small.
+> - From the brief, deliberately not taken: a new media server or API (Orpheus is it), playback in
+>   Cantinero's page (the Orpheus player window stays the target), PostgreSQL, 11 dotted tool names
+>   (OpenAI names can't contain dots; tokens are per tool), queue edits and room transfer (Orpheus
+>   Phase 5b and later).
+
+Status before 2026-11-23: **mostly not built.** The date/time half of System Info shipped early (2026-08-17) without
 needing any of the skill machinery — see below, it changed what the skill is for. Everything marked
 ✅ VERIFIED was measured against the live stack on 2026-08-17; everything else is design.
 
