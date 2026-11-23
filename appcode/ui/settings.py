@@ -15,6 +15,7 @@ import js
 from wapyt import message
 
 from bff.account import Account
+from bff.residents import Residents
 from ui.common import Listeners, Modal, attr, by_id, closest, esc, failed, spawn, toast
 
 # (key, label, kind, extra, hint). kind: check | range(min, max, step, fmt) | text | select(options)
@@ -108,6 +109,8 @@ class SettingsView:
         self.render()
         self._context_check()
         spawn(self._fill_mics(False), "microphones")
+        spawn(self.load_residents(), "residents")
+        spawn(self.load_music(), "music")
         if r["me"]["role"] == "admin":
             await self.load_users()
 
@@ -176,11 +179,97 @@ class SettingsView:
             '<label class="pt-setting"><span>&nbsp;</span><button class="pt-btn" data-act="password">Change password</button></label>'
             '</div></section>'
             + groups
+            + '<section class="pt-sec" id="set-residents"><h2>Residents <small>Cantinero on the machines '
+            'with the speakers</small></h2><p class="pt-dim">A resident does the listening and talking where '
+            'you are, and plays the music. To add one, start it and type the code it shows.</p>'
+            '<div id="set-res-list"><span class="pt-spin small"></span></div>'
+            '<div class="pt-row3"><label class="pt-setting"><span><b>Pairing code</b></span>'
+            '<input type="text" id="res-code" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="123456"></label>'
+            '<label class="pt-setting"><span>&nbsp;</span><button class="pt-btn" data-act="res-approve" type="button">'
+            '<i class="mdi mdi-link-variant"></i>Pair</button></label></div></section>'
+            + '<section class="pt-sec" id="set-music"><h2>Music</h2>'
+            '<div id="set-music-body"><span class="pt-spin small"></span></div></section>'
             + ('<section class="pt-sec" id="set-users"><h2>Users <small>each has a private library</small></h2>'
                '<div id="set-users-list"><span class="pt-spin small"></span></div></section>' if me["role"] == "admin" else "")
             + '<div class="pt-studio-bar"><span class="pt-dim" id="set-status"></span><span class="pt-flex"></span>'
             '<button class="pt-btn primary" data-act="save"><i class="mdi mdi-content-save-outline"></i>Save settings</button></div>'
             '</div>')
+
+    async def load_residents(self) -> None:
+        r = await Residents().listing()
+        box = by_id("set-res-list")
+        if not box or failed(r, "list residents"):
+            return
+        rows = []
+        for res in r.get("residents") or []:
+            player = res.get("orpheus_player_name") or ("its player" if res.get("orpheus_player_id") else "no player yet")
+            seen = (res.get("last_seen") or "never")[:16].replace("T", " ")
+            rows.append(
+                f'<div class="pt-urow"><i class="mdi mdi-speaker"></i><b>{esc(res["name"])}</b>'
+                f'<span class="pt-dim">{esc(player)} · last seen {esc(seen)}</span><span class="pt-flex"></span>'
+                f'<button class="pt-btn small" data-res-rename="{esc(res["id"])}" data-name="{esc(res["name"])}" type="button">Rename</button>'
+                f'<button class="pt-btn small danger" data-res-revoke="{esc(res["id"])}" data-name="{esc(res["name"])}" type="button">Remove</button>'
+                '</div>')
+        waiting = r.get("waiting") or 0
+        box.innerHTML = ("".join(rows) or '<p class="pt-dim">No residents yet.</p>') + (
+            f'<p class="pt-dim">{waiting} waiting to be paired.</p>' if waiting else "")
+
+    async def load_music(self) -> None:
+        r = await Residents().music()
+        box = by_id("set-music-body")
+        if not box or failed(r, "read the music players"):
+            return
+        if not r.get("paired"):
+            box.innerHTML = ('<p class="pt-dim">Not connected to Orpheus yet. Ask a bartender with the DJ on '
+                             'her menu to connect the music.</p>')
+            return
+        cur = r.get("default_player_id") or ""
+        opts = '<option value="">The only one open (ask when several are)</option>' + "".join(
+            f'<option value="{esc(p["id"])}" data-name="{esc(p["name"])}"{" selected" if p["id"] == cur else ""}>'
+            f'{esc(p["name"])}{"" if p["online"] else " (closed)"}</option>' for p in r.get("players") or [])
+        box.innerHTML = (
+            '<label class="pt-setting"><span><b>Play music from the web chat on</b></span>'
+            f'<select id="music-default">{opts}</select>'
+            '<small>A resident plays what you ask it on its own player; naming a player ("in the lounge") '
+            'always wins.' + (f' {esc(r["error"])}' if r.get("error") else "") + '</small></label>')
+        sel = by_id("music-default")
+        self.listeners.on(sel, "change", lambda _e: spawn(self._set_default_player(), "default player"))
+
+    async def _set_default_player(self) -> None:
+        sel = by_id("music-default")
+        if not sel:
+            return
+        opt = sel.options.item(sel.selectedIndex)
+        r = await Residents().set_default_player(str(sel.value), str(attr(opt, "data-name") or ""))
+        if not failed(r, "set the default player"):
+            toast("Default player saved.", "success")
+
+    async def _pair_resident(self) -> None:
+        code = str(by_id("res-code").value).strip()
+        if not code:
+            toast("Type the code the resident shows.", "warning")
+            return
+        r = await Residents().approve(code)
+        if failed(r, "pair the resident"):
+            return
+        by_id("res-code").value = ""
+        toast(f"{r['resident']['name']} paired.", "success")
+        await self.load_residents()
+
+    async def _rename_resident(self, rid: str, name: str) -> None:
+        new = await message.prompt(f"A new name for {name}:", title="Rename resident")
+        if not new:
+            return
+        if not failed(await Residents().rename(rid, new), "rename the resident"):
+            await self.load_residents()
+
+    async def _revoke_resident(self, rid: str, name: str) -> None:
+        if not await message.confirm(f"Remove {name}? It stops working at once and must be paired again.",
+                                     title="Remove resident", ok_text="Remove", danger=True):
+            return
+        if not failed(await Residents().revoke(rid), "remove the resident"):
+            toast(f"{name} removed.", "success")
+            await self.load_residents()
 
     async def load_users(self) -> None:
         r = await Account().users()
@@ -304,6 +393,16 @@ class SettingsView:
                 spawn(self._fill_mics(True), "microphones")
             elif which == "add-user":
                 spawn(self._add_user(), "add user")
+            elif which == "res-approve":
+                spawn(self._pair_resident(), "pair resident")
+            return
+        rren = closest(ev, "[data-res-rename]")
+        if rren:
+            spawn(self._rename_resident(attr(rren, "data-res-rename"), attr(rren, "data-name")), "rename resident")
+            return
+        rrev = closest(ev, "[data-res-revoke]")
+        if rrev:
+            spawn(self._revoke_resident(attr(rrev, "data-res-revoke"), attr(rrev, "data-name")), "remove resident")
             return
         reset = closest(ev, "[data-reset]")
         if reset:

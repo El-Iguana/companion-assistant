@@ -433,6 +433,8 @@ async def delete_user(uid: str, admin: User = Depends(require_admin)):
         raise HTTPException(400, "cannot delete the last admin")
     (USERS / f"{uid}.json").unlink(missing_ok=True)
     shutil.rmtree(UROOT / uid, ignore_errors=True)   # remove their private library
+    from services import residents
+    residents.forget_user(uid)                       # and the residents paired to them
     return {"ok": True}
 
 
@@ -1416,7 +1418,7 @@ STREAM_KEEPALIVE_S = 10.0
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
+async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = ""):
     session = _load(cur.sessions, req.session_id, ChatSession)
     if not session:
         raise HTTPException(404, "session not found")
@@ -1447,7 +1449,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     # The Menu: the tools this bartender offers right now, and what their schemas cost.
     skill_ctx = skills_rt.SkillContext(user_id=cur.user.id, root=cur.cards.parent,
                                        card_id=card.id, session_id=session.id,
-                                       can_launch=req.can_launch, events=asyncio.Queue())
+                                       # a resident's request: its own Orpheus player (R-6)
+                                       player_id=player_id)
     tools = skills_rt.tools_for(card, skill_ctx)
     if tools:
         window = max(2048, window - skills_rt.schema_tokens(tools))
@@ -1529,17 +1532,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                     tool = next((t for t in tools if t.name == call["name"]), None)
                     yield _sse({"skill": {"tool": call["name"],
                                           "status": (tool.status if tool else "") or "Working on it…"}})
-                    # Run it while relaying anything it asks of the page (open the player).
-                    task = asyncio.ensure_future(skills_rt.run(call, tools, skill_ctx))
-                    while True:
-                        getter = asyncio.ensure_future(skill_ctx.events.get())
-                        done_set, _ = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
-                        if getter in done_set:
-                            yield _sse({"skill": {"tool": call["name"], **getter.result()}})
-                            continue
-                        getter.cancel()
-                        break
-                    results.append((call, task.result()))
+                    results.append((call, await skills_rt.run(call, tools, skill_ctx)))
                 convo = _with_tool_results(convo, results)
                 if _pass == MAX_TOOL_ROUNDS - 1:
                     params.pop("tools", None)          # last pass: answer, don't call again

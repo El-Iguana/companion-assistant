@@ -706,9 +706,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   the Studio's Menu section. ✅ **DJ:** `media_connect` / `media_play` / `media_control` /
   `media_find` / `media_status` on Orpheus (Homelab, Phase 5 remote control), a model-free fast
   path for pause/next/volume (`media.fast_command`), music ducked while she speaks or listens
-  (`/pmedia/music/duck`), and the desktop shell opening the Orpheus player when none is open (its
-  page → shell channel `cantinero`, one fixed message). See the status block at the top of
-  `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
+  (`/pmedia/music/duck`). Where it plays: a resident's own player, else the default one
+  (Settings → Music). See the status block at the top of `SKILLS_PLAN.md`. ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).
   **Verified live:** KoboldCPP + this Qwen3.5 fine-tune support OpenAI `tools` **including over
@@ -724,7 +723,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   machine (predator first) does the wake word, STT and TTS locally, holds the Orpheus player built in and
   always on, and sends only text to amd-halo, which stays the brain (KoboldCPP, cards, memory, the DJ's
   pairing). A browser chat plays on the user's default speaker machine. #36's "shell launches the player"
-  is superseded.
+  is superseded. ✅ **R1 (amd-halo):** `services/residents.py` (pairing by 6-digit code approved in
+  Settings → Residents, token hash in `data/auth/residents/`), `pantheon_web/resident_api.py`
+  (`/resident/pair`, `/resident/self`), and the desktop page's routes taking a resident's bearer token where
+  they say `_ctx(request, resident=True)`; Settings → Music picks the default player. Tests:
+  `tests/test_residents.py`.
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the

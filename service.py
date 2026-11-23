@@ -191,6 +191,14 @@ def build_web_app():
     del application.router.routes[before:]
     application.router.routes[0:0] = added
 
+    from pantheon_web.resident_api import router as resident_router
+
+    before = len(application.router.routes)
+    application.include_router(resident_router)         # /resident/*: pairing, then bearer
+    added = application.router.routes[before:]
+    del application.router.routes[before:]
+    application.router.routes[0:0] = added
+
     from pantheon_web.tls_page import router as tls_router
 
     before = len(application.router.routes)

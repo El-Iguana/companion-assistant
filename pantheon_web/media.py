@@ -25,9 +25,27 @@ router = APIRouter(prefix="/pmedia")
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
-def _ctx(request: Request):
+def _bearer(request: Request) -> str:
+    h = request.headers.get("authorization", "")
+    return h[7:].strip() if h[:7].lower() == "bearer " else ""
+
+
+def _ctx(request: Request, resident: bool = False):
+    """The caller's ``main.Ctx``: the signed-in session, or, where ``resident`` allows it,
+    a paired resident's bearer token acting for its account (RESIDENT_PLAN.md R-2: the
+    desktop page's routes only). The resident is left on ``request.state.resident``."""
     from pantheon_web.auth import ctx_for
 
+    token = _bearer(request)
+    if token:
+        from services import residents
+
+        rec = residents.authenticate(token) if resident else None
+        cur = ctx_for({"user_id": rec["user_id"]}) if rec else None
+        if cur is None:
+            raise HTTPException(status_code=401, detail="unknown or revoked resident")
+        request.state.resident = rec
+        return cur
     session = getattr(request, "session", None) or {}
     user = session.get("user")
     cur = ctx_for(user if isinstance(user, dict) else None)
@@ -63,7 +81,7 @@ def card_portrait(card_id: str, request: Request, upload: int = 0):
 
     if not _ID.match(card_id):
         raise HTTPException(status_code=404, detail="no such card")
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     card = main._load(cur.cards, card_id, CharacterCard)
     if not card:
         raise HTTPException(status_code=404, detail="no such card")
@@ -106,7 +124,10 @@ async def card_export(card_id: str, request: Request, version: int = 2):
 # --- uploads + the voice test (Studio, Phase 4) ------------------------------------
 def _require_csrf(request: Request) -> None:
     """These POSTs never pass through pytincture's BFF handler, which is what checks
-    CSRF there; mirror it. The page sends the token from its CSRF cookie."""
+    CSRF there; mirror it. The page sends the token from its CSRF cookie. A resident's
+    bearer call needs none: a browser never attaches that header by itself."""
+    if getattr(request.state, "resident", None):
+        return
     session = getattr(request, "session", None) or {}
     expected = str(session.get("csrf_token") or "")
     supplied = request.headers.get("x-csrf-token", "")
@@ -181,7 +202,7 @@ async def avatar(card_id: str, request: Request):
 
     if not _ID.match(card_id):
         raise HTTPException(status_code=404, detail="no such card")
-    return await main.get_avatar(card_id, cur=_ctx(request))
+    return await main.get_avatar(card_id, cur=_ctx(request, resident=True))
 
 
 @router.get("/vrm")
@@ -223,9 +244,11 @@ async def music_duck(request: Request):
 
     from services.skills import media as dj
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     _require_csrf(request)
     body = await request.json()
     on = bool(body.get("on")) if isinstance(body, dict) else False
-    asyncio.ensure_future(dj.duck(cur.cards.parent, on))
+    # A resident ducks its own player; the web page (testing) the default one (R-7).
+    rec = getattr(request.state, "resident", None) or {}
+    asyncio.ensure_future(dj.duck(cur.cards.parent, on, rec.get("orpheus_player_id", "")))
     return {"ok": True}

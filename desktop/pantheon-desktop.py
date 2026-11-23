@@ -99,13 +99,6 @@ class DesktopShell(Gtk.Application):
             WebKit.CookiePersistentStorage.SQLITE)
 
         self.view = WebKit.WebView(network_session=nm)
-        # The page -> shell channel: one fixed message, "open_orpheus_player" (the DJ
-        # found no music player open). Anything else is ignored; the page can never
-        # name a command line.
-        ucm = self.view.get_user_content_manager()
-        ucm.register_script_message_handler("cantinero", None)
-        ucm.connect("script-message-received::cantinero", self._on_page_message)
-        self._launched_at = 0.0
         s = self.view.get_settings()
         for prop, val in (
             ("enable-webgl", True),
@@ -185,27 +178,6 @@ class DesktopShell(Gtk.Application):
         # current so characters added in the main window show up here.
         GLib.timeout_add_seconds(4, self._refresh_characters)
         GLib.timeout_add_seconds(30, self._refresh_characters)
-
-    # -- the page asks ---------------------------------------------------------
-
-    def _on_page_message(self, _manager, value):
-        try:
-            msg = value.to_string()
-        except Exception:                               # noqa: BLE001
-            return
-        if msg != "open_orpheus_player":
-            print(f"[shell] ignored page message {msg[:40]!r}")
-            return
-        now = GLib.get_monotonic_time() / 1e6
-        if now - self._launched_at < 30:                # a retry within the wait: once is enough
-            return
-        self._launched_at = now
-        # The desktop entry Orpheus's player/desktop/install.sh writes.
-        try:
-            GLib.spawn_async(["gtk-launch", "orpheus-player"], flags=GLib.SpawnFlags.SEARCH_PATH)
-            print("[shell] opened the Orpheus player")
-        except GLib.Error as e:
-            print(f"[shell] couldn't open the Orpheus player: {e.message}")
 
     # -- position persistence ------------------------------------------------
     def _load_geometry(self):

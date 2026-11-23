@@ -146,10 +146,6 @@
   }
 
   // ---- a turn -------------------------------------------------------------------
-  // The native shell's channel (desktop/pantheon-desktop.py): present only inside it.
-  function shell() {
-    try { return window.webkit.messageHandlers.cantinero || null; } catch { return null; }
-  }
 
   async function send(text) {
     if (streaming || !sessionId) return;
@@ -162,7 +158,7 @@
       const r = await fetch("/pdesk/chat", {
         method: "POST", credentials: "same-origin", signal: controller.signal,
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-        body: JSON.stringify({ session_id: sessionId, text, can_launch: !!shell() }),
+        body: JSON.stringify({ session_id: sessionId, text }),
       });
       if (!r.ok) throw new Error("chat: " + r.status);
       const reader = r.body.getReader(), dec = new TextDecoder();
@@ -185,8 +181,6 @@
               V.expr(ev.expr);
             } else if (ev.skill) {
               caption("🎵 " + (ev.skill.status || "Working on it…"), 0);   // a Menu tool is running
-              // The DJ found no player open: the shell opens it (one fixed message, no arguments).
-              if (ev.skill.launch === "orpheus_player" && shell()) shell().postMessage("open_orpheus_player");
             } else if (ev.error) {
               caption(`${card.name} could not answer: ${ev.error}`, 8000);
             } else if (ev.done) {

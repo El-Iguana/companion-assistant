@@ -25,7 +25,7 @@ Three decisions (user, 2026-11-23):
 predator (resident)                                   amd-halo (server)                 homelab
 ┌───────────────────────────────────────────┐        ┌──────────────────────────┐      ┌─────────┐
 │ shell (GTK4 + WebKit, tray)               │        │ Cantinero :7867/:7868    │      │ Orpheus │
-│  ├─ /desktop page: wake word, avatar      │  text  │  /resident/* (bearer)   │ cmds │  :8096  │
+│  ├─ /desktop page: wake word, avatar      │  text  │  /pdesk… (bearer)        │ cmds │  :8096  │
 │  │    ↕ http://127.0.0.1:7867 (loopback:  │ ─────► │  chat, memory, DJ        │ ───► │         │
 │  │      the mic works, no HTTPS needed)   │ HTTPS, │  KoboldCPP               │      │         │
 │  └─ Orpheus player view (always on)  ◄────┼─pinned─┼──────────────────────────┼──────┤ control │
@@ -55,9 +55,13 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
     `orpheus_player_id`, last seen).
   - Revoking a resident cuts it off at once.
   - Same shape as Orpheus pairing, which the user already knows.
-- **R-2 `/resident/*` is the resident API on amd-halo.** It covers `/pdesk/*` (same handlers, bearer auth
-  instead of the cookie), `card.png`, `avatar.vrm` and `music/duck`, plus `PUT /resident/self`
-  (registers its Orpheus player). Nothing else: no admin, no studio, no accounts.
+- **R-2 A resident calls the desktop page's own routes with a bearer token, on an allowlist.**
+  - Allowed: `/pdesk/*`, a card's PNG, `avatar.vrm` and `/pmedia/music/duck`.
+  - In code, each allowed route says `_ctx(request, resident=True)`. A token on any other route is a 401
+    (no admin, no studio, no accounts). A bearer call needs no CSRF token.
+  - So the resident forwards paths unchanged. `/resident/*` holds only what is a resident's own:
+    `POST /resident/pair`, `GET /resident/pair/{id}`, `GET`/`PUT /resident/self` (its Orpheus player).
+  - Built in R1 (2026-11-23); the first draft had a `/resident/*` copy of every route.
 - **R-3 Resident → amd-halo goes over HTTPS on :7868**, with Cantinero's CA pinned by fingerprint at pairing
   (`pantheon_web/tls.py` already makes it). A plain-HTTP fallback is allowed only if the user turns it on.
 - **R-4 The built-in player is the Orpheus web player in a second WebKit view** of the same shell process:
@@ -89,13 +93,13 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
 
 ## Steps (each usable on its own)
 
-1. **R1 — amd-halo: residents** (#37). Pairing and approval, token auth, `/resident/*`, Settings →
+1. **R1 — amd-halo: residents** (#37). Pairing and approval, token auth on the allowlist (R-2), Settings →
    Residents (approve, rename, revoke), the default player in Settings → Music, DJ targeting (R-6), and
    removing the launch path. Tests.
 2. **R2 — the resident service** (#38). `resident/`, where `PANTHEON_ROLE=resident` runs:
    - local TTS and STT;
    - `/desktop` and static files;
-   - a proxy to `/resident/*` that streams the chat SSE;
+   - a proxy for the allowlisted routes, path unchanged, that streams the chat SSE;
    - `python -m resident pair <server>`, with CA pinning.
 
    Tests against a fake amd-halo. Runs on amd-halo itself for development (loopback to its own server).

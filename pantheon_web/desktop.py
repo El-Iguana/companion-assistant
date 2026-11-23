@@ -68,7 +68,7 @@ async def state(request: Request):
     import main
     from models.schema import CharacterCard, ChatSession
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     cards = sorted(main._list(cur.cards, CharacterCard), key=lambda c: c.name.lower())
     sessions = sorted(main._list(cur.sessions, ChatSession), key=lambda s: s.updated_at, reverse=True)
     settings = main._load_settings(cur).model_dump()
@@ -88,7 +88,7 @@ async def card(request: Request, id: str = ""):
     import main
     from models.schema import CharacterCard
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     c = main._load(cur.cards, id, CharacterCard) if id else None
     if c is None:
         raise HTTPException(status_code=404, detail="no such character")
@@ -102,7 +102,7 @@ async def open_chat(request: Request):
     import main
     from models.schema import CharacterCard, ChatSession
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     _require_csrf(request)
     body = await request.json()
     cid = str((body or {}).get("character_id") or "")
@@ -125,20 +125,21 @@ async def chat(request: Request):
     import main
     from models.schema import ChatRequest
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     _require_csrf(request)
     body = await request.json() or {}
+    # A resident's voice request plays on that resident's own player (R-6).
+    rec = getattr(request.state, "resident", None) or {}
     return await main.chat(ChatRequest(session_id=str(body.get("session_id") or ""),
-                                       input_text=str(body.get("text") or ""),
-                                       # the desktop shell can open the Orpheus player
-                                       can_launch=bool(body.get("can_launch"))), cur=cur)
+                                       input_text=str(body.get("text") or "")), cur=cur,
+                           player_id=rec.get("orpheus_player_id", ""))
 
 
 @router.post("/pdesk/sweep")
 async def sweep(request: Request):
     import main
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     _require_csrf(request)
     body = await request.json() or {}
     return await main.sweep_session(str(body.get("session_id") or ""), cur=cur)
@@ -148,7 +149,7 @@ async def sweep(request: Request):
 async def settings(request: Request):
     import main
 
-    cur = _ctx(request)
+    cur = _ctx(request, resident=True)
     _require_csrf(request)
     body = await request.json() or {}
     patch = {k: v for k, v in body.items() if k in _SETTINGS}

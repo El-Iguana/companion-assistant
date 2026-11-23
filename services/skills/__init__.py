@@ -47,17 +47,8 @@ class SkillContext:
     root: Path                 # the user's library folder, data/u/<uid>
     card_id: str = ""
     session_id: str = ""
-    # The client can open the Orpheus player (the desktop shell can; a browser tab can't).
-    can_launch: bool = False
-    # A tool that needs the page mid-run (the DJ asking it to open the player) puts an
-    # event here; the chat turn relays it as a `skill` SSE event while the tool runs.
-    events: "asyncio.Queue | None" = None
-
-    def emit(self, event: dict) -> bool:
-        if self.events is None:
-            return False
-        self.events.put_nowait(event)
-        return True
+    # The Orpheus player of the resident this request came from ("" from the web chat).
+    player_id: str = ""
 
 
 @dataclass
