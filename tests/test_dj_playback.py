@@ -56,13 +56,12 @@ def _ctx(tmp_path, **kw):
 PREDATOR = {"id": "p1", "name": "Predator", "role": "player", "online": True, "state": {"volume": 70}}
 
 
-def test_a_clear_match_plays_at_once_and_the_player_is_remembered(tmp_path, monkeypatch):
+def test_a_clear_match_plays_at_once(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
     ctx = _ctx(tmp_path)
     out = asyncio.run(media._play(ctx, {"query": "sigur ros", "shuffle": True}))
     assert out == {"ok": True, "played": True, "playing": "( ) — Sigur Rós", "player": "Predator"}
     assert o.sent == [("p1", {"type": "play", "item_id": 9042, "shuffle": True})]
-    assert om.load(tmp_path)["player_id"] == "p1"
 
 
 def test_an_ambiguous_match_asks_and_the_choice_survives_the_turn(tmp_path, monkeypatch):
@@ -85,36 +84,28 @@ def test_a_playlist_plays_by_its_id(tmp_path, monkeypatch):
     assert o.sent == [("p1", {"type": "play", "playlist_id": "4b8e-uuid"})]
 
 
-def test_no_player_open_opens_one_where_the_client_can(tmp_path, monkeypatch):
-    monkeypatch.setattr(media, "LAUNCH_WAIT_S", 3)
-    closed = dict(PREDATOR, online=False)
-    o = FakeOrpheus(monkeypatch, [closed], SIGUR[:1])
-    events = asyncio.Queue()
-    polls = {"n": 0}
-
-    def connects_on_second_poll():
-        polls["n"] += 1
-        if polls["n"] >= 3:
-            o.players[0]["online"] = True
-    o.on_poll = connects_on_second_poll
-    out = asyncio.run(media._play(_ctx(tmp_path, can_launch=True, events=events), {"query": "sigur ros"}))
-    assert events.get_nowait()["launch"] == "orpheus_player"
-    assert out["played"] and o.sent[0][0] == "p1"
-
-    # A browser tab can't open it: she says so instead of waiting.
-    o2 = FakeOrpheus(monkeypatch, [closed], SIGUR[:1])
-    out = asyncio.run(media._play(_ctx(tmp_path, events=asyncio.Queue()), {"query": "sigur ros"}))
-    assert out["error"] == "PLAYER_OFFLINE" and not o2.sent
-
-
-def test_several_players_open_means_ask_unless_one_was_used_last(tmp_path, monkeypatch):
+def test_where_it_plays(tmp_path, monkeypatch):
+    """R-6: named, else the resident's own, else the default, else the only one open."""
     lounge = dict(PREDATOR, id="p2", name="Lounge")
     o = FakeOrpheus(monkeypatch, [PREDATOR, lounge], SIGUR[:1])
     ctx = _ctx(tmp_path)
     assert asyncio.run(media._play(ctx, {"query": "x"}))["error"] == "WHICH_PLAYER"
     assert asyncio.run(media._play(ctx, {"query": "x", "player": "lounge"}))["player"] == "Lounge"
-    assert asyncio.run(media._play(ctx, {"query": "x"}))["player"] == "Lounge"   # remembered
-    assert [d for d, _ in o.sent] == ["p2", "p2"]
+    media.set_default_player(tmp_path, "p1", "Predator")
+    assert asyncio.run(media._play(ctx, {"query": "x"}))["player"] == "Predator"            # the default
+    resident = _ctx(tmp_path, player_id="p2")
+    assert asyncio.run(media._play(resident, {"query": "x"}))["player"] == "Lounge"         # its own wins
+    assert asyncio.run(media._play(resident, {"query": "x", "player": "predator"}))["player"] == "Predator"
+    assert [d for d, _ in o.sent] == ["p2", "p1", "p2", "p1"]
+
+
+def test_a_closed_chosen_player_is_an_error_not_another_room(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [dict(PREDATOR, online=False), dict(PREDATOR, id="p2", name="Lounge")], SIGUR[:1])
+    ctx = _ctx(tmp_path)
+    media.set_default_player(tmp_path, "p1", "Predator")
+    out = asyncio.run(media._play(ctx, {"query": "x"}))
+    assert out["error"] == "PLAYER_OFFLINE" and "Predator" in out["message"] and not o.sent
+    assert asyncio.run(media._play(ctx, {"query": "x", "player": "nowhere"}))["error"] == "NO_SUCH_PLAYER"
 
 
 def test_control_and_its_refusals(tmp_path, monkeypatch):
@@ -158,15 +149,15 @@ def test_fast_control_answers_in_words(tmp_path, monkeypatch):
     assert asyncio.run(media.fast_control(ctx, {"type": "pause"})) == "The music player isn't open."
 
 
-def test_duck_goes_to_the_player_used_last_and_never_raises(tmp_path, monkeypatch):
+def test_duck_goes_to_the_residents_player_else_the_default_and_never_raises(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR])
     om.save(tmp_path, {"url": "http://o", "device_id": "ctl", "token": "t"})
     asyncio.run(media.duck(tmp_path, True))
-    assert not o.sent                                                  # never played anywhere: nothing to duck
-    om.save(tmp_path, dict(om.load(tmp_path), player_id="p1"))
-    asyncio.run(media.duck(tmp_path, True))
+    assert not o.sent                                                  # no resident, no default: nothing
+    asyncio.run(media.duck(tmp_path, True, "p9"))
+    media.set_default_player(tmp_path, "p1", "Predator")
     asyncio.run(media.duck(tmp_path, False))
-    assert o.sent == [("p1", {"type": "duck", "level": 25}), ("p1", {"type": "unduck"})]
+    assert o.sent == [("p9", {"type": "duck", "level": 25}), ("p1", {"type": "unduck"})]
     o.refuse = "OFFLINE"
     asyncio.run(media.duck(tmp_path, True))                            # silent
 
@@ -192,43 +183,3 @@ def test_a_fast_command_never_reaches_the_model(cur, session, monkeypatch):
     assert {"token": "Paused."} in evs and any(e.get("done") for e in evs)
     assert o.sent == [("p1", {"type": "pause"})]
     assert _reload(cur, session).messages[-1].content == "Paused."
-
-
-def test_a_tool_can_ask_the_page_mid_run(cur, session, monkeypatch):
-    """The launch request reaches the client while media_play is still waiting."""
-    card = main._load(cur.cards, session.character_id, CharacterCard)
-    card.skills = ["dj"]
-    main._save(card, cur.cards)
-    monkeypatch.setattr(media, "LAUNCH_WAIT_S", 3)
-    o = FakeOrpheus(monkeypatch, [dict(PREDATOR, online=False)], SIGUR[:1])
-    om.save(cur.cards.parent, {"url": "http://o", "device_id": "ctl", "token": "t"})
-    polls = {"n": 0}
-
-    def connects():
-        polls["n"] += 1
-        if polls["n"] >= 3:
-            o.players[0]["online"] = True
-    o.on_poll = connects
-    passes = []
-
-    async def stream(messages, params):
-        passes.append(1)
-        if len(passes) == 1:
-            yield main.ToolCallsEvent([{"id": "c1", "name": "media_play", "arguments": '{"query": "sigur ros"}'}])
-            return
-        yield "Playing ( ) by Sigur Rós."
-
-    async def neutral(*a, **k):
-        return "neutral"
-    monkeypatch.setattr(main.kobold, "chat_generate_stream", stream)
-    monkeypatch.setattr(main.expressions, "classify", neutral)
-    monkeypatch.setattr(main.assistant_memory, "fold", lambda *a, **k: asyncio.sleep(0, False))
-
-    async def go():
-        resp = await main.chat(main.ChatRequest(session_id=session.id, input_text="play sigur ros",
-                                                can_launch=True), cur=cur)
-        return _events([c if isinstance(c, str) else c.decode() async for c in resp.body_iterator])
-    evs = asyncio.run(go())
-    skill_evs = [e["skill"] for e in evs if "skill" in e]
-    assert any(s.get("launch") == "orpheus_player" for s in skill_evs)
-    assert o.sent == [("p1", {"type": "play", "item_id": 9042})]

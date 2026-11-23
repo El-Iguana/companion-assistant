@@ -34,16 +34,16 @@ skill, built on Navidrome, until 2026-09-15 — see Skill 2.*
 >   it when the match is clear (one tool pass), or returns up to three choices, kept in
 >   `media/pending.json` for 5 min and named in the next turn's note so `media_play {id}` picks one.
 >   `media_control` (pause/resume/stop/next/previous/seek/volume). Playlists resolve too. The target
->   player: the one named, else the one used last if online (`player_id` in `orpheus.json`), else
->   the only one online; several → `WHICH_PLAYER`. None online: a client with `can_launch` (the
->   desktop shell) gets a mid-tool `skill` event `{"launch": "orpheus_player"}` (`SkillContext.emit`,
->   relayed while the tool runs), the shell runs `gtk-launch orpheus-player`, and the play waits up
->   to 20 s for it to connect; a browser tab gets `PLAYER_OFFLINE` at once. **Fast path:**
+>   player (RESIDENT_PLAN.md R-6): the one named, else a resident's own player for a request from
+>   that resident, else the default player (Settings → Music), else the only one online; several →
+>   `WHICH_PLAYER`; a chosen player that's closed → `PLAYER_OFFLINE`, never another room. (#36's
+>   "desktop shell launches the player" was removed in R1: the resident's player is always on.)
+>   **Fast path:**
 >   `media.fast_command` recognises whole plain utterances ("pause the music", "next song", "turn it
 >   down", "volume 40") and `main.chat` does them without the model ("Paused."), for a card with
 >   the DJ. **Ducking:** voice.js posts `/pmedia/music/duck` while she speaks or is awake after
->   the wake word (unduck after 1.5 s quiet); the server sends `duck 25`/`unduck` to the player used
->   last. Tests: `tests/test_dj_playback.py`.
+>   the wake word (unduck after 1.5 s quiet); the server sends `duck 25`/`unduck` to that resident's
+>   player, or the default one from the web page. Tests: `tests/test_dj_playback.py`.
 > - **Model re-verified 2026-11-23:** Cydonia-24B (Mistral-based) made 21/21 correct streaming tool
 >   calls (right tool, valid arguments, none for non-music questions), and KoboldCPP accepts the
 >   `tool` result messages for the second pass. **Latency is the cost: ~12–14 s per pass, ~25 s for

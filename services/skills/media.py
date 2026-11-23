@@ -7,11 +7,12 @@ tools that can work (and only pays prompt tokens for those):
   paired                      ->  media_play, media_control, media_find, media_status
 
 Playback is Orpheus Phase 5 (remote control): Orpheus sends the command to a player (the
-Orpheus window on this computer) and answers with the player's ack. ``media_play`` takes
+one built into a Cantinero resident) and answers with the player's ack. ``media_play`` takes
 what the user said and plays it when the match is clear, so "play Sigur Rós" is one tool
 pass; when it isn't, the choices are kept for five minutes (``pending.json``) and the next
-turn's prompt names them. With no player open, a client that can (the desktop shell) is
-asked to open it, and the play waits for it to connect.
+turn's prompt names them. Where it plays (RESIDENT_PLAN.md R-6): a named player, else
+the resident's own (a voice request from the speaker machine), else the user's default
+player (Settings → Music), else the only one online.
 
 "Pause", "next song", "turn it down" never reach the model: ``fast_command`` recognises
 them and ``fast_control`` does them in well under a second (a tool turn costs ~25 s on the
@@ -23,7 +24,6 @@ finish one.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import time
@@ -41,7 +41,6 @@ KINDS = ["artist", "album", "track", "playlist"]
 # library (2026-11-23). Under it she says it isn't there rather than offer a lookalike.
 MIN_SCORE = 0.5
 PENDING_TTL_S = 300          # a choice she offered is remembered this long
-LAUNCH_WAIT_S = 20           # an opened player has this long to connect
 VOLUME_STEP = 15             # "turn it up" / "down", in percent
 DUCK_LEVEL = 25              # the music under her voice, % of the listener's volume
 
@@ -52,42 +51,38 @@ def _players(devs: list[dict]) -> list[dict]:
     return [d for d in devs if (d.get("role") or "player") != "controller"]
 
 
-async def _target(ctx: SkillContext, st: dict, name: str = "", launch: bool = False) -> dict:
-    """The player a command goes to: the one named, else the one used last if it's online,
-    else the only one online. None online and ``launch``: ask the client to open it and
-    wait for it to connect. Raises OrpheusError with a code the model can talk about."""
+async def _target(ctx: SkillContext, st: dict, name: str = "") -> dict:
+    """The player a command goes to (RESIDENT_PLAN.md R-6): the one named; else, for a
+    resident's request, that resident's own player; else the user's default player; else
+    the only one online; else she asks. A chosen player that is closed is an error, never
+    a quiet switch to another room. Raises OrpheusError with a code she can talk about."""
     players = _players(await om.devices(st["url"], st["token"]))
     if name:
-        players = [d for d in players if name.lower() in str(d.get("name") or "").lower()]
-        if not players:
-            raise om.OrpheusError("NO_SUCH_PLAYER", f"No player is called {name!r}.")
+        named = [d for d in players if name.lower() in str(d.get("name") or "").lower()]
+        if not named:
+            raise om.OrpheusError("NO_SUCH_PLAYER", f"No player is called {name!r}. The players are: "
+                                  + ", ".join(str(d.get("name")) for d in players) + ".")
+        on = [d for d in named if d.get("online")]
+        if not on:
+            raise om.OrpheusError("PLAYER_OFFLINE", f"{named[0].get('name')} isn't connected.")
+        return on[0]
+    for want in (ctx.player_id, st.get("default_player_id")):
+        if want:
+            dev = next((d for d in players if d.get("id") == want), None)
+            if dev is None:
+                continue                             # forgotten by Orpheus: fall through
+            if not dev.get("online"):
+                raise om.OrpheusError("PLAYER_OFFLINE", f"The player on {dev.get('name')} isn't "
+                                      "connected. Is the Cantinero resident running there?")
+            return dev
     online = [d for d in players if d.get("online")]
-    saved = next((d for d in online if d.get("id") == st.get("player_id")), None)
-    if saved or len(online) == 1:
-        return saved or online[0]
+    if len(online) == 1:
+        return online[0]
     if len(online) > 1:
         raise om.OrpheusError("WHICH_PLAYER", "Several players are open: "
                               + ", ".join(str(d.get("name")) for d in online) + ". Ask which one.")
-    if not launch or not ctx.can_launch or not ctx.emit({"launch": "orpheus_player",
-                                                         "status": "Opening the player…"}):
-        raise om.OrpheusError("PLAYER_OFFLINE", "The Orpheus player isn't open. Ask the user to "
-                              "open it (the Orpheus Player app) and try again.")
-    deadline = time.monotonic() + LAUNCH_WAIT_S
-    while time.monotonic() < deadline:
-        await asyncio.sleep(1.0)
-        online = [d for d in _players(await om.devices(st["url"], st["token"])) if d.get("online")]
-        if name:
-            online = [d for d in online if name.lower() in str(d.get("name") or "").lower()]
-        if online:
-            return next((d for d in online if d.get("id") == st.get("player_id")), online[0])
-    raise om.OrpheusError("PLAYER_OFFLINE", "I opened the player, but it didn't connect. It may "
-                          "need signing in once.")
-
-
-def _remember(ctx: SkillContext, st: dict, dev: dict) -> None:
-    if st.get("player_id") != dev.get("id"):
-        st = dict(om.load(ctx.root), player_id=dev.get("id"), player_name=dev.get("name"))
-        om.save(ctx.root, st)
+    raise om.OrpheusError("PLAYER_OFFLINE", "No music player is connected. Is the Cantinero "
+                          "resident running on the speaker machine?")
 
 
 def _refusal(e: om.OrpheusError) -> dict:
@@ -226,11 +221,10 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
             body["playlist_id"] = pick["id"]
         if args.get("shuffle"):
             body["shuffle"] = True
-        dev = await _target(ctx, st, args.get("player", ""), launch=True)
+        dev = await _target(ctx, st, args.get("player", ""))
         await om.command(st["url"], st["token"], dev["id"], body)
     except om.OrpheusError as e:
         return _refusal(e)
-    _remember(ctx, st, dev)
     _save_pending(ctx, None)
     return {"ok": True, "played": True, "playing": pick.get("name") or "it", "player": dev.get("name")}
 
@@ -254,7 +248,6 @@ async def _control(ctx: SkillContext, args: dict) -> dict:
         await om.command(st["url"], st["token"], dev["id"], body)
     except om.OrpheusError as e:
         return _refusal(e)
-    _remember(ctx, st, dev)
     return {"ok": True, "done": action, "player": dev.get("name")}
 
 
@@ -339,21 +332,50 @@ async def fast_control(ctx: SkillContext, cmd: dict) -> str:
                 "WHICH_PLAYER": "More than one player is open, so tell me which.",
                 "AUTOPLAY_BLOCKED": "The player needs one click before it can make sound.",
                 "SERVER_UNREACHABLE": "I can't reach the music server."}.get(e.code, "That didn't work.")
-    _remember(ctx, st, dev)
     return f"Volume {body['level']}." if cmd["type"] == "volume" else _SAID.get(cmd["type"], "Done.")
 
 
-async def duck(root, on: bool) -> None:
-    """Lower the music while she speaks or listens (AD-8: relative, restored exactly, and
-    undone by the player after a minute if this never arrives). Best effort, silent."""
+async def duck(root, on: bool, player_id: str = "") -> None:
+    """Lower the music while she speaks or listens (Orpheus AD-8: relative, restored exactly,
+    and undone by the player after a minute if this never arrives). A resident ducks its own
+    player, the web page the default one (R-7). Best effort, silent."""
     st = om.load(root)
-    if not om.paired(st) or not st.get("player_id"):
+    target = player_id or st.get("default_player_id")
+    if not om.paired(st) or not target:
         return
     body = {"type": "duck", "level": DUCK_LEVEL} if on else {"type": "unduck"}
     try:
-        await om.command(st["url"], st["token"], st["player_id"], body)
+        await om.command(st["url"], st["token"], target, body)
     except om.OrpheusError:
         pass
+
+
+# --- Settings → Music ----------------------------------------------------------------------
+
+async def players(root) -> dict:
+    """The Orpheus players and which is the default, for Settings → Music."""
+    st = om.load(root)
+    if not om.paired(st):
+        return {"paired": False, "players": [], "default_player_id": ""}
+    try:
+        devs = _players(await om.devices(st["url"], st["token"]))
+    except om.OrpheusError as e:
+        return {"paired": True, "error": str(e), "players": [],
+                "default_player_id": st.get("default_player_id", "")}
+    return {"paired": True, "server": st.get("server_name", "Orpheus"),
+            "default_player_id": st.get("default_player_id", ""),
+            "players": [{"id": d.get("id"), "name": d.get("name"), "online": bool(d.get("online"))}
+                        for d in devs]}
+
+
+def set_default_player(root, player_id: str, name: str = "") -> None:
+    st = om.load(root)
+    if not om.paired(st):
+        return
+    st["default_player_id"], st["default_player_name"] = player_id or "", name or ""
+    st.pop("player_id", None)                       # #36's "used last" is not a rule any more
+    st.pop("player_name", None)
+    om.save(root, st)
 
 
 # --- tools ---------------------------------------------------------------------------------
