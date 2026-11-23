@@ -1,0 +1,48 @@
+{"text": "From now on, call me El.", "ok": ["instruction"], "why": "a plain standing instruction"}
+{"text": "Don't read me the weather unless I ask for it.", "ok": ["instruction"], "why": "standing, phrased as a don't"}
+{"text": "Always give me temperatures in Celsius.", "ok": ["instruction"], "why": "standing preference for how she answers"}
+{"text": "Keep your answers short in the mornings, I'm never awake.", "ok": ["instruction"], "why": "standing, with a reason attached"}
+{"text": "Please stop saying 'certainly' at the start of everything.", "ok": ["instruction"], "why": "a correction that should last"}
+{"text": "When I say goodnight, turn the music off too.", "ok": ["instruction"], "why": "a standing rule with a trigger"}
+{"text": "Speak a bit slower from now on.", "ok": ["instruction"], "why": "'from now on' makes it standing"}
+{"text": "Never play country music, I can't stand it.", "ok": ["instruction", "fact"], "why": "an instruction carrying a preference"}
+{"text": "I'm vegetarian.", "ok": ["fact"], "why": "a lasting fact"}
+{"text": "My daughter's name is Ana.", "ok": ["fact"], "why": "a lasting fact about family"}
+{"text": "I work night shifts at the hospital.", "ok": ["fact"], "why": "a lasting fact about work"}
+{"text": "I'm allergic to penicillin.", "ok": ["fact"], "why": "a lasting health fact"}
+{"text": "We moved to Porto last year.", "ok": ["fact"], "why": "where they live now"}
+{"text": "My favourite band is Rush.", "ok": ["fact"], "why": "a lasting preference"}
+{"text": "I drive a 2014 Corolla.", "ok": ["fact"], "why": "a lasting fact about a possession"}
+{"text": "Is it okay to take ibuprofen? I'm allergic to penicillin.", "ok": ["fact"], "why": "a fact inside a question"}
+{"text": "My sister is visiting next weekend.", "ok": ["event"], "why": "time-bound"}
+{"text": "I've got the dentist on Thursday at three.", "ok": ["event"], "why": "an appointment"}
+{"text": "We fly to Lisbon on the twelfth.", "ok": ["event"], "why": "a dated plan"}
+{"text": "My two friends Tom and Bill are coming next month.", "ok": ["event", "fact"], "why": "a visit, and two friends' names"}
+{"text": "The plumber comes tomorrow morning.", "ok": ["event"], "why": "time-bound"}
+{"text": "My exam is in three weeks, I need to start revising.", "ok": ["event"], "why": "a dated commitment"}
+{"text": "morning", "ok": ["nothing"], "why": "small talk"}
+{"text": "just checking you're awake", "ok": ["nothing"], "why": "small talk"}
+{"text": "ok carry on", "ok": ["nothing"], "why": "small talk"}
+{"text": "thanks, that's great", "ok": ["nothing"], "why": "thanks"}
+{"text": "lol", "ok": ["nothing"], "why": "noise"}
+{"text": "What's the weather tomorrow?", "ok": ["nothing"], "why": "a question, nothing about the user"}
+{"text": "Play some jazz.", "ok": ["nothing"], "why": "a one-off request"}
+{"text": "Turn it down a bit.", "ok": ["nothing"], "why": "a one-off control"}
+{"text": "What's fifteen percent of eighty?", "ok": ["nothing"], "why": "a one-off question"}
+{"text": "Say that again?", "ok": ["nothing"], "why": "one-off; once invented as a directive in this app"}
+{"text": "Don't tell me the weather today, I already know it's raining.", "ok": ["nothing"], "why": "a one-off don't, not standing"}
+{"text": "Set a timer for ten minutes.", "ok": ["nothing", "event"], "why": "a one-off task"}
+{"text": "If I were vegetarian, what would I eat at a barbecue?", "ok": ["nothing"], "why": "hypothetical, not a fact"}
+{"text": "My friend thinks Rush is overrated.", "ok": ["nothing", "fact"], "why": "about someone else; at most a weak fact"}
+{"text": "Can you explain how vaccines work?", "ok": ["nothing"], "why": "a question"}
+{"text": "Tell me a joke.", "ok": ["nothing"], "why": "a one-off request"}
+{"text": "Ugh, long day.", "ok": ["nothing"], "why": "a mood, not a lasting fact"}
+{"text": "I'm tired.", "ok": ["nothing"], "why": "a passing state"}
+{"text": "Sorry, I meant Lisbon, not Porto.", "ok": ["nothing"], "why": "a correction of the conversation"}
+{"text": "Good night Mira.", "ok": ["nothing"], "why": "a goodbye"}
+{"text": "What did I say my daughter's name was?", "ok": ["nothing"], "why": "asks about memory, adds nothing"}
+{"text": "Could you remember that I take my coffee black?", "ok": ["fact"], "why": "an explicit remember request for a fact"}
+{"text": "Remember: I hate being called sir.", "ok": ["instruction", "fact"], "why": "explicit, implies how to address them"}
+{"text": "I've started learning Portuguese.", "ok": ["fact"], "why": "an ongoing fact"}
+{"text": "My birthday is the 3rd of March.", "ok": ["fact"], "why": "a lasting date, not an event to expire"}
+{"text": "I'm going to bed early tonight.", "ok": ["nothing", "event"], "why": "passing; at most a same-day event"}
