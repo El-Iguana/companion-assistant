@@ -167,12 +167,17 @@ def _remember_play(ctx: SkillContext, what: str, player: str) -> None:
         pass
 
 
-def _just_played(ctx: SkillContext, what: str, player: str) -> bool:
+def _just_played(ctx: SkillContext, what: str, dev: dict) -> bool:
+    """The same play to the same player moments ago, and it is still playing: a repeat, not a
+    request. Paused or stopped since, it plays again (found live: "play" after "pause" was
+    refused as already playing)."""
+    if (dev.get("state") or {}).get("status") != "playing":
+        return False
     try:
         p = json.loads((ctx.root / "media" / "last_play.json").read_text())
     except (OSError, ValueError):
         return False
-    return (p.get("what") == what.strip().lower() and p.get("player") == player
+    return (p.get("what") == what.strip().lower() and p.get("player") == dev.get("id")
             and time.time() - float(p.get("at") or 0) < _RECENT_PLAY_S)
 
 
@@ -283,7 +288,7 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                 return _choices(cands[:3], how["ask"])
             pick = cands[0]
         dev = await _target(ctx, st, args.get("player", ""))
-        if _just_played(ctx, query or choice_id, dev["id"]):
+        if _just_played(ctx, query or choice_id, dev):
             # The same play to the same player again in the same breath: it's on; don't restart it.
             return {"ok": True, "played": True, "already_playing": True, "player": dev.get("name"),
                     "final": "It's playing."}
@@ -417,7 +422,7 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
             return None                               # she asks, or says it isn't there
         pick = cands[0]
         dev = await _target(ctx, st)
-        if _just_played(ctx, query, dev["id"]):
+        if _just_played(ctx, query, dev):
             return "It's playing."
         queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                                 playlist_id="" if pick["id"].isdigit() else pick["id"])

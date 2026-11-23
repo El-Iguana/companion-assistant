@@ -212,11 +212,14 @@ def test_a_fast_command_never_reaches_the_model(cur, session, monkeypatch):
 
 
 def test_the_same_play_twice_doesnt_restart_the_music(tmp_path, monkeypatch):
-    o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
+    o = FakeOrpheus(monkeypatch, [dict(PREDATOR, state={"status": "playing"})], SIGUR[:1])
     ctx = _ctx(tmp_path)
     asyncio.run(media._play(ctx, {"query": "sigur ros"}))
     again = asyncio.run(media._play(ctx, {"query": "Sigur Ros"}))
     assert again["already_playing"] and again["final"] == "It's playing." and len(o.sent) == 1
+    o.players[0]["state"] = {"status": "paused"}                      # paused since: play it again
+    assert asyncio.run(media._play(ctx, {"query": "sigur ros"})).get("already_playing") is None
+    assert len(o.sent) == 2
 
 
 def test_spoken_names():

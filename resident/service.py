@@ -221,7 +221,9 @@ async def status(request: Request):
     return {"paired": not removed, "host": cfg["host"], "reachable": reachable,
             "resident": me.get("resident"), "account": me.get("account"),
             "music": {"line": RELAY.connected, "player": RELAY.player is not None,
-                      "status": RELAY.player_state.get("status")}}
+                      "status": RELAY.player_state.get("status"), "volume": RELAY.player_state.get("volume"),
+                      "ducked": RELAY.player_state.get("ducked"),
+                      "now": (RELAY.player_state.get("now") or {}).get("title")}}
 
 
 @app.post("/pdesk/chat")
