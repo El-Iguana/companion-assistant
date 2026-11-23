@@ -504,6 +504,7 @@
     if (!on && why !== "mic off") speakLine(activeFarewell());
     if (on) toast("Listening — say “" + (activeSleepPhrase() || "stop") + "” when done", "info");
     if (!on) conversationEnded(why);
+    else window.dispatchEvent(new CustomEvent("avatar:wave"));     // hello
     repaint();
   }
 
@@ -961,6 +962,7 @@
           const wasAwake = awake;
           awake = !!isAwake; hfCapturing = !!listening;
           if (wasAwake && !awake) conversationEnded("brain");
+          if (!wasAwake && awake) window.dispatchEvent(new CustomEvent("avatar:wave"));
           repaint();
         },
         abortNow() { if (ttsSource || streaming) abortAndWait(); },
