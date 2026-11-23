@@ -47,10 +47,12 @@ def pair(host: str, name: str, http_port: int, https_port: int, insecure: bool) 
                 got = r.raise_for_status().json()
                 if got.get("status") == "paired":
                     import secrets
-                    config.save({"host": host, "http_port": http_port, "https_port": https_port,
-                                 "insecure_http": insecure, "ca_pem": ca_pem,
-                                 "resident_id": got["resident_id"], "token": got["token"], "name": name,
-                                 "player_key": secrets.token_urlsafe(24)})
+                    # Merged, not replaced: a re-pair keeps the Orpheus pairing and the player key.
+                    old = config.load()
+                    config.save(old | {"host": host, "http_port": http_port, "https_port": https_port,
+                                       "insecure_http": insecure, "ca_pem": ca_pem,
+                                       "resident_id": got["resident_id"], "token": got["token"], "name": name,
+                                       "player_key": old.get("player_key") or secrets.token_urlsafe(24)})
                     print(f"Paired as {name!r}. Start it with: python -m resident serve")
                     return 0
     except httpx.HTTPError as e:

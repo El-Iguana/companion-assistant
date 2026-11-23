@@ -75,7 +75,10 @@ def test_an_ambiguous_match_asks_and_the_choice_survives_the_turn(tmp_path, monk
     o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR, ambiguous=True)
     ctx = _ctx(tmp_path)
     out = asyncio.run(media._play(ctx, {"query": "sigur ros"}))
-    assert out["played"] is False and out["ask"].startswith("( )") and not o.sent
+    assert out["played"] is False and out["say"].startswith("( )") and not o.sent
+    assert [c["id"] for c in out["choices"]] == ["9042", "9050"] and "id" in out["next"]
+    again = asyncio.run(media._play(ctx, {"query": "Sigur Ros "}))     # the same call again: ask first
+    assert again["error"] == "ASK_FIRST" and len(again["choices"]) == 2 and not o.sent
     note = skills.REGISTRY["dj"].note(ctx)
     assert "Ágætis byrjun" in note and "[id 9050]" in note              # the next turn knows the choices
     picked = asyncio.run(media._play(ctx, {"id": "9050"}))

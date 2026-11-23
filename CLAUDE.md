@@ -756,6 +756,12 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
       (`want_playing`), not the pipeline's.
   - `CANTINERO_MUSIC_DEBUG=1` logs each command; `CANTINERO_RESIDENT_URL` points the player at
     another resident service.
+
+  ✅ **R4 (install):** on a speaker machine, `resident/install.sh amd-halo.local` builds the image
+  there, pairs, and installs two systemd user units: `cantinero-resident` (the container) and
+  `cantinero-shell` (the avatar, the tray and the music window, in the graphical session).
+  `--update` pulls and rebuilds. Predator is the first resident; its data is
+  `~/.local/share/cantinero-resident/`.
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the

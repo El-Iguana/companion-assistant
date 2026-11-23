@@ -124,7 +124,16 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
    streamed from Orpheus; play, volume, duck/unduck, next, seek, previous, pause, resume and stop were
    all acked; it reconnected by itself; an unknown command was refused. The full chain (amd-halo → the
    resident service → the player) is R4's install and R5's acceptance.
-4. **R4 — install** (#40). `resident/install.sh`: build or pull the image, a systemd user unit for the
+4. **R4 — install** (#40). `resident/install.sh <server>`:
+   - clones this repo into `~/.local/share/cantinero-resident/src` and builds `localhost/cantinero-resident`;
+   - pairs (the code is typed into Settings → Residents), and pairs the music with Orpheus unless it
+     already is;
+   - writes two user units: `cantinero-resident.service` (the container, host network, restart always)
+     and `cantinero-shell.service` (`graphical-session.target`: the avatar, the tray, the music window);
+   - enables linger.
+
+   `--update`, `--pair`, `--pair-music`, `--uninstall [--purge]`. Plasma passes `WAYLAND_DISPLAY` into
+   the user manager, so the shell unit needs no environment of its own. First described as: `resident/install.sh`: build or pull the image, a systemd user unit for the
    service container and for the shell, both pairings walked through, and an uninstall.
 5. **R5 — acceptance on predator** (#41):
    1. Wake word, reply spoken on predator, STT and TTS local (no audio on the LAN, checked in amd-halo's
