@@ -73,6 +73,7 @@ COPY services/ ./services/
 COPY static/ ./static/
 # The page (pytincture): browser code + BFF classes, and its server-side helpers.
 COPY pantheon_web/ ./pantheon_web/
+COPY resident/ ./resident/
 COPY appcode/ ./appcode/
 # The example assistant (Mira) every new library starts with; main._seed_library.
 COPY seed/ ./seed/
@@ -104,4 +105,6 @@ EXPOSE 7867 7868
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fs http://127.0.0.1:${PANTHEON_PORT}/api/health || exit 1
 
-CMD ["python3", "service.py"]
+# One image, two roles (RESIDENT_PLAN.md R-8): the server, or with PANTHEON_ROLE=resident the
+# resident service (local voice, the desktop page, the rest forwarded to the server).
+CMD ["sh", "-c", "if [ \"$PANTHEON_ROLE\" = resident ]; then exec python3 -m resident serve; else exec python3 service.py; fi"]

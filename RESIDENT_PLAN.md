@@ -93,10 +93,10 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
 
 ## Steps (each usable on its own)
 
-1. **R1 — amd-halo: residents** (#37). Pairing and approval, token auth on the allowlist (R-2), Settings →
+1. ✅ **R1 — amd-halo: residents** (#37, merged 2026-11-23). Pairing and approval, token auth on the allowlist (R-2), Settings →
    Residents (approve, rename, revoke), the default player in Settings → Music, DJ targeting (R-6), and
    removing the launch path. Tests.
-2. **R2 — the resident service** (#38). `resident/`, where `PANTHEON_ROLE=resident` runs:
+2. ✅ **R2 — the resident service** (#38, built 2026-11-23). `resident/`, where `PANTHEON_ROLE=resident` runs:
    - local TTS and STT;
    - `/desktop` and static files;
    - a proxy for the allowlisted routes, path unchanged, that streams the chat SSE;
