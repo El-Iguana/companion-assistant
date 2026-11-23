@@ -1541,6 +1541,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                     text = " ".join(finals)
                     acc += text
                     yield _sse({"token": text})
+                    if "neutral" in known:
+                        tagged.append("neutral")   # a fixed line needs no classifier call (~7 s)
                     break
                 convo = _with_tool_results(convo, results)
                 if _pass == MAX_TOOL_ROUNDS - 1:
