@@ -153,6 +153,9 @@ is correct). Auto-written entries carry an `AUTO` badge and are individually edi
 
 ## Known gaps
 
+Most of these are addressed by **Phase 7** (`MEMORY_PLAN.md`, issues #15–#23), which is planned,
+not built: memory that belongs to the bartender, folded per episode, recalled per turn.
+
 - Long-term `facts` never expire; they stay until the user removes them. Whether they should decay is
   still open.
 - **The prompt is budgeted by dropping old turns only.** Everything here has to fit the context
