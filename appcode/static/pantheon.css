@@ -695,3 +695,9 @@ body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px;
   background: var(--card2); color: var(--txt); cursor: pointer; }
 .help-copy:hover { border-color: var(--accLine); }
 .pt-form label.pt-btn { flex-direction: row; text-transform: none; letter-spacing: 0; font: 700 12px var(--sans); color: var(--txt); }
+
+/* Voice & tone sliders (Staff studio): the two ends either side of the track. */
+.pt-tone-row { display: flex; align-items: center; gap: 10px; }
+.pt-tone-row input[type="range"] { flex: 1; min-width: 0; }
+.pt-tone-row small { width: 74px; color: var(--mut); }
+.pt-tone-row small:last-child { text-align: right; }

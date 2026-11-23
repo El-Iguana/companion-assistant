@@ -142,6 +142,25 @@ def current_voice_id(voice: str) -> str:
     return voice
 
 
+class Tone(BaseModel):
+    """How a character speaks, each from -1 to 1 (0 = no lean either way). Rendered into
+    the prompt as one "Voice and tone" line (prompt_builder.tone_note)."""
+    warmth: float = 0.0          # reserved .. warm
+    formality: float = 0.0       # casual .. formal
+    playfulness: float = 0.0     # serious .. playful
+    detail: float = 0.0          # brief .. thorough
+    femininity: float = 0.0      # masculine .. feminine speech style
+
+    @field_validator("warmth", "formality", "playfulness", "detail", "femininity", mode="before")
+    @classmethod
+    def _clamp(cls, v) -> float:
+        # Out-of-range or junk values clamp rather than fail: a card must always load.
+        try:
+            return max(-1.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
+
 class CharacterCard(BaseModel):
     """Character Card V2/V3 `data` object, plus local storage fields."""
     # --- local storage (not part of the card spec) ---
@@ -167,6 +186,8 @@ class CharacterCard(BaseModel):
     # The figure the 3D avatar stands as: which poses she uses and how she stands in them
     # (vtuber.mjs POSE_SETS). "" = not set, the shared set every card had before.
     figure: str = ""                     # "" | "female" | "male"
+    # Voice and tone: how they talk, alongside the free-text personality.
+    tone: Tone = Field(default_factory=Tone)
     # Profile picture: where the card's picture comes from (cards, rail, chat header).
     # "" = automatic, the behaviour before this field: uploaded portrait, else the
     # neutral sprite. "image" = the uploaded portrait, "sprite" = one expression sprite

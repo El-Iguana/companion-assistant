@@ -5,7 +5,7 @@ KoboldClient.chat_generate_stream(). Handles:
   - {{char}} / {{user}} macro substitution
   - system prompt = character definition + persona + memory + lorebook
   - lorebook (character_book) key scanning against recent turns
-  - post_history_instructions injected AFTER the chat history
+  - the character's voice and tone (Tone sliders) beside the free-text personality
 """
 from __future__ import annotations
 
@@ -161,11 +161,41 @@ def _char_block(card: CharacterCard, char_name: str, user_name: str) -> str:
     if card.personality:
         parts.append(f"{char_name}'s personality: " +
                      substitute_macros(card.personality, char_name, user_name))
-    if card.scenario:
-        # A card's scenario field, imported from a roleplay card, is background here:
-        # the assistant prompt has no scene, so it must not read as one to act out.
-        parts.append("Background: " + substitute_macros(card.scenario, char_name, user_name))
+    tone = tone_note(card.tone, char_name)
+    if tone:
+        parts.append(tone)
+    # Not injected any more (2026-11-23): the roleplay fields a card may carry from an
+    # import (scenario, example dialogue, post-history instructions). The Staff studio
+    # no longer shows them, and a prompt shaped by text nobody can see or edit is worse
+    # than losing it. They stay on the card, so an export still round-trips.
     return "\n\n".join(p for p in parts if p.strip())
+
+
+# Voice and tone, from the card's sliders. Each leans one way or the other; near zero
+# says nothing. Static per card, so it sits in the system block with the personality.
+_TONE_WORDS = {
+    "warmth": ("reserved and matter-of-fact", "warm and personable"),
+    "formality": ("casual and relaxed in wording", "formal and polished in wording"),
+    "playfulness": ("serious and straightforward", "playful, with light humour"),
+    "detail": ("brief, getting straight to the point", "thorough, explaining things fully"),
+    "femininity": ("masculine in speech style: plain, direct phrasing with few softeners",
+                   "feminine in speech style: softer phrasing and expressive, gentle word choice"),
+}
+
+
+def tone_note(tone, char_name: str) -> str:
+    if tone is None:
+        return ""
+    bits = []
+    for key, (low, high) in _TONE_WORDS.items():
+        v = float(getattr(tone, key, 0.0) or 0.0)
+        if abs(v) < 0.15:
+            continue
+        degree = "very " if abs(v) >= 0.7 else ("" if abs(v) >= 0.35 else "slightly ")
+        bits.append(degree + (high if v > 0 else low))
+    if not bits:
+        return ""
+    return f"Voice and tone: {char_name} is " + "; ".join(bits) + "."
 
 
 # The system block loses to the transcript. An assistant card whose history already
@@ -307,8 +337,6 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         sys_parts.append(char_def)
     if lb_after:
         sys_parts.append("\n".join(sub(b) for b in lb_after))
-    if card.mes_example:
-        sys_parts.append("Example dialogue:\n" + sub(card.mes_example))
 
     # memory, widest scope first: pinned facts (this chat, always-on) -> the pairing's
     # assistant memory. `longterm_note` arrives pre-rendered with real names, so it
@@ -345,10 +373,8 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         content = m.swipes[m.swipe_index] if (m.role == "char" and m.swipes) else m.content
         history.append({"role": role, "content": sub(content)})
 
-    # --- post-history instructions (jailbreak / UJB) go after the history ---
+    # Post-history instructions are no longer injected (see _char_block).
     after: List[Dict] = []
-    if card.post_history_instructions:
-        after.append({"role": "system", "content": sub(card.post_history_instructions)})
 
     # --- ONE trailing note: everything that must sit after the history ---
     # These used to be separate system turns after {{user}}'s message (time, expression

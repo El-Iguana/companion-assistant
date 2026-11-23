@@ -20,11 +20,40 @@ from models.schema import CharacterCard
 from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient, get_checkpoint_defaults
 
-# The label sets and their valence live in Muninn (shared with Rhapsode).
-from services.muninn.emotion import CORE_EMOTIONS, EMOTION_VALENCE, FULL_EMOTIONS, valence_of  # noqa: E402,F401
+# The roleplay label sets (8 core, 28 full) came with Muninn. They stay importable for
+# old data (a stored message's label, sprites generated before), but nothing new uses
+# them: an assistant doesn't fall in love or lose its temper.
+from services.muninn.emotion import CORE_EMOTIONS, EMOTION_VALENCE, FULL_EMOTIONS  # noqa: E402,F401
+from services.muninn.emotion import valence_of as _roleplay_valence  # noqa: E402
+
+# What an assistant feels, and how each moves the running mood (-1..1). The voice
+# prompt's [expr:x] beats, the classifier fallback, the VRM face, gestures and arm poses
+# all use these (vtuber.mjs maps each one). No love, desire, anger, disgust, fear or grief.
+ASSISTANT_EMOTIONS = [
+    "neutral", "happy", "amused", "curious", "thoughtful", "surprised", "confused",
+    "concerned", "apologetic", "grateful", "proud", "relieved", "sympathetic",
+]
+ASSISTANT_VALENCE = {
+    "neutral": 0.0, "happy": 0.7, "amused": 0.6, "curious": 0.25, "thoughtful": 0.05,
+    "surprised": 0.1, "confused": -0.1, "concerned": -0.2, "apologetic": -0.1,
+    "grateful": 0.6, "proud": 0.5, "relieved": 0.4, "sympathetic": -0.15,
+}
 
 # Default label vocabulary used when a caller doesn't specify one.
-EMOTIONS = CORE_EMOTIONS
+EMOTIONS = ASSISTANT_EMOTIONS
+
+
+def card_emotions(card) -> list[str]:
+    """The labels a card's replies are tagged and classified with: the assistant set for
+    a card showing a 3D avatar (its face, gestures and poses follow them), none for a
+    card on a static portrait, where an emotion would change nothing on screen and the
+    classifier call would be wasted. Sprite cards are portraits now (2026-11-23)."""
+    return list(ASSISTANT_EMOTIONS) if (card.vrm and card.avatar_mode == "vrm") else []
+
+
+def valence_of(emotion: str) -> float:
+    """An assistant label's valence; an old roleplay label (stored data) keeps its own."""
+    return ASSISTANT_VALENCE.get(emotion, _roleplay_valence(emotion))
 
 
 def strip_bare_labels(text: str, labels) -> str:
@@ -106,10 +135,9 @@ def _seed_for(card: CharacterCard, emotion: str = "") -> int:
 async def classify(kobold: KoboldClient, reply: str, labels: list[str] | None = None) -> str:
     """Return one label describing the emotion of `reply`.
 
-    `labels` is the vocabulary to choose from — pass the emotions a card actually
-    has sprites for (so an 8-sprite card classifies into 8, a 28-sprite card into 28).
+    `labels` is the vocabulary to choose from (card_emotions); the assistant set by default.
     """
-    labels = labels or CORE_EMOTIONS
+    labels = labels or ASSISTANT_EMOTIONS
     default = "neutral" if "neutral" in labels else labels[0]
     if not reply.strip():
         return default

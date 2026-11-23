@@ -29,8 +29,8 @@ from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, csrf_t
                        failed, portrait_url, spawn, toast)
 
 STYLES = ["anime", "none", "photorealistic", "fantasy_art", "cinematic", "dark_fantasy"]
-SECTIONS = [("basics", "Basics"), ("persona", "Personality"), ("greet", "Greetings"),
-            ("lore", "Lorebook"), ("look", "Expressions"),
+SECTIONS = [("basics", "Basics"), ("persona", "Personality & tone"), ("greet", "Greetings"),
+            ("lore", "Lorebook"),
             ("avatar", "3D avatar"), ("voice", "Voice"), ("advanced", "Advanced")]
 JOB_POLL_MS = 2000
 
@@ -51,6 +51,16 @@ def _local(op: str, key: str, value: str = ""):
     except Exception:  # noqa: BLE001 - private windows can refuse storage
         return ""
     return ""
+
+
+# The voice & tone sliders: key on CharacterCard.tone, label, and what each end means.
+TONE_SLIDERS = (
+    ("warmth", "Warmth", "reserved", "warm"),
+    ("formality", "Formality", "casual", "formal"),
+    ("playfulness", "Playfulness", "serious", "playful"),
+    ("detail", "Detail", "brief", "thorough"),
+    ("femininity", "Speech style", "masculine", "feminine"),
+)
 
 
 class StudioView:
@@ -163,6 +173,13 @@ class StudioView:
         return (f'<label class="pt-field"><span>{label}</span><select data-f="{f}">{opts}</select>'
                 + (f'<small>{hint}</small>' if hint else "") + '</label>')
 
+    @staticmethod
+    def _tone_row(key: str, label: str, lo: str, hi: str, value) -> str:
+        v = max(-1.0, min(1.0, float(value or 0)))
+        return (f'<label class="pt-field pt-tone"><span>{label}</span><div class="pt-tone-row">'
+                f'<small>{lo}</small><input type="range" data-tone="{key}" min="-1" max="1" step="0.1" value="{v:g}">'
+                f'<small>{hi}</small></div></label>')
+
     def _form_html(self) -> str:
         c = self.data["card"]
         new = self.data["is_new"]
@@ -179,7 +196,7 @@ class StudioView:
             '<label class="pt-btn small"><i class="mdi mdi-image-plus"></i>Choose portrait'
             '<input type="file" id="st-portrait-file" accept="image/*" hidden></label>'
             f'<button class="pt-btn small ghost" data-act="remove-portrait"{"" if portrait else " hidden"}>Remove</button>'
-            '<small class="pt-dim">Shown on cards, in chat, and the base for generated sprites. Stored as PNG.</small>'
+            '<small class="pt-dim">Shown on cards, in the sidebar and in chat. Stored as PNG.</small>'
             '</div></div>'
             + self._profile_html()
             + '<div class="pt-row2">'
@@ -191,18 +208,18 @@ class StudioView:
                         "How the 3D avatar carries herself: which poses she uses and how she stands in them.")
             + self._inp("Tagline", "creator_notes", c.get("creator_notes"),
                         "One line under their name on cards and the profile (the card's creator notes).",
-                        "Noir detective who reads you instantly")
-            + self._inp("Tags", "tags", ", ".join(c.get("tags") or []), "Comma separated — they become the Staff page's filters.")
+                        "Keeps your calendar and the house running")
             + '</section>')
-        # --- personality
+        # --- personality, voice and tone
+        tone = c.get("tone") or {}
         sec.append(
-            '<section class="pt-sec" id="sec-persona"><h2>Personality <small>use {{char}} and {{user}}</small></h2>'
+            '<section class="pt-sec" id="sec-persona"><h2>Personality &amp; tone <small>use {{char}} and {{user}}</small></h2>'
             + self._area("Description", "description", c.get("description"), 6,
-                         "The persistent definition: who they are, history, manner.")
+                         "Who they are and what they're for: their role, what they know, how they work.")
             + self._area("Personality", "personality", c.get("personality"), 2, ph="warm, observant, dry humour")
-            + self._area("Background", "scenario", c.get("scenario"), 2,
-                         "Context they should know (the card's scenario field). Not a scene to act out.")
-            + self._area("Example dialogue", "mes_example", c.get("mes_example"), 4, "&lt;START&gt; blocks, as in SillyTavern.")
+            + '<h3 class="pt-sub">Voice &amp; tone <small>how they talk; the middle is no lean either way</small></h3>'
+            + "".join(self._tone_row(key, label, lo, hi, tone.get(key, 0.0))
+                      for key, label, lo, hi in TONE_SLIDERS)
             + '</section>')
         # --- greetings + starters
         greets = [c.get("first_mes") or ""] + list(c.get("alternate_greetings") or [])
@@ -220,21 +237,11 @@ class StudioView:
             f'<div class="pt-rep" id="st-lore">{"".join(self._lore_row(e, i) for i, e in enumerate(self.lore))}</div>'
             '<button class="pt-btn small" data-act="add-lore"><i class="mdi mdi-plus"></i>Add an entry</button>'
             '</section>')
-        # --- expressions
-        sec.append('<section class="pt-sec" id="sec-look"><h2>Appearance &amp; expressions</h2>'
-                   + self._area("Appearance prompt", "appearance", c.get("appearance"), 2,
-                                "What sprites are generated from.", "silver-haired archivist, round glasses, cardigan")
-                   + self._sprites_html() + '</section>')
         # --- avatar
-        mode = c.get("avatar_mode") or ("vrm" if c.get("vrm") else "sprite")
         vrm_opts = [("", "— none —")] + [(m["name"], f'{m["name"]} ({m.get("size", 0) / 1048576:.0f} MB{" — unusable" if m.get("usable") is False else ""})')
                                          for m in self.data.get("vrms") or []]
         sec.append(
-            '<section class="pt-sec" id="sec-avatar"><h2>3D avatar <small>instead of sprites</small></h2>'
-            '<div class="pt-seg">'
-            f'<label><input type="radio" name="st-avatar" value="sprite"{" checked" if mode != "vrm" else ""}><span>Expression sprites</span></label>'
-            f'<label><input type="radio" name="st-avatar" value="vrm"{" checked" if mode == "vrm" else ""}><span>3D model (VRM)</span></label>'
-            '</div>'
+            '<section class="pt-sec" id="sec-avatar"><h2>3D avatar <small>optional; without one, the portrait is shown</small></h2>'
             '<div id="st-vrm-body">'
             '<div class="pt-row2">'
             + self._sel("Model", "vrm", vrm_opts, c.get("vrm") or "")
@@ -266,12 +273,7 @@ class StudioView:
             '<section class="pt-sec" id="sec-advanced"><h2>Advanced</h2>'
             + self._area("System prompt", "system_prompt", c.get("system_prompt"), 3,
                          "Replaces the built-in assistant prompt entirely (including its spoken-reply rules).")
-            + self._area("Post-history instructions", "post_history_instructions",
-                         c.get("post_history_instructions"), 2, "Injected after the chat history.")
-            + '<div class="pt-row2">'
-            + self._inp("Creator", "creator", c.get("creator"))
-            + self._inp("Version", "character_version", c.get("character_version"))
-            + '</div></section>')
+            + '</section>')
         return "".join(sec)
 
     @staticmethod
@@ -284,7 +286,7 @@ class StudioView:
     @staticmethod
     def _starter_row(text: str) -> str:
         return ('<div class="pt-rep-row inline" data-rep="starter">'
-                f'<input type="text" data-starter="1" value="{esc(text)}" placeholder="Read me like a case file">'
+                f'<input type="text" data-starter="1" value="{esc(text)}" placeholder="What&#39;s on today?">'
                 '<button class="pt-mbtn" data-rm="1" title="Remove"><i class="mdi mdi-close"></i></button></div>')
 
     @staticmethod
@@ -306,19 +308,13 @@ class StudioView:
         """Where the profile picture comes from: portrait, one sprite, or a 3D still."""
         c = self.data["card"]
         src = c.get("portrait_source") or ""
-        sprites = c.get("sprites") or []
-        want = c.get("portrait_sprite") or "neutral"
-        spr_opts = [(s, s) for s in sprites] or [("neutral", "neutral — no sprites yet")]
-        if want not in [s for s, _ in spr_opts]:
-            spr_opts.insert(0, (want, f"{want} — not generated"))
         still = ("Captured from " + esc(c.get("vrm_still_of") or "the model")) if c.get("has_vrm_still") else "No still yet"
         return (
             '<div class="pt-row2">'
             + self._sel("Profile picture", "portrait_source",
-                        [("", "Automatic — portrait, else neutral sprite"), ("image", "Uploaded portrait"),
-                         ("sprite", "Expression sprite"), ("vrm", "3D model still")], src,
+                        [("", "Automatic"), ("image", "Uploaded portrait"), ("vrm", "3D model still")]
+                        + ([("sprite", "Expression sprite (older card)")] if src == "sprite" else []), src,
                         "What cards, the sidebar and the chat header show.")
-            + '<div id="st-pp-sprite">' + self._sel("Sprite", "portrait_sprite", spr_opts, want) + '</div>'
             + '<div class="pt-field" id="st-pp-vrm"><span>3D still</span><div class="pt-btnrow">'
             '<button class="pt-btn small" data-act="capture-still"><i class="mdi mdi-camera"></i>Capture from model</button></div>'
             f'<small id="st-pp-still">{still}. Taken from the model chosen under 3D avatar; retaken on save when the model changes.</small></div>'
@@ -329,7 +325,7 @@ class StudioView:
 
     def _sync_profile(self) -> None:
         src = self._pp_source()
-        for el_id, on in (("st-pp-sprite", src == "sprite"), ("st-pp-vrm", src == "vrm")):
+        for el_id, on in (("st-pp-vrm", src == "vrm"),):
             el = by_id(el_id)
             if el:
                 el.hidden = not on
@@ -600,13 +596,11 @@ class StudioView:
 
     # --- avatar --------------------------------------------------------------------
     def _avatar_mode(self) -> str:
-        el = self.root.querySelector('input[name="st-avatar"]:checked') if self.root else None
-        return str(el.value) if el else "sprite"
+        # No sprites to choose any more: a chosen model is the avatar, else the portrait.
+        return "vrm" if self._field("vrm") else "sprite"
 
     def _sync_avatar_mode(self) -> None:
-        body = by_id("st-vrm-body")
-        if body:
-            body.hidden = self._avatar_mode() != "vrm"
+        pass                                # the model picker is always shown now
 
     def _render_vrm_info(self) -> None:
         box = by_id("st-vrm-info")
@@ -723,7 +717,10 @@ class StudioView:
         fields = {}
         for el in self.root.querySelectorAll("[data-f]"):
             fields[attr(el, "data-f")] = str(el.value)
-        fields["tags"] = [t.strip() for t in fields.get("tags", "").split(",") if t.strip()]
+        if "tags" in fields:                 # not on the form any more; never wipe them
+            fields["tags"] = [t.strip() for t in fields["tags"].split(",") if t.strip()]
+        fields["tone"] = {attr(el, "data-tone"): float(el.value or 0)
+                          for el in self.root.querySelectorAll("[data-tone]")}
         for k in ("tts_speed",):
             if k in fields:
                 fields[k] = float(fields[k] or 0)
@@ -836,8 +833,9 @@ class StudioView:
         for key, value in f.items():
             if key not in ("first_mes", "alternate_greetings", "avatar_mode", "tags"):
                 card[key] = value
-        tags = f.get("tags") or []
-        card["tags"] = tags if isinstance(tags, list) else [t.strip() for t in str(tags).split(",") if t.strip()]
+        if "tags" in f:
+            tags = f.get("tags") or []
+            card["tags"] = tags if isinstance(tags, list) else [t.strip() for t in str(tags).split(",") if t.strip()]
         card["first_mes"] = f.get("first_mes", card.get("first_mes"))
         card["alternate_greetings"] = f.get("alternate_greetings", card.get("alternate_greetings"))
         card["avatar_mode"] = f.get("avatar_mode", card.get("avatar_mode"))

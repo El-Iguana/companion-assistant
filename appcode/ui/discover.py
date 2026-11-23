@@ -98,7 +98,7 @@ class DiscoverView:
         top_tags = sorted(tags, key=lambda t: (-tags[t], t.lower()))[:12]
         pills = "".join(
             f'<button class="pt-pill{" on" if self.tag == t else ""}" data-tag="{esc(t)}">{esc(t or "All")}</button>'
-            for t in ["", *top_tags])
+            for t in ["", *top_tags]) if top_tags else ""          # no tags: no filter row
         self.root.innerHTML = (
             '<div class="pt-page">'
             '<section class="pt-hero">'

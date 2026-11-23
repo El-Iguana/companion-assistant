@@ -75,10 +75,6 @@ class ProfileModal:
             stats.append(f'<span>last {esc(ago(chats["latest_at"]))}</span>')
         if c.get("has_vrm"):
             stats.append('<span class="pt-tag">3D avatar</span>')
-        elif c.get("sprites"):
-            stats.append(f'<span class="pt-tag">{c["sprites"]} expressions</span>')
-        if c.get("creator"):
-            stats.append(f'<span>by <b>{esc(c["creator"])}</b></span>')
 
         can_continue = bool(chats.get("resume_id"))
         actions = []
