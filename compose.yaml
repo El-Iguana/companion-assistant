@@ -4,9 +4,8 @@
 #   docker compose up -d          (or: podman compose up -d)
 #   docker compose logs companion-assistant  # the first-run ADMIN password is here
 #
-# Cantinero needs a KoboldCPP to chat with (and optionally a ComfyUI for
-# sprites). By default it looks for both on this computer, through
-# host.docker.internal. Add-ons, stacked with -f or COMPOSE_FILE in .env:
+# Cantinero needs a KoboldCPP to chat with. By default it looks for it on this
+# computer, through host.docker.internal. Add-ons, stacked with -f or COMPOSE_FILE in .env:
 #   compose.koboldcpp.yaml      KoboldCPP in a container next to Cantinero
 #   compose.gpu.docker.yaml     …with the NVIDIA GPU, under Docker
 #   compose.gpu.podman.yaml     …with the NVIDIA GPU, under Podman
@@ -38,7 +37,6 @@ services:
     environment:
       PANTHEON_PORT: ${PANTHEON_PORT:-7867}
       KOBOLD_URL: ${KOBOLD_URL:-http://host.docker.internal:5001}
-      COMFYUI_URL: ${COMFYUI_URL:-http://host.docker.internal:8188}
       # The image is UTC; timestamps and "what time is it?" follow this.
       TZ: ${TZ:-UTC}
       # Read once, when the first account is created. Empty = a random one,

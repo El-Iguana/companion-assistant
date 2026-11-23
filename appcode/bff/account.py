@@ -121,7 +121,7 @@ class Account:
 
         cards = []
         for c in sorted(main._list(cur.cards, CharacterCard), key=lambda c: c.name.lower()):
-            extras = [f"{len(c.expressions)} sprites"] if c.expressions else []
+            extras = []
             if c.vrm:
                 extras.append("VRM")
             if c.tts_voice:

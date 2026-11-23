@@ -154,15 +154,11 @@ def studio_steps(page) -> None:
     # 3D avatar: import the repo's baseline model, see its audit
     baseline = Path(__file__).resolve().parents[1] / "data" / "vrm" / "baseline.vrm"
     if baseline.exists():
-        page.check('input[name="st-avatar"][value="vrm"]')
         page.set_input_files("#st-vrm-file", str(baseline))
         page.wait_for_function("document.querySelector('#st-vrm-info').textContent.includes('triangles')",
                                timeout=60_000)
         page.screenshot(path=str(SHOTS / "studio-vrm.png"))
-        page.check('input[name="st-avatar"][value="sprite"]')
-    page.click('[data-jump="look"]')
-    page.wait_for_timeout(600)
-    page.screenshot(path=str(SHOTS / "studio-sprites.png"))
+        page.select_option('[data-f="vrm"]', "")          # back to the portrait for now
 
     # duplicate: the VRM import left unsaved changes, so it asks first
     page.click('[data-act="duplicate"]')
@@ -235,12 +231,11 @@ def phase6_steps(page, card_id: str) -> None:
     spoken = page.evaluate("PantheonVoice._clean('| a | b |\\n|---|---|\\n*waves* ~150 [expr:joy]')")
     assert spoken == "a, b. about 150", spoken
 
-    # the 3D avatar: put the card on the VRM tier, open a chat, see the canvas
+    # the 3D avatar: give the card a model, open a chat, see the canvas
     page.evaluate(f"location.hash = '#/create/{card_id}'")
     page.wait_for_selector('[data-f="name"]', timeout=20_000)
     model = page.evaluate("[...document.querySelectorAll('[data-f=vrm] option')].map(o => o.value).find(v => v)")
     if model:
-        page.check('input[name="st-avatar"][value="vrm"]')
         page.select_option('[data-f="vrm"]', model)
         page.click('[data-act="save"]')
         page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
@@ -248,7 +243,6 @@ def phase6_steps(page, card_id: str) -> None:
         page.wait_for_function("location.hash.startsWith('#/chat/')", timeout=10_000)
         page.wait_for_selector("#ch-avatar-slot canvas.pt-avatar:not([hidden])", timeout=60_000)
         assert page.evaluate("document.body.classList.contains('pt-avatar-on')")
-        assert page.locator("#ch-portrait:not([hidden])").count() == 0, "sprite hides under the avatar"
         page.wait_for_timeout(1500)
         page.screenshot(path=str(SHOTS / "chat-avatar.png"))
         # leaving the chat parks the canvas and stops the renderer
@@ -257,7 +251,7 @@ def phase6_steps(page, card_id: str) -> None:
         assert not page.evaluate("document.body.classList.contains('pt-avatar-on')")
         page.evaluate(f"location.hash = '#/create/{card_id}'")
         page.wait_for_selector('[data-f="name"]', timeout=20_000)
-        page.check('input[name="st-avatar"][value="sprite"]')
+        page.select_option('[data-f="vrm"]', "")          # no model: back to the portrait
         page.click('[data-act="save"]')
         page.wait_for_function("document.querySelector('#st-status').textContent === 'Saved'", timeout=15_000)
 

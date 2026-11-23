@@ -116,7 +116,6 @@ class ChatView:
         self.menu = ContextMenu(ContextMenuConfig(items=[MenuItem(id="x", label="…")]))
         self.menu.on_select(self._on_menu)
         self._menu_mid = ""
-        self.live_expr = ""
 
     # --- lifecycle -------------------------------------------------------------
     def mount(self, root) -> None:
@@ -127,7 +126,6 @@ class ChatView:
         self.listeners.on(w, "pvoice:ready", lambda _e: self._attach_voice())
         self.listeners.on(w, "pvoice:send", self._on_voice_send)
         self.listeners.on(w, "pvoice:abort", lambda _e: self.stop())
-        self.listeners.on(w, "pvoice:expr", lambda e: self._portrait(str(e.detail.label or "")))
         self.listeners.on(w, "pvoice:state", lambda e: self._paint_voice(e.detail))
         self.listeners.on(w, "pvoice:persist", self._on_voice_persist)
         self.listeners.on(w, "pvoice:toast", lambda e: toast(str(e.detail.msg), str(e.detail.kind or "info"), 6000))
@@ -173,9 +171,9 @@ class ChatView:
         card = d["card"]
         portrait = portrait_url(card["id"], card.get("updated_at", "")) if card.get("has_portrait") else ""
         bg = f'<div class="pt-chat-bg" style="background-image:url(&quot;{esc(portrait)}&quot;)"></div>' if portrait else ""
-        # The stage: a column of its own beside the chat for the sprite or 3D avatar,
-        # so the messages never run underneath it. Only for cards that have one.
-        stage = bool(card.get("expressions")) or bool(card.get("has_vrm"))
+        # The stage: a column of its own beside the chat for the 3D avatar, so the
+        # messages never run underneath it. Only for cards that have one.
+        stage = bool(card.get("has_vrm"))
         self.root.innerHTML = (
             f'<div class="pt-chat{" has-stage" if stage else ""}">'
             + bg
@@ -206,7 +204,6 @@ class ChatView:
             f'<div class="pt-hint">{self._hint()}</div>'
             '</div></div>'
             '<aside class="pt-stage" id="ch-stage"' + ("" if stage else " hidden") + '>'
-            '<img class="pt-portrait" id="ch-portrait" alt="" hidden>'
             '<div class="pt-avatar-slot" id="ch-avatar-slot"></div>'
             '</aside></div>')
         inp = by_id("ch-input")
@@ -216,7 +213,6 @@ class ChatView:
         self._render_header()
         self._render_messages()
         self._render_sugs()
-        self._portrait()
         ptt = by_id("ch-ptt")
         for name in ("pointerdown", "pointerup", "pointerleave", "pointercancel"):
             self.listeners.on(ptt, name, self._on_ptt)
@@ -271,8 +267,6 @@ class ChatView:
             content = m["swipes"][max(0, min(m.get("swipe_index", 0), len(m["swipes"]) - 1))]
         if char:
             head = esc(card["name"]) + (f" · {esc(time)}" if time else "")
-            if m.get("expression") and card.get("expressions"):
-                head += f' · <span class="pt-feel">{esc(m["expression"])}</span>'
         else:
             head = esc(time) if time else esc(persona["name"])
         acts = []
@@ -322,32 +316,6 @@ class ChatView:
         box.innerHTML = "".join(f'<button class="pt-sug" data-sug="{esc(s)}">{esc(s)}</button>'
                                 for s in starters)
         box.hidden = not starters
-
-    # --- portrait ----------------------------------------------------------------
-    def _portrait(self, label: str = "") -> None:
-        """The docked expression sprite: a live beat when given, else the running mood,
-        else the last reply's feeling. Only for cards that have sprites."""
-        img = by_id("ch-portrait")
-        card = self.data.get("card") or {}
-        have = card.get("expressions") or []
-        if not img or not have:
-            return
-        if js.document.body.classList.contains("pt-avatar-on"):
-            img.hidden = True                   # the 3D avatar owns that corner
-            return
-        if not label:
-            msgs = self.data["session"]["messages"]
-            last = next((m for m in reversed(msgs) if m["role"] == "char"), None)
-            label = ((self.data["session"].get("mood") or {}).get("mood")
-                     or (last or {}).get("expression") or "neutral")
-        if label not in have:
-            label = "neutral" if "neutral" in have else have[0]
-        if label == self.live_expr and not img.hidden:
-            return
-        self.live_expr = label
-        img.src = (f"/pmedia/card/{js.encodeURIComponent(card['id'])}/expr/"
-                   f"{js.encodeURIComponent(label)}.png?v={js.encodeURIComponent(card.get('updated_at', ''))}")
-        img.hidden = False
 
     # --- scrolling ---------------------------------------------------------------
     def _near_bottom(self) -> bool:
@@ -439,8 +407,6 @@ class ChatView:
                 elif "expr" in ev:
                     if v:
                         v.expr(str(ev["expr"]))      # timed to the audio when speaking
-                    else:
-                        self._portrait(str(ev["expr"]))
                 elif "error" in ev:
                     error = str(ev["error"])
                 elif ev.get("done"):
@@ -469,7 +435,6 @@ class ChatView:
             self._render_header()
             self._render_messages()
             self._render_sugs()
-            self._portrait()
         if self.stopped:
             toast("Stopped — that turn was not saved." + (" What you typed is back in the box." if restore else ""),
                   "info", 5000)
@@ -514,12 +479,6 @@ class ChatView:
         if ptt:
             ptt.classList.toggle("recording", bool(st.recording))
             ptt.classList.toggle("busy", bool(st.busy))
-        img = by_id("ch-portrait")
-        if img and bool(st.avatar):
-            img.hidden = True
-        elif img and img.hidden and self.data:
-            self.live_expr = ""
-            self._portrait()
 
     def _on_ptt(self, ev) -> None:
         v = voice()
@@ -632,7 +591,6 @@ class ChatView:
         if isinstance(r, dict) and r.get("expression"):
             m["expression"] = r["expression"]
             self._render_messages()
-            self._portrait(r["expression"])
 
     # --- menus -------------------------------------------------------------------
     def _msg(self, mid: str):

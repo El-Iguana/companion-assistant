@@ -19,8 +19,8 @@ Type=simple
 ExecStart=@DIR@/desktop/pantheon-desktop.py
 Restart=on-failure
 RestartSec=3
-# The renderer is a continuous WebGL loop sharing the GPU with KoboldCPP and
-# ComfyUI; keep it from competing with inference for CPU.
+# The renderer is a continuous WebGL loop sharing the GPU with KoboldCPP; keep it
+# from competing with inference for CPU.
 Nice=5
 
 [Install]

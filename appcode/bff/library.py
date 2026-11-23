@@ -55,7 +55,7 @@ class Library:
                 # (2026-11-23); they stay on the card for export.
                 "tags": [], "creator": "", "starters": starters(card),
                 "has_portrait": has_portrait(card),
-                "sprites": 0, "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm",
+                "has_vrm": bool(card.vrm) and card.avatar_mode == "vrm",
                 "updated_at": card.updated_at,
             },
             "chats": {"count": len(chats),

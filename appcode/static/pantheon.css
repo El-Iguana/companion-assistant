@@ -369,7 +369,6 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 .pt-msg-col { display: flex; flex-direction: column; max-width: min(76%, 680px); min-width: 0; }
 .pt-msg.user .pt-msg-col { align-items: flex-end; }
 .pt-msg-head { font-size: 11.5px; color: var(--mut); margin: 0 4px 4px; }
-.pt-feel { color: var(--accText); text-transform: capitalize; }
 .pt-bubble { background: var(--card2); border: 1px solid var(--line); border-radius: 16px; border-bottom-left-radius: 6px;
   padding: 10px 13px; font-size: 14.5px; line-height: 1.55; overflow-wrap: anywhere; }
 .pt-bubble p { margin: 0 0 8px; }
@@ -447,7 +446,7 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 @keyframes pt-stop { 0% { box-shadow: 0 0 0 0 rgba(216,75,75,.55); } 70% { box-shadow: 0 0 0 10px rgba(216,75,75,0); } 100% { box-shadow: 0 0 0 0 rgba(216,75,75,0); } }
 .pt-hint { font-size: 11.5px; color: var(--mut); margin: 8px 6px 0; }
 
-/* The stage: the right-hand column that holds the sprite or the 3D avatar. A fixed
+/* The stage: the right-hand column that holds the 3D avatar. A fixed
    share of the chat area (--pt-stage-w), so the messages never run underneath it;
    the chat column stays centred in what is left. Phones drop it (below). */
 .pt-chat.has-stage { --pt-stage-w: 36%; justify-content: flex-start; }
@@ -455,10 +454,6 @@ html, body { background: var(--bg); color: var(--txt); overflow: clip; height: 1
 .pt-stage { position: relative; z-index: 1; flex: 0 0 var(--pt-stage-w); min-width: 260px; max-width: 820px;
   height: 100%; border-left: 1px solid var(--line); overflow: clip; }
 .pt-stage[hidden] { display: none; }
-.pt-portrait { position: absolute; inset: 12px 12px 0; width: calc(100% - 24px); height: calc(100% - 12px);
-  object-fit: contain; object-position: bottom center; pointer-events: none;
-  filter: drop-shadow(0 20px 40px rgba(0,0,0,.45)); }
-.pt-portrait[hidden] { display: none; }
 
 /* Voice (Phase 6). Speaker in the header, hands-free + push-to-talk in the composer. */
 .pt-ibtn.on { color: var(--acc); border-color: var(--accLine); }
@@ -571,30 +566,13 @@ body > canvas.pt-avatar { position: fixed; width: 1px; height: 1px; left: -10px;
 .pt-seg span { display: block; padding: 7px 14px; border-radius: 999px; font: 700 13px var(--sans); color: var(--mut); }
 .pt-seg input:checked + span { background: var(--grad); color: var(--ink); }
 .pt-seg input:disabled + span { opacity: .45; cursor: not-allowed; }
-/* Studio sprite panel: the two choices side by side, the portrait it will start from. */
-.pt-spr-choice { display: flex; flex-wrap: wrap; gap: 14px 24px; }
-.pt-spr-portrait { display: flex; align-items: center; gap: 12px; }
-.pt-spr-thumb { width: 72px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: var(--bg2); }
 .pt-vrm-info { font-size: 13px; line-height: 1.6; color: var(--txt); background: var(--bg2); border-radius: 12px; padding: 10px 12px; }
 .pt-vrm-info code { font-family: ui-monospace, monospace; font-size: 12px; }
 .pt-good { color: #5bd38a; }
 .pt-warn { color: #e6b450; }
 .pt-bad { color: #f0a3a3; }
 
-.pt-job { display: flex; align-items: center; gap: 10px; font-size: 13.5px; padding: 10px 12px; border-radius: 12px;
-  background: var(--accSoft); border: 1px solid var(--accLine); }
 .pt-spin.small { width: 16px; height: 16px; border-width: 2px; }
-.pt-sprites-count { margin-bottom: 8px; }
-.pt-sprite-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
-.pt-sprite { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg2); }
-.pt-sprite-img { aspect-ratio: 3 / 4; display: flex; align-items: flex-end; justify-content: center;
-  background-color: #1b1b22; background-image: linear-gradient(45deg, #24242c 25%, transparent 25%), linear-gradient(-45deg, #24242c 25%, transparent 25%),
-  linear-gradient(45deg, transparent 75%, #24242c 75%), linear-gradient(-45deg, transparent 75%, #24242c 75%);
-  background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
-.pt-sprite-img img { max-width: 100%; max-height: 100%; object-fit: contain; object-position: bottom; display: block; }
-.pt-sprite.empty .pt-sprite-img { background: var(--bg2); align-items: center; }
-.pt-sprite-foot { display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 9px; font-size: 12px; text-transform: capitalize; }
-.pt-sprite-foot span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pt-phone { width: 300px; height: 600px; margin: 16px auto 0; border-radius: 38px; border: 8px solid #050507;
   background: var(--bg); box-shadow: var(--shadow), 0 0 0 1px var(--line); display: flex; flex-direction: column; overflow: hidden; position: relative; }

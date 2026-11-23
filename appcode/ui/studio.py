@@ -5,8 +5,7 @@ A full page: the form on the left in sections, a phone-shaped live preview on th
 Everything the classic card editor did is here:
 
 * fields, greetings (a repeater, not one-per-line), starters, lorebook entries;
-* expression sprites (generate a set as a background job, per-sprite regenerate and
-  delete, at in-chat portrait framing) and the 3D avatar (VRM import with its audit);
+* personality with voice & tone sliders, and the 3D avatar (VRM import with its audit);
 * voice (Kokoro/Piper, pace, test) and the hands-free phrases;
 * import a V2/V3 PNG/JSON card, duplicate, delete.
 
@@ -28,11 +27,9 @@ from bff.studio import Studio
 from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, csrf_token, esc,
                        failed, portrait_url, spawn, toast)
 
-STYLES = ["anime", "none", "photorealistic", "fantasy_art", "cinematic", "dark_fantasy"]
 SECTIONS = [("basics", "Basics"), ("persona", "Personality & tone"), ("greet", "Greetings"),
             ("lore", "Lorebook"),
             ("avatar", "3D avatar"), ("voice", "Voice"), ("advanced", "Advanced")]
-JOB_POLL_MS = 2000
 
 
 def _draft_key(card_id: str) -> str:
@@ -76,8 +73,6 @@ class StudioView:
         self.vrm_still_of = ""
         self.dirty = False
         self.saving = False
-        self.job = None
-        self._poll = None
         self.listeners = Listeners()
         self._keep: list = []
 
@@ -90,7 +85,6 @@ class StudioView:
     def unmount(self) -> None:
         if self.dirty and self.data:
             self._save_draft()
-        self._stop_poll()
         self.listeners.clear()
         self.root = None
 
@@ -107,8 +101,6 @@ class StudioView:
         self.lore = [dict(e) for e in (book.get("entries") or [])]
         self.render()
         self._offer_draft()
-        if r.get("job"):
-            self._follow_job(r["job"])
 
     # --- render ------------------------------------------------------------------
     def render(self) -> None:
@@ -151,7 +143,6 @@ class StudioView:
         self._render_vrm_info()
         self._sync_profile()
         self._render_preview()
-        self._sync_sprite_opts()
 
     # Small field builders. Every value is escaped; data-f names the card field.
     @staticmethod
@@ -303,7 +294,7 @@ class StudioView:
             f'<textarea rows="2" data-lore="content" placeholder="Text injected when a key matches…">{esc(e.get("content") or "")}</textarea>'
             '</div>')
 
-    # --- sprites -------------------------------------------------------------------
+    # --- profile picture -----------------------------------------------------------
     def _profile_html(self) -> str:
         """Where the profile picture comes from: portrait, one sprite, or a 3D still."""
         c = self.data["card"]
@@ -354,246 +345,6 @@ class StudioView:
         self._render_preview()
         return True
 
-    def _sprites_html(self) -> str:
-        """The sprite panel, wrapped so it can be redrawn (after a save adds or removes the
-        portrait) without touching the rest of the Studio."""
-        return f'<div id="st-spr-panel">{self._sprites_inner()}</div>'
-
-    def _sprites_inner(self) -> str:
-        c = self.data["card"]
-        if self.data["is_new"]:
-            return '<p class="pt-dim">Save the character first — sprites are generated onto a saved card.</p>'
-        cps = self.data.get("checkpoints") or []
-        kontext_ok = bool(self.data.get("kontext"))
-        has_portrait = bool(c.get("has_portrait"))
-        # Remembered from the last set: where it came from and how its emotions were made.
-        src = "portrait" if (c.get("expr_from_upload") and has_portrait) else "prompt"
-        if has_portrait and not (c.get("sprites") or []):
-            src = "portrait"                          # a portrait and no sprites yet: the obvious start
-        method = "kontext" if (kontext_ok and c.get("expr_kontext", True)) else "img2img"
-        # Default model: the one this card's sprites were made with (so a single regen
-        # matches the set), else FLUX when it's installed, else the first one.
-        want = c.get("expr_checkpoint") if c.get("expr_checkpoint") in cps else next(
-            (x for x in cps if "flux" in x.lower()), cps[0] if cps else "")
-        cp_opts = "".join(f'<option value="{esc(x)}"{" selected" if x == want else ""}>{esc(x)}</option>'
-                          for x in cps) or '<option value="">ComfyUI is not running</option>'
-        styles = "".join(f'<option value="{s}">{s}</option>' for s in STYLES)
-        denoise = float(c.get("expr_denoise") or 0.55)
-
-        def seg(name, value, label, on, disabled=False, title=""):
-            return (f'<label title="{esc(title)}"><input type="radio" name="{name}" value="{value}"'
-                    f'{" checked" if on else ""}{" disabled" if disabled else ""}><span>{label}</span></label>')
-
-        cid = esc(c["id"])
-        bust = esc(c.get("updated_at", ""))
-        thumb = (f'<img class="pt-spr-thumb" src="/pmedia/card/{cid}.png?upload=1&v={bust}" alt="The uploaded portrait">'
-                 if has_portrait else "")
-        no_portrait = ('<p class="pt-dim" id="st-spr-noportrait">No portrait yet: upload one under '
-                       '<b>Choose portrait</b> under Basics. It is saved for you when you generate.</p>')
-        return (
-            '<div class="pt-spr-choice">'
-            '<div class="pt-field"><span>Make sprites from</span><div class="pt-seg">'
-            + seg("st-spr-src", "portrait", "The portrait", src == "portrait",
-                  title="Every sprite is the uploaded portrait with a different expression.")
-            + seg("st-spr-src", "prompt", "The appearance prompt", src == "prompt",
-                  title="A new picture is drawn from the appearance prompt, then given each expression.")
-            + '</div></div>'
-            '<div class="pt-field"><span>Change the expression with</span><div class="pt-seg">'
-            + seg("st-spr-method", "kontext", "Flux Kontext", method == "kontext", not kontext_ok,
-                  "Edits the picture by instruction: only the expression changes, so the likeness holds. "
-                  "About 50 s per sprite." if kontext_ok else "Flux Kontext isn't installed in ComfyUI.")
-            + seg("st-spr-method", "img2img", "A model (img2img)", method == "img2img",
-                  title="Redraws the picture with the model below. Faster (about 15 s per sprite); "
-                        "the expression is subtler and the likeness drifts more.")
-            + '</div></div></div>'
-            f'<div class="pt-spr-portrait" id="st-spr-portrait">{thumb or no_portrait}'
-            + ('<small class="pt-dim">The neutral sprite is the portrait itself; each other '
-               'expression is made from it.</small>' if thumb else '') + '</div>'
-            '<div class="pt-row3">'
-            f'<label class="pt-field" id="st-spr-model"><span>Model</span><select id="st-checkpoint">{cp_opts}</select></label>'
-            f'<label class="pt-field"><span>Style</span><select id="st-style">{styles}</select></label>'
-            '<label class="pt-field"><span>Set</span><select id="st-set"><option value="core">Core 8 — fast</option>'
-            '<option value="full">Full 28 — SillyTavern</option></select></label></div>'
-            f'<label class="pt-field" id="st-spr-strength"><span>Expression strength · <b id="st-denoise-val">{denoise:.2f}</b></span>'
-            f'<input type="range" id="st-denoise" min="0.2" max="0.9" step="0.05" value="{denoise:g}">'
-            '<small>Lower keeps the likeness; higher shows the feeling more strongly.</small></label>'
-            '<div class="pt-btnrow">'
-            '<label class="pt-check"><input type="checkbox" id="st-transparent" checked>Transparent background</label>'
-            '<span class="pt-flex"></span>'
-            '<button class="pt-btn primary small" data-act="generate">'
-            '<i class="mdi mdi-creation"></i><span id="st-gen-label">Generate sprites</span></button></div>'
-            '<div class="pt-job" id="st-job" hidden></div>'
-            f'<div class="pt-sprites" id="st-sprites">{self._gallery_html()}</div>')
-
-    def _spr_choice(self, name: str) -> str:
-        el = self.root.querySelector(f'input[name="{name}"]:checked') if self.root else None
-        return str(el.value) if el else ""
-
-    def _sync_sprite_opts(self) -> None:
-        """Show what the chosen source and method need, and say what the button will do."""
-        if not by_id("st-spr-panel") or self.data.get("is_new"):
-            return
-        src, method = self._spr_choice("st-spr-src"), self._spr_choice("st-spr-method")
-        portrait = src == "portrait"
-        has = bool(self.data["card"].get("has_portrait")) or bool(self.portrait)
-        cps = self.data.get("checkpoints") or []
-        # The model draws the base (prompt source) and does img2img; portrait + Kontext uses none.
-        needs_model = not (portrait and method == "kontext")
-        by_id("st-spr-portrait").hidden = not portrait
-        by_id("st-spr-model").style.visibility = "visible" if needs_model else "hidden"
-        by_id("st-spr-strength").hidden = method != "img2img"
-        label = by_id("st-gen-label")
-        if label:
-            label.textContent = "Generate sprites from the portrait" if portrait else "Generate sprites"
-        btn = self.root.querySelector('[data-act="generate"]')
-        if btn:
-            btn.disabled = bool(self.job) or (portrait and not has) or (needs_model and not cps)
-            btn.title = ("Upload a portrait first" if portrait and not has
-                         else "Start ComfyUI to pick a model" if needs_model and not cps else "")
-
-    def _render_sprite_panel(self) -> None:
-        """After a save added or removed the portrait: redraw only the portrait preview.
-        Rebuilding the whole panel reset the model, style, set and transparency the user
-        had just chosen, and a generate that saved first then ran with the defaults."""
-        box = by_id("st-spr-portrait")
-        if box is None:
-            return
-        tmp = js.document.createElement("div")
-        tmp.innerHTML = self._sprites_inner()
-        part = tmp.querySelector("#st-spr-portrait")
-        if part is not None:
-            box.innerHTML = part.innerHTML
-        self._sync_sprite_opts()
-
-    def _gallery_html(self) -> str:
-        have = set(self.data["card"].get("sprites") or [])
-        sets = self.data.get("emotions") or {"core": [], "full": []}
-        full = any(e not in sets["core"] for e in have)
-        target = sets["full"] if full else sets["core"]
-        cid = self.data["card"]["id"]
-        bust = self.data["card"].get("updated_at", "")
-        cells = []
-        for emo in target:
-            img = (f'<img src="/pmedia/card/{esc(cid)}/expr/{esc(emo)}.png?v={esc(bust)}" alt="{esc(emo)}" loading="lazy">'
-                   if emo in have else '<span class="pt-dim">—</span>')
-            delete = (f'<button class="pt-mbtn" data-spr-del="{esc(emo)}" title="Delete"><i class="mdi mdi-close"></i></button>'
-                      if emo in have else "")
-            cells.append(f'<div class="pt-sprite{"" if emo in have else " empty"}"><div class="pt-sprite-img">{img}</div>'
-                         f'<div class="pt-sprite-foot"><span>{esc(emo)}</span>'
-                         f'<button class="pt-mbtn" data-spr-regen="{esc(emo)}" title="{"Regenerate" if emo in have else "Generate"}">'
-                         f'<i class="mdi mdi-autorenew"></i></button>{delete}</div></div>')
-        return (f'<div class="pt-dim pt-sprites-count">{len(have)} sprite{"s" if len(have) != 1 else ""} · '
-                f'showing {"Full 28" if full else "Core 8"}</div><div class="pt-sprite-grid">{"".join(cells)}</div>')
-
-    def _gen_params(self) -> dict:
-        def val(i):
-            el = by_id(i)
-            return str(el.value) if el else ""
-        source = self._spr_choice("st-spr-src") or "prompt"
-        method = self._spr_choice("st-spr-method") or "img2img"
-        return {"source": source, "method": method,
-                # Portrait + Kontext uses no model; sending none says so.
-                "checkpoint": "" if (source == "portrait" and method == "kontext") else val("st-checkpoint"),
-                "style": val("st-style") or "anime",
-                "preset": val("st-set") or "core", "transparent": bool(by_id("st-transparent").checked),
-                "denoise": float(val("st-denoise") or 0.55),
-                "appearance": str(self.root.querySelector('[data-f="appearance"]').value or "")}
-
-    async def _generate(self, emotion: str = "") -> None:
-        if self.job:
-            toast("A generation is already running for this character.", "warning")
-            return
-        params = self._gen_params()
-        if not emotion and params["source"] == "portrait" and (self.portrait or self.remove_portrait):
-            # A portrait picked (or removed) but not saved: the server only knows the saved
-            # one, so save first rather than generate from the old picture.
-            if self.remove_portrait:
-                toast("The portrait is marked for removal — save, then upload one to generate from.", "warning")
-                return
-            await self._save()
-            if self.dirty or self.portrait:
-                return                                   # the save failed and said why
-            params = self._gen_params()
-        if not emotion and self.data["card"].get("sprites"):
-            if not await message.confirm(
-                    "Generate a new set? It replaces every sprite this character has when it finishes.",
-                    title="Generate sprites", ok_text="Generate"):
-                return
-        r = await (Studio().regenerate(self.card_id, emotion, params) if emotion
-                   else Studio().generate(self.card_id, params))
-        if failed(r, "start generating"):
-            return
-        self._follow_job(r["job"])
-
-    def _follow_job(self, job: dict) -> None:
-        self.job = job
-        self._render_job()
-        self._stop_poll()
-        proxy = create_proxy(lambda *_: spawn(self._poll_job(), "job"))
-        self._keep.append(proxy)
-        self._poll = js.setInterval(proxy, JOB_POLL_MS)
-
-    def _stop_poll(self) -> None:
-        if self._poll is not None:
-            js.clearInterval(self._poll)
-            self._poll = None
-
-    async def _poll_job(self) -> None:
-        if not self.job:
-            return
-        r = await Studio().job(self.job["id"])
-        if not isinstance(r, dict) or not r.get("ok"):
-            self._stop_poll()
-            self.job = None
-            self._render_job(error=(r or {}).get("error", "the job vanished"))
-            return
-        self.job = r["job"]
-        self._render_job()
-        if self.job["state"] != "running":
-            self._stop_poll()
-            job, self.job = self.job, None
-            if job["state"] == "done":
-                toast(f"{job['label'].replace('Generating', 'Generated')} — done.", "success")
-                s = await Studio().sprites(self.card_id)
-                if isinstance(s, dict) and s.get("ok"):
-                    self.data["card"]["sprites"] = s["sprites"]
-                    self.data["card"]["updated_at"] = str(js.Date.now())     # bust the image cache
-                    box = by_id("st-sprites")
-                    if box:
-                        box.innerHTML = self._gallery_html()
-            self._render_job(final=job)
-
-    def _render_job(self, final: dict = None, error: str = "") -> None:
-        box = by_id("st-job")
-        if not box:
-            return
-        job = final or self.job
-        box.hidden = not (job or error)
-        self._sync_sprite_opts()                     # the button: job running, portrait, model
-        if error:
-            box.innerHTML = f'<i class="mdi mdi-alert"></i>{esc(error)}'
-            return
-        if not job:
-            return
-        mins, secs = divmod(int(job.get("elapsed") or 0), 60)
-        if job["state"] == "running":
-            box.innerHTML = (f'<span class="pt-spin small"></span>{esc(job["label"])}… '
-                             f'<span class="pt-dim">{mins}:{secs:02d} — a full set takes a few minutes; '
-                             'you can keep editing, or leave and come back.</span>')
-        elif job["state"] == "done":
-            box.innerHTML = f'<i class="mdi mdi-check"></i>{esc(job["label"])} finished in {mins}:{secs:02d}.'
-        else:
-            box.innerHTML = f'<i class="mdi mdi-alert"></i>{esc(job["label"])} failed: {esc(job.get("error"))}'
-
-    async def _delete_sprite(self, emo: str) -> None:
-        if not await message.confirm(f'Delete the "{emo}" sprite?', title="Delete sprite", ok_text="Delete", danger=True):
-            return
-        r = await Studio().delete_sprite(self.card_id, emo)
-        if failed(r, "delete the sprite"):
-            return
-        self.data["card"]["sprites"] = [e for e in self.data["card"].get("sprites") or [] if e != emo]
-        by_id("st-sprites").innerHTML = self._gallery_html()
-
     # --- avatar --------------------------------------------------------------------
     def _avatar_mode(self) -> str:
         # No sprites to choose any more: a chosen model is the avatar, else the portrait.
@@ -609,7 +360,7 @@ class StudioView:
         name = self._field("vrm")
         m = next((x for x in self.data.get("vrms") or [] if x.get("name") == name), None)
         if not m:
-            box.innerHTML = ('<span class="pt-dim">No model assigned — this character uses expression sprites. '
+            box.innerHTML = ('<span class="pt-dim">No model assigned — this character shows their portrait. '
                              'Import a .vrm (VRoid Hub, Booth) to give them a 3D avatar.</span>')
             return
         if m.get("error"):
@@ -783,11 +534,8 @@ class StudioView:
         src = self._pp_source()
         if src == "vrm" and self.vrm_still:
             return self.vrm_still
-        if src == "sprite" and saved:
-            spr = self._field("portrait_sprite") or "neutral"
-            if spr in (c.get("sprites") or []):
-                return (f"/pmedia/card/{js.encodeURIComponent(c['id'])}/expr/{js.encodeURIComponent(spr)}.png"
-                        f"?v={js.encodeURIComponent(c.get('updated_at', ''))}")
+        if src == "sprite" and saved:                # an older card kept on its sprite picture
+            return portrait_url(c["id"], c.get("updated_at", ""))
         if self.portrait and src in ("", "image"):
             return self.portrait
         if saved and not self.remove_portrait and (c.get("has_portrait") or c.get("has_vrm_still")
@@ -853,12 +601,6 @@ class StudioView:
         f = attr(t, "data-f")
         if f == "tts_speed":
             by_id("st-speed-val").textContent = f"{float(t.value):.2f}"
-        elif t.id == "st-denoise":
-            by_id("st-denoise-val").textContent = f"{float(t.value):.2f}"
-            return
-        if t.id in ("st-checkpoint", "st-style", "st-set", "st-transparent") or \
-                attr(t, "name") in ("st-spr-src", "st-spr-method"):
-            return
         self._mark_dirty()
         if f in ("name", "creator_notes", "personality") or t.hasAttribute("data-greet") or t.hasAttribute("data-starter"):
             self._render_preview()
@@ -869,14 +611,9 @@ class StudioView:
             self._pick_portrait(t)
         elif t.id == "st-vrm-file":
             spawn(self._upload_vrm(), "vrm upload")
-        elif attr(t, "name") == "st-avatar":
-            self._sync_avatar_mode()
-            self._mark_dirty()
         elif attr(t, "data-f") == "vrm":
             self._render_vrm_info()
-        elif attr(t, "name") in ("st-spr-src", "st-spr-method"):
-            self._sync_sprite_opts()
-        elif attr(t, "data-f") in ("portrait_source", "portrait_sprite"):
+        elif attr(t, "data-f") == "portrait_source":
             self._sync_profile()
             self._render_preview()
 
@@ -893,7 +630,6 @@ class StudioView:
                 rm.hidden = False
             self._mark_dirty()
             self._render_preview()
-            self._sync_sprite_opts()
         proxy = create_proxy(loaded)
         self._keep.append(proxy)
         reader.addEventListener("load", proxy)
@@ -914,14 +650,6 @@ class StudioView:
             self._renumber_greets()
             self._mark_dirty()
             self._render_preview()
-            return
-        regen = closest(ev, "[data-spr-regen]")
-        if regen:
-            spawn(self._generate(attr(regen, "data-spr-regen")), "sprite")
-            return
-        sdel = closest(ev, "[data-spr-del]")
-        if sdel:
-            spawn(self._delete_sprite(attr(sdel, "data-spr-del")), "sprite delete")
             return
         act = closest(ev, "[data-act]")
         if not act:
@@ -950,9 +678,6 @@ class StudioView:
             act.hidden = True
             self._mark_dirty()
             self._render_preview()
-            self._sync_sprite_opts()
-        elif which == "generate":
-            spawn(self._generate(), "generate")
         elif which == "capture-still":
             spawn(self._capture_still(), "capture still")
         elif which == "vrm-delete":
@@ -1027,15 +752,11 @@ class StudioView:
             return
         toast(f"{name} saved.", "success")
         if not self.card_id:
-            self.app.go(f"create/{r['id']}")          # now a saved card: sprites unlock
+            self.app.go(f"create/{r['id']}")          # now a saved card
             return
         if self.portrait or self.remove_portrait:
-            # The sprite panel offers "from the portrait" only when there is one: it used to
-            # read has_portrait once, at load, so a portrait added here never unlocked it.
             c["has_portrait"] = bool(self.portrait)
             c["updated_at"] = r.get("updated_at") or str(js.Date.now())
-            self.portrait, self.remove_portrait = "", False
-            self._render_sprite_panel()
         self.portrait, self.remove_portrait = "", False
         if self.vrm_still:
             c["has_vrm_still"], c["vrm_still_of"] = True, self.vrm_still_of

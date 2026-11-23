@@ -1,5 +1,5 @@
-"""Plain GET routes for images the new page shows: card portraits, expression sprites,
-persona portraits.
+"""Plain GET routes for what the page loads by URL: card and persona portraits, card
+export and import, VRM models, speech in and out.
 
 Why not BFF: the BFF is JSON (8 MiB requests), and an image belongs in an ``<img src>``
 the browser can cache; uploads are multipart files (a VRM model is tens of MB). These routes read the signed-in user from
@@ -23,7 +23,6 @@ from fastapi.responses import Response
 router = APIRouter(prefix="/pmedia")
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-_EMOTION = re.compile(r"^[a-z_]{1,32}$")
 
 
 def _ctx(request: Request):
@@ -78,22 +77,6 @@ def card_portrait(card_id: str, request: Request, upload: int = 0):
     from pantheon_web.present import portrait_b64
 
     return _png(request, portrait_b64(card), _etag(cur.cards / f"{card_id}.json"))
-
-
-@router.get("/card/{card_id}/expr/{emotion}.png")
-def card_expression(card_id: str, emotion: str, request: Request):
-    import main
-    from models.schema import CharacterCard
-
-    if not _ID.match(card_id) or not _EMOTION.match(emotion):
-        raise HTTPException(status_code=404, detail="no such sprite")
-    cur = _ctx(request)
-    card = main._load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(status_code=404, detail="no such card")
-    # Same fallback chain as main.get_expression: the emotion, neutral, then the card art.
-    b64 = card.expressions.get(emotion) or card.expressions.get("neutral") or card.image
-    return _png(request, b64, _etag(cur.cards / f"{card_id}.json", emotion))
 
 
 @router.get("/persona/{persona_id}.png")

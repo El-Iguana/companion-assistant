@@ -1,8 +1,8 @@
 """Pantheon assistant — FastAPI app.
 
 A character-card voice assistant (split from El-Iguana/companion, the roleplay app,
-on 2026-11-07). Talks to KoboldCPP (text) and optionally ComfyUI (portraits/
-expressions) on the shared `ai-net` Podman network.
+on 2026-11-07). Talks to KoboldCPP (text) on the shared `ai-net` Podman network, or
+wherever KOBOLD_URL points.
 
 No database: cards, personas, and sessions are JSON files under data/. Multi-user:
 each account has its own isolated library under data/u/<user_id>/… ; auth is a
@@ -32,7 +32,6 @@ from models.schema import (
     AppSettings, AssistantMemory, MemoryFact, User,
 )
 from services.kobold import KoboldClient, ExprEvent
-from services.comfyui import ComfyUIClient
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -50,9 +49,7 @@ for d in (AUTH, USERS, UROOT):
     d.mkdir(parents=True, exist_ok=True)
 
 KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://koboldcpp:5001")
-COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://comfyui:8188")
 kobold = KoboldClient(KOBOLD_URL)
-comfy = ComfyUIClient(COMFYUI_URL)
 
 # The route table is no longer served (2026-10-26, pytincture switch-over): service.py
 # serves the page, whose BFF classes (appcode/bff/) and plain routes (pantheon_web/) call
@@ -377,7 +374,6 @@ async def _shutdown():
     for t in list(_sweep_timers.values()):          # waiting idle timers; a restart's
         t.cancel()                                   # catch-up sweeps those chats instead
     await kobold.close()
-    await comfy.close()
 
 
 # --------------------------------------------------------------------------
@@ -563,15 +559,11 @@ async def put_settings(body: dict, cur: Ctx = Depends(get_ctx)):
 # --------------------------------------------------------------------------
 @app.get("/api/cards")
 async def list_cards(cur: Ctx = Depends(get_ctx)):
-    # Trim the heavy expression sprite blobs from the list; expose a flag instead.
+    # Old cards may still carry sprite blobs from before sprites were removed: trim them.
     out = []
     for c in _list(cur.cards, CharacterCard):
         d = c.model_dump(exclude={"expressions", "vrm_still"})
-        d["has_expressions"] = bool(c.expressions)
-        # Labels only — the sprite blobs stay trimmed. The client needs these to know
-        # which inline [expr:x] beats it actually has a sprite for.
-        d["expression_labels"] = sorted(c.expressions.keys())
-        # Avatar tier: "" here means the client stays on the sprite portrait.
+        # Avatar tier: "" here means the client stays on the portrait.
         # An avatar needs BOTH a model and the mode set to use it, so the
         # renderer must not infer the tier from the filename alone.
         d["has_vrm"] = bool(c.vrm) and c.avatar_mode == "vrm"
@@ -632,115 +624,8 @@ async def export_card(card_id: str, version: int = 2, cur: Ctx = Depends(get_ctx
 
 
 # --------------------------------------------------------------------------
-# ComfyUI + expression sprites
+# 3D avatar (VRM)
 # --------------------------------------------------------------------------
-@app.get("/api/comfyui/status")
-async def comfyui_status(_: User = Depends(current_user)):
-    return await comfy.check_status()
-
-
-@app.get("/api/comfyui/checkpoints")
-async def comfyui_checkpoints(_: User = Depends(current_user)):
-    try:
-        return {"checkpoints": await comfy.list_checkpoints()}
-    except Exception as e:
-        raise HTTPException(502, f"ComfyUI unreachable: {e}")
-
-
-@app.get("/api/expressions/emotions")
-async def expression_emotions(_: User = Depends(current_user)):
-    return {"core": expressions.CORE_EMOTIONS, "full": expressions.FULL_EMOTIONS}
-
-
-@app.post("/api/cards/{card_id}/expressions")
-async def generate_expressions(card_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
-    """Generate an expression sprite per emotion via ComfyUI and store them on the card."""
-    card = _load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(404, "card not found")
-    if "appearance" in body:
-        card.appearance = body["appearance"]
-
-    # Two explicit choices (the Studio's "Make sprites from" / "Change the expression
-    # with"): `source` = "portrait" | "prompt", `method` = "kontext" | "img2img". The
-    # older `from_upload` / `kontext` flags still work when those are absent. A choice
-    # that can't be honoured is an error, never a quiet fallback: a portrait request on a
-    # card with no saved portrait used to come back as a brand-new character drawn from
-    # the appearance prompt, which looked exactly like "it ignored my portrait".
-    from_upload = (body["source"] == "portrait") if "source" in body else bool(body.get("from_upload"))
-    if from_upload and not card.image:
-        raise HTTPException(400, "this character has no saved portrait — upload one in the "
-                                 "Studio and save before generating from it")
-    kontext = (body["method"] == "kontext") if "method" in body else bool(body.get("kontext", card.expr_kontext))
-    if kontext and not await comfy.has_kontext():
-        if "method" in body:
-            raise HTTPException(400, "Flux Kontext isn't installed in ComfyUI — pick img2img and a model")
-        kontext = False                 # the old checkbox only meant "when installed"
-    checkpoint = body.get("checkpoint") or ""
-    # Portrait + Kontext uses no model: the portrait is the base and Kontext does each edit.
-    if not checkpoint and not (from_upload and kontext):
-        raise HTTPException(400, "checkpoint is required")
-    use_kontext = kontext
-    # Persist the choices so single-sprite regen from the gallery matches the batch.
-    card.expr_from_upload = from_upload
-    card.expr_kontext = kontext
-    denoise = min(0.9, max(0.2, float(body.get("denoise", 0.55))))
-    card.expr_denoise = denoise
-    if checkpoint:
-        card.expr_checkpoint = checkpoint
-
-    # Resolve which emotions to generate: explicit list > preset ("core"|"full").
-    emotions = body.get("emotions")
-    if not emotions:
-        emotions = (expressions.FULL_EMOTIONS if body.get("preset") == "full"
-                    else expressions.CORE_EMOTIONS)
-
-    try:
-        sprites = await expressions.generate_expressions(
-            comfy, card, checkpoint=checkpoint,
-            style=body.get("style", "anime"),
-            emotions=emotions,
-            transparent=body.get("transparent", True),
-            from_upload=from_upload,
-            denoise=denoise,
-            use_kontext=use_kontext,
-        )
-    except Exception as e:
-        raise HTTPException(502, f"generation failed: {e}")
-
-    # Bulk generate REPLACES the whole set (clears old sprites first) so switching
-    # between Core/Full starts fresh — no stale sprites left over. Single-sprite
-    # regen (below) still merges.
-    #
-    # Re-read the card before saving: generation takes minutes, and saving the copy
-    # loaded at the start would silently undo any edit made meanwhile (in either
-    # page). Only the sprite fields this request owns are written onto the fresh copy.
-    fresh = _load(cur.cards, card_id, CharacterCard)
-    if not fresh:
-        raise HTTPException(404, "card was deleted during generation")
-    fresh.expressions = sprites
-    fresh.appearance = card.appearance
-    fresh.expr_from_upload = card.expr_from_upload
-    fresh.expr_denoise = card.expr_denoise
-    fresh.expr_checkpoint = card.expr_checkpoint
-    fresh.expr_kontext = card.expr_kontext
-    _save(fresh, cur.cards)
-    return {"generated": list(sprites.keys()), "total": len(fresh.expressions)}
-
-
-@app.get("/api/cards/{card_id}/expression/{emotion}")
-async def get_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)):
-    """Return one expression sprite as a PNG (falls back to neutral, then card art)."""
-    card = _load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(404, "card not found")
-    b64 = card.expressions.get(emotion) or card.expressions.get("neutral") or card.image
-    if not b64:
-        raise HTTPException(404, "no sprite")
-    import base64
-    return Response(content=base64.b64decode(b64), media_type="image/png")
-
-
 BASELINE_VRM = BASE / "data" / "vrm" / "baseline.vrm"   # pixiv sample, redistributable; Mira's
 
 
@@ -859,59 +744,6 @@ async def get_avatar(card_id: str, cur: Ctx = Depends(get_ctx)):
     # so it must not be cached by the view that loads it.
     return FileResponse(path, media_type="model/gltf-binary",
                         headers={"Cache-Control": "no-store"})
-
-
-@app.get("/api/cards/{card_id}/expressions")
-async def list_expressions(card_id: str, cur: Ctx = Depends(get_ctx)):
-    """Which emotions this card currently has sprites for (names only, no blobs)."""
-    card = _load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(404, "card not found")
-    return {"emotions": sorted(card.expressions.keys())}
-
-
-@app.post("/api/cards/{card_id}/expression/{emotion}")
-async def regenerate_expression(card_id: str, emotion: str, body: dict, cur: Ctx = Depends(get_ctx)):
-    """(Re)generate a single expression sprite."""
-    card = _load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(404, "card not found")
-    # Match the batch: its source and method are stored on the card.
-    from_upload = card.expr_from_upload and bool(card.image)
-    use_kontext = card.expr_kontext and await comfy.has_kontext()
-    checkpoint = body.get("checkpoint") or card.expr_checkpoint or ""
-    if not checkpoint and not (from_upload and use_kontext):
-        raise HTTPException(400, "checkpoint is required")
-    if "appearance" in body:
-        card.appearance = body["appearance"]
-    try:
-        sprites = await expressions.generate_expressions(
-            comfy, card, checkpoint=checkpoint, style=body.get("style", "anime"),
-            emotions=[emotion], transparent=body.get("transparent", True),
-            from_upload=from_upload, denoise=card.expr_denoise,
-            use_kontext=use_kontext,
-        )
-    except Exception as e:
-        raise HTTPException(502, f"generation failed: {e}")
-    # Merge onto a fresh read, for the same reason as the batch above.
-    fresh = _load(cur.cards, card_id, CharacterCard)
-    if not fresh:
-        raise HTTPException(404, "card was deleted during generation")
-    fresh.expressions.update(sprites)
-    if "appearance" in body:
-        fresh.appearance = card.appearance
-    _save(fresh, cur.cards)
-    return {"ok": True, "emotion": emotion}
-
-
-@app.delete("/api/cards/{card_id}/expression/{emotion}")
-async def delete_expression(card_id: str, emotion: str, cur: Ctx = Depends(get_ctx)):
-    card = _load(cur.cards, card_id, CharacterCard)
-    if not card:
-        raise HTTPException(404, "card not found")
-    card.expressions.pop(emotion, None)
-    _save(card, cur.cards)
-    return {"ok": True, "total": len(card.expressions)}
 
 
 # --------------------------------------------------------------------------

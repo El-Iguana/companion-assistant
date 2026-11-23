@@ -129,14 +129,10 @@ class Shell:
         return {"ok": True, "chats": out}
 
     async def status(self) -> dict:
-        """KoboldCPP and ComfyUI, probed in parallel (each has a 5 s timeout)."""
-        import asyncio
-
+        """KoboldCPP, the one backend (5 s timeout)."""
         import main
 
-        kobold, comfy = await asyncio.gather(main.kobold.check_status(),
-                                             main.comfy.check_status())
-        return {"ok": True, "kobold": kobold, "comfy": comfy}
+        return {"ok": True, "kobold": await main.kobold.check_status()}
 
     async def set_theme(self, theme: str) -> dict:
         import main

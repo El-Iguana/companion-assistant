@@ -1,6 +1,6 @@
 """Local text-to-speech: Kokoro (default) + Piper (per-voice ONNX models).
 
-Both run on the onnxruntime already present for rembg, with no torch and no cloud. Kokoro
+Both run on onnxruntime (kokoro-onnx brings it), with no torch and no cloud. Kokoro
 is one model + a bank of style embeddings ("af_sarah"); Piper is one .onnx per voice, so
 its voices are namespaced `piper:<name>` and loaded from /app/models/piper (see
 Containerfile). Anything without a prefix goes to Kokoro.

@@ -224,7 +224,7 @@ class CopyCharacterDialog:
         self.modal.set_html(
             '<div class="pt-form">'
             f'<h2>Copy {esc(self.name)} <span class="pt-dim">to another user</span></h2>'
-            '<p class="pt-dim">They get their own copy: portrait, sprites, voice and VRM included. '
+            '<p class="pt-dim">They get their own copy: portrait, voice and VRM included. '
             'Your chats and memory with this character are not copied.</p>'
             + (f'<div class="pt-copyto-list">{rows}</div>' if rows
                else '<p class="pt-dim">There are no other accounts yet — add one in Settings → Users.</p>')

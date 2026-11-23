@@ -2,10 +2,10 @@
 
 **Cantinero** — *El Iguana's bartender, at your service.* A self-hosted **voice assistant on
 character cards**: TTS (Kokoro / Piper) + STT (faster-whisper), hands-free with wake
-word and barge-in, a face from **expression sprites or a VRM avatar**, a **desktop shell**, and
+word and barge-in, a face from a **VRM avatar** (else a portrait), a **desktop shell**, and
 **assistant memory** (standing instructions, facts, task notes). FastAPI + uvicorn in a Podman
-container, talking to **KoboldCPP** (text) and **ComfyUI** (sprites) on the shared `ai-net`
-network. Everything local; no external services, no database.
+container, talking to **KoboldCPP** (text), its one backend, on the shared `ai-net` network.
+Everything local; no external services, no database.
 
 **Split from El-Iguana/companion on 2026-11-07.** This repo (`El-Iguana/companion-assistant`) was
 cloned with companion's full history and trimmed to the assistant half. The sibling `../companion`
@@ -47,9 +47,11 @@ detail, femininity, each −1..1, clamped) → one "Voice and tone" line beside 
 grateful, proud, relieved, sympathetic; no love, anger, fear…) drive the reply's `[expr:x]` beats,
 the classifier fallback, the VRM face, gestures and arm poses, for a card **with a 3D avatar**
 (`card_emotions`); a card without one shows its static portrait and gets none. Before this, only
-sprite cards got beats, so a VRM-only card (Mira) never moved its face or arms on emotion. The
-sprite generation endpoints, ComfyUI client and baked rembg models are still in the code, unused
-by the UI.
+sprite cards got beats, so a VRM-only card (Mira) never moved its face or arms on emotion.
+**Sprites and ComfyUI are gone from the code too (2026-11-23):** the generation endpoints and
+jobs, the ComfyUI client and `COMFYUI_URL`, rembg and its baked models (~340 MB of the image).
+An older card's sprite blobs stay in its JSON; the only thing that still reads them is
+`present.portrait_b64`, so a card whose picture was a sprite keeps it.
 
 Taglines: *"Pull up a stool. What'll it be?"* where the user is invited in (login, the Staff
 page's hero, the rail); *"El Iguana's bartender — at your service."* where the app is described
@@ -137,14 +139,13 @@ PANTHEON_URL=http://127.0.0.1:7877 PANTHEON_USER=… PANTHEON_PASS=… \
 | `PANTHEON_PORT` | 7867 | listen port **and** the port in the address bar — publish it on the same number |
 | `PANTHEON_BIND` | 127.0.0.1 | listen address; the image sets 0.0.0.0 and publishes on 127.0.0.1 only |
 | `PANTHEON_DATA_DIR` | `./data` | another library (dev/test); read by `main.py` |
-| `KOBOLD_URL` / `COMFYUI_URL` | `http://koboldcpp:5001` / `http://comfyui:8188` | backends |
+| `KOBOLD_URL` | `http://koboldcpp:5001` | the backend |
 
 Health: `GET /api/health` (public, `{"ok": true}`) — what `stack status` and the compose
 healthchecks probe. `stack companion-assistant` opens `http://localhost:7867/`, which redirects.
 
-Prereqs: `~/Development/ai_ecosystem/koboldcpp/start.sh` (text). For sprites: `~/bin/comfyui.sh` (ComfyUI in the `comfyui`
-distrobox on :8188). They share VRAM — use SD 1.5 checkpoints (e.g. `absolutereality_v181`) when both
-run. **Data (`data/…`) is a mounted volume**, so editing card/session/memory JSON is live; **code
+Prereqs: KoboldCPP (ai-stack's, or `~/Development/ai_ecosystem/koboldcpp/start.sh`).
+**Data (`data/…`) is a mounted volume**, so editing card/session/memory JSON is live; **code
 is baked in — rebuild after edits.** It runs beside the RPG chat (`companion`, :7861); both share
 the backends. `podman exec` needs `-i` to receive a stdin heredoc.
 
@@ -170,8 +171,8 @@ Traps, all measured:
 - **Podman ignores Docker's GPU form.** `deploy.resources.reservations.devices` gives the container
   no GPU and no error (`nvidia-smi` not found), so there are two GPU files.
 - **From a bridge network, `host.*.internal` does not reach 127.0.0.1-only host services**
-  (connection refused; an all-interfaces port is reachable). ComfyUI binds 127.0.0.1 by default.
-  Hence `compose.host-network.yaml` and `manage.py probe`.
+  (connection refused; an all-interfaces port is reachable). Hence `compose.host-network.yaml`
+  and `manage.py probe`.
 - **Restoring into a volume after the first start duplicates ADMIN.** The first start seeds an
   account; the backup brings another with the same name. Restore = `compose create`, `compose cp`,
   then `up`.
@@ -193,7 +194,6 @@ Traps, all measured:
 |------------|-----------------|---------------------------------|--------------|
 | companion-assistant | ai-net | `127.0.0.1:7867`     | this app      |
 | koboldcpp  | ai-net | `koboldcpp:5001`                | LLM text gen |
-| comfyui    | host            | `host.containers.internal:8188` | image gen    |
 
 ## File structure
 
@@ -205,13 +205,12 @@ run.py                  # dev launcher (service:app, autoreload, :7867)
 models/schema.py        # Pydantic models (below)
 services/
   kobold.py             # KoboldCPP client. chat_generate_stream() = OpenAI SSE + auto-continue (2 rounds)
-  comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, DEFAULT_ASSISTANT, lorebook scan, memory + date/time, the trailing note
   context.py            # the context window: services/muninn/context.py + this app's CONTEXT_SIZES
   memory.py             # what the assistant fold shares: needs_summary, the transcript, fold_chunks/budget
   assistant_memory.py   # assistant memory: directives + facts + task notes (fold, extract, block)
-  expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
+  expressions.py        # the assistant emotion set, valence, classify() a reply, card_emotions()
   tts.py                # local TTS (ONNX/CPU) — Kokoro + Piper (`piper:<name>`), text -> WAV, strips *action* narration
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
@@ -224,8 +223,8 @@ appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (
 pantheon_web/           # server-side plain modules (never shipped to the browser): auth (login hook) ·
                         #   tls + tls_page (HTTPS for other devices: local CA, /ca, /ca.crt) ·
                         #   login_page · media (/pmedia: images, export, import, VRM list/file/upload, tts, stt,
-                        #   avatar.vrm, help.html) · desktop (/desktop + /pdesk/*) · jobs (background sprite
-                        #   generation) · present (shared formatting) · assets/help.html (the in-app guide)
+                        #   avatar.vrm, help.html) · desktop (/desktop + /pdesk/*) ·
+                        #   present (shared formatting) · assets/help.html (the in-app guide)
 static/js/voice.js      # voice island: read-aloud + lip-sync, PTT, mic capture, barge-in; loads vtuber.mjs.
                         #   Its hands-free decisions run in Python when the page plugs in a brain (below);
                         #   the desktop window (no Pyodide) still uses voice.js's own copy of the rules
@@ -249,7 +248,6 @@ data/auth/  secret · users/<uid>.json                    # accounts + signing s
 data/u/<uid>/  characters/ personas/ sessions/ settings/ assistant/  # per-user isolated library
 data/vrm/               # avatar models, shared by all users; baseline.vrm is tracked (Mira's)
 seed/characters/        # example cards put into every NEW library (mira.json); baked into the image
-models/rembg/           # baked: isnet-anime.onnx + u2net.onnx (background removal)
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
 models/whisper/         # baked: faster-whisper base.en (CTranslate2) — STT
@@ -295,15 +293,18 @@ Login-gated, role-based, per-user isolated libraries.
 
 ## Data model (models/schema.py)
 
-- **CharacterCard** — V2/V3 spec fields (`description`, `personality`, `scenario` — shown and
-  injected as "Background", `first_mes`, `mes_example`, `alternate_greetings`, `system_prompt`,
-  `post_history_instructions`, `character_book`, `tags`, `nickname`, …). Local: `image` (base64
-  portrait), `appearance` (sprite prompt), `expressions` (emotion→base64),
+- **CharacterCard** — V2/V3 spec fields (`description`, `personality`, `first_mes`,
+  `alternate_greetings`, `system_prompt`, `character_book`, `nickname`, …; `scenario`,
+  `mes_example`, `post_history_instructions`, `tags`, `creator` are kept for export but neither
+  shown nor prompted). Local: `image` (base64 portrait), `tone` (voice & tone sliders), `figure`,
+  `appearance` / `expressions` / `expr_*` (left over from sprites; read only for an old sprite
+  profile picture),
   **`tts_voice`** (Kokoro id or `piper:<name>`), **`tts_speed`** (0.5–1.5 speaking
   pace, 1.0 = the voice's own tempo; Kokoro multiplier / inverse Piper `length_scale`),
   **`wake_word` / `sleep_phrase` / `farewell`** (per card; blank = the global setting),
-  **`vrm` + `avatar_mode`** (`sprite` | `vrm`; a model stays assigned while showing sprites),
-  **`portrait_source`** (`""` auto = portrait else neutral sprite | `image` | `sprite` + `portrait_sprite`
+  **`vrm` + `avatar_mode`** (`vrm` when a model is chosen; `sprite` is the stored name for "no
+  3D avatar, show the portrait"),
+  **`portrait_source`** (`""` auto = portrait else an old neutral sprite | `image` | `sprite` (older cards) + `portrait_sprite`
   | `vrm` = `vrm_still`, a PNG of the model rendered in the browser by `vtuber.mjs` `captureStill()`,
   taken from `vrm_still_of`) — the Studio's "Profile picture"; `present.portrait_b64()` is the one
   place that picks, so `/pmedia/card/{id}.png` and `has_portrait` follow it everywhere. A missing
@@ -365,22 +366,16 @@ tests use them; nothing listens on them. User management requires admin (403).
 POST /api/me/password                      change own password (needs current)
 GET/POST /api/users ; DELETE /api/users/{id} ; POST /api/users/{id}/password   ADMIN only
 POST /api/users/{id}/copy                  ADMIN: clone characters/personas from your library into theirs
-                                           (new ids; sprites/portrait/voice/VRM ride along)
+                                           (new ids; portrait/voice/VRM ride along)
 GET  /api/status                           KoboldCPP {online, version, model, context}
 POST /api/tts ; GET /api/tts/voices        local TTS (text→WAV) / 54 Kokoro voices + any `piper:<name>`
 POST /api/stt                              local faster-whisper STT (multipart audio → {text})
 GET/PUT /api/settings                      per-user app settings (hands_free, wake_word, VAD tuning, disable_thinking, context_limit, memory fold)
 # cards
-GET/POST /api/cards                        list (trimmed, +has_expressions) / create
+GET/POST /api/cards                        list (trimmed) / create
 POST /api/cards/import                     import PNG/JSON card (multipart)
 GET/PUT/DELETE /api/cards/{id}             full card ops
 GET  /api/cards/{id}/export?version=2|3    download PNG card
-# expressions / ComfyUI
-GET  /api/comfyui/status | /checkpoints
-GET  /api/expressions/emotions             {core:[8], full:[28]}
-POST /api/cards/{id}/expressions           generate set — REPLACES all sprites (source portrait|prompt, method kontext|img2img, checkpoint, style, preset core|full, transparent, denoise)
-GET  /api/cards/{id}/expressions           labels the card has sprites for
-GET/POST/DELETE /api/cards/{id}/expression/{emotion}   serve PNG / regen one / delete one
 # personas
 GET/POST /api/personas ; PUT/DELETE /api/personas/{id}
 # sessions + chat
@@ -406,47 +401,18 @@ POST /api/chat                             SSE stream; done carries {message_id,
   asked, expression beats, `ASSISTANT_FORMAT_NOTE`, the retake note, then
   `focus_note`); streams via `kobold.chat_generate_stream()`. A stop sequence on the user's turn is
   added. After the reply: strip bare labels, the courtesy question and the closing offer; pick the
-  expression (inline tag, else classify when the card has sprites); update mood; save; send `done`
+  expression (inline tag, else classify, for a card with a 3D avatar); update mood; save; send `done`
   — then the memory fold in the background (`_memory_job`, see Conventions).
 - **Swipes:** alternates per message; each swipe's emotion cached in `swipe_expressions`. `▶` past the end regenerates.
 - **Cards:** `card_io.py` reads/writes the PNG `chara`(V2)/`ccv3`(V3) tEXt chunk.
-- **Expressions:** `expressions.py` — `classify()` picks a label (from the card's own set) via KoboldCPP;
-  `generate_expressions()` makes ONE base portrait then derives each emotion via **img2img** (denoise
-  adjustable via the panel slider, default 0.55, persisted `card.expr_denoise`; lower = closer to the
-  base/likeness) so all sprites are the same character; `rembg` cuts a transparent background. The base is either
-  a fresh **txt2img** from the appearance prompt (default) or the card's **uploaded portrait**
-  (`from_upload` → `_uploaded_base`, cover-cropped to portrait dims) — chosen via the "Use uploaded
-  portrait as base" checkbox, persisted on `card.expr_from_upload` so single-sprite regen matches the
-  batch. (img2img still restyles the upload toward the checkpoint, so likeness drifts somewhat; the
-  likeness-preserving upgrade is LivePortrait — see `vtuber-upgrade-plan.md`/models present.)
-  **Sprites from the portrait (2026-11-06):** the Studio asks two things explicitly — *Make
-  sprites from* the portrait or the appearance prompt, and *Change the expression with* Flux
-  Kontext or a model (img2img, with the strength slider) — sent as `source` / `method` to
-  `generate_expressions`. Portrait + Kontext needs no model. A choice that can't be honoured
-  is a 400, never a fallback: a portrait request on a card with no saved portrait used to
-  come back as a new character drawn from the prompt, and the portrait option only appeared
-  after a reload (it read `has_portrait` once, at load). Generating from a portrait picked but
-  not saved saves first. Audio checkpoints (ACE-Step, Stable Audio) are left out of the model
-  list. `remove_background` keeps the uncut image when the cutout leaves under 5% of the
-  pixels (it erased a flat drawing entirely). `/pmedia/card/{id}.png?upload=1` serves the
-  uploaded portrait itself. Tests: `tests/test_sprites_from_portrait.py`.
-  Sets: **Core 8** / **Full 28** (SillyTavern-compatible). Portrait reflects the running **mood**.
-  **FLUX (2026-10-27):** `flux1-schnell-Q4_K_S.gguf` (models/unet) is listed by
-  `comfy.list_checkpoints()` and loads split (`_flux_loaders`: UnetLoaderGGUF + DualCLIPLoader
-  clip_l/t5xxl + VAELoader ae — an fp8 all-in-one is ~12 GB, the whole card); img2img has its own
-  FLUX graph (`_flux_img2img`) and FLUX prompts drop the `(x:1.3)` weighting T5 can't read. The
-  Studio defaults the checkpoint to `card.expr_checkpoint` (what the set was made with, so a
-  single regen matches), else FLUX. **Emotions use Flux Kontext** (`generate_kontext`,
-  `card.expr_kontext`, Studio checkbox, on when `flux1-kontext-dev-Q4_K_M.gguf` is installed):
-  an instruction edit of the base ("change the facial expression to …, keep everything else"),
-  resized back to the base's size. Measured on the same base: img2img at 0.55 left five emotions
-  near-identical, at 0.7 angry/surprised were both grins; Kontext gave eight distinct emotions with
-  face, clothes and background unchanged. Cost: ~50 s per sprite at 12 steps (20 looked no better
-  at ~85 s) — Core 8 in 402 s, Full 28 ≈ 25 min — vs ~15 s for schnell img2img. Runs beside
-  KoboldCPP (9.5 GB loaded) without OOM.
+- **Expressions:** `expressions.py` — the assistant emotion set (`ASSISTANT_EMOTIONS`), and
+  `classify()` picks one via KoboldCPP when the reply carried no `[expr:x]` beat. Only for a card
+  with a 3D avatar (`card_emotions`): the VRM face, gestures and arm poses follow it. Expression
+  sprites (ComfyUI img2img / Flux Kontext, rembg cutouts) were removed on 2026-11-23; their history
+  is in git and `vtuber-upgrade-plan.md`.
 - **Mood/valence:** per reply, `EMOTION_VALENCE` → running `session.mood` via EMA; **neutral holds**.
-  Driven by the sprite label (or an inline `[expr:x]` tag), so a card without sprites keeps a
-  neutral mood. No header meter: the mood picks the sprite and the avatar's resting face.
+  Driven by the reply's emotion (an inline `[expr:x]` tag, else the classifier), so a card without
+  a 3D avatar keeps a neutral mood. No header meter: the mood sets the avatar's resting face.
 - **Memory: `MEMORY.md` is the reference.** One pipeline: `AssistantMemory` — directives, facts,
   task notes, per (character, persona); plus this chat's pinned facts. When `summarize_after`
   un-folded messages pile up, `_maintain_memory` folds all but `keep_recent` of them
@@ -472,7 +438,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 |---|---|
 | `pantheon.py` | the shell: 292 px rail (tile nav Staff/Hire/Chats/Personas/Settings, Recent chats, Staff with who is on shift, persona menu, theme swatches, sign out), top bar (search, KoboldCPP status, Hire), hash routing, mobile drawer, `end_chat` (save a chat to memory when it ends); loads `pantheon.css` and `voice.js` |
 | `ui/discover.py` · `ui/profile.py` | the Staff page (route `discover`: hero with who is on shift, search, tags) · profile modal (greetings, start / continue, export, copy to user) |
-| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, persona + memory count in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the sprite or the 3D avatar slot, only for cards with either — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
+| `ui/chat.py` | the chat: bubbles, streaming + Stop, swipes, ⋯ per message (another take, edit / save & resend, read aloud, copy, delete), starter chips, persona + memory count in the header, the **stage** (`.pt-stage`: its own right-hand column, `--pt-stage-w` 36% of the chat area, min 260 px, gone below 900 px; holds the 3D avatar slot, only for cards with one — `vtuber.mjs` `frameBust()` fits the camera to its shape, gaze aimed at eye height), speaker / hands-free / push-to-talk; drives `voice.js` |
 | `ui/chats.py` | all chats |
 | `ui/studio.py` | the card editor ("Staff studio", route `create`): every V2/V3 field, greetings, starters, lorebook, voice + test, expression generation + gallery + preview, VRM import/assign/audit, import / export / duplicate, local drafts |
 | `ui/people.py` | personas |
@@ -488,9 +454,7 @@ never destroy a proxy inside its own callback; `overflow: clip`, not `hidden`, o
 
 ✅ Card V2/V3 import/export · ✅ streaming chat · ✅ swipes + per-swipe emotions · ✅ **assistant
 memory** (directives/facts/notes, per char+persona, saved when a chat ends, curated + revertible) · ✅ persona ·
-✅ card editor (fields, portrait, lorebook, Duplicate) · ✅ ComfyUI expression sprites (same-character,
-transparent via rembg, Core-8/Full-28, gallery w/ per-sprite regen/delete, Flux Kontext) · ✅ live
-portrait swap · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper,
+✅ card editor (fields, voice & tone, portrait, lorebook, Duplicate) · ✅ running mood/valence · ✅ local **TTS + STT** (Kokoro/Piper,
 faster-whisper), hands-free, wake word, barge-in · ✅ **VRM avatar** (idle life, lip-sync, expressions,
 gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new libraries.
 
@@ -586,12 +550,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
 - CSS (`appcode/static/pantheon.css`): an element with its own `display` beats the `hidden`
   attribute, so each such rule carries a `[hidden] { display: none }` partner; accessible hidden
   radios use `opacity: 0`, not `display: none`.
-- `GET /api/cards` strips `expressions` (adds `has_expressions`); fetch the full card before editing.
-- **Sprite generation re-reads the card before saving** (`generate_expressions` /
-  `regenerate_expression`). It takes minutes; saving the copy loaded at the start silently
-  undid any edit made meanwhile, in either page. Only the sprite fields are written onto a fresh read.
-- Mood updates on generation only (not re-rolls). Sprites are same-character via img2img from a
-  reproducible base (fixed per-card seed) — single-emotion regen stays consistent.
+- `GET /api/cards` strips old `expressions` blobs; fetch the full card before editing.
+- Mood updates on generation only (not re-rolls).
 - The whole `data/` is one bind mount now, so new subdirs persist automatically (no per-subdir mount list).
   Historically `run-podman.sh`/`compose.yaml` mounted each subdir and a missed one wiped state on rebuild.
 - `podman exec` heredocs need `-i`. Auth: never log/return password hashes; keep the scrypt params in
@@ -728,7 +688,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   the viseme block; costs a rig-adapter refactor and loses VRM spring bones) · ◻ Track B3 real animation
   clips · ◻ visemes (blocked on phoneme timings unless the ARKit route is taken). **Track B (sourcing a `.vrm`) now blocks 3b** —
   Booth.pm, VRoid Hub, VRoid Studio under Proton, or Blender + VRM Add-on; mind the license flags.
-  Local-first voice throughout. Sprites remain the fallback tier for cards with no `.vrm`.
+  Local-first voice throughout. A card with no `.vrm` shows its portrait (sprites were removed
+  on 2026-11-23).
 - **The Menu (skills) for the staff** — plan in `SKILLS_PLAN.md`; users see it as "the Menu" (Vocabulary). ✅ **Phase 0 done** — host-derived
   `TZ` + assistant-mode date/time injection (she was inventing dates; the container clock was never
   the problem). ◻ Next: skill scaffolding (`CharacterCard.skills`, registry, two-pass tool loop).
@@ -744,6 +705,5 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the
   eval fixtures, first).
-- **Sprite-pack import** — drop Full-28-named PNGs straight into `card.expressions`.
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
-- Tuning knobs: `expressions` img2img denoise, `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.
+- Tuning knobs: `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.

@@ -33,7 +33,7 @@ stop() {
 start() {
   cd "$ROOT"
   PANTHEON_PORT="$PORT" PANTHEON_DATA_DIR="$PANTHEON_DATA_DIR" \
-    KOBOLD_URL="${KOBOLD_URL:-http://localhost:5001}" COMFYUI_URL="${COMFYUI_URL:-http://localhost:8188}" \
+    KOBOLD_URL="${KOBOLD_URL:-http://localhost:5001}" \
     setsid .venv/bin/python service.py >"$LOG" 2>&1 &
   echo $! >"$PIDFILE"
   for _ in $(seq 1 40); do
