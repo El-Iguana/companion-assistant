@@ -29,7 +29,7 @@ from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, csrf_t
 
 SECTIONS = [("basics", "Basics"), ("persona", "Personality & tone"), ("greet", "Greetings"),
             ("lore", "Lorebook"),
-            ("avatar", "3D avatar"), ("voice", "Voice"), ("advanced", "Advanced")]
+            ("avatar", "3D avatar"), ("voice", "Voice"), ("menu", "Menu"), ("advanced", "Advanced")]
 
 
 def _draft_key(card_id: str) -> str:
@@ -259,6 +259,18 @@ class StudioView:
             + self._inp("Sleep phrase", "sleep_phrase", c.get("sleep_phrase"))
             + self._inp("Farewell", "farewell", c.get("farewell"))
             + '</div></section>')
+        # --- the Menu (skills)
+        on = set(c.get("skills") or [])
+        items = "".join(
+            f'<label class="pt-check pt-menu-item"><input type="checkbox" data-skill="{esc(m["id"])}"'
+            f'{" checked" if m["id"] in on else ""}><span><b>{esc(m["title"])}</b>'
+            f'<small class="pt-dim">{esc(m["description"])}</small></span></label>'
+            for m in self.data.get("menu") or [])
+        sec.append(
+            '<section class="pt-sec" id="sec-menu"><h2>Menu <small>what they can do beyond talk</small></h2>'
+            + (items or '<p class="pt-dim">Nothing on the menu yet.</p>')
+            + '<small class="pt-dim">Each item costs a little of every prompt, so add only what they need.</small>'
+            '</section>')
         # --- advanced
         sec.append(
             '<section class="pt-sec" id="sec-advanced"><h2>Advanced</h2>'
@@ -472,6 +484,8 @@ class StudioView:
             fields["tags"] = [t.strip() for t in fields["tags"].split(",") if t.strip()]
         fields["tone"] = {attr(el, "data-tone"): float(el.value or 0)
                           for el in self.root.querySelectorAll("[data-tone]")}
+        fields["skills"] = [attr(el, "data-skill") for el in self.root.querySelectorAll("[data-skill]")
+                            if el.checked]
         for k in ("tts_speed",):
             if k in fields:
                 fields[k] = float(fields[k] or 0)

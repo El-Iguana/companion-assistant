@@ -188,6 +188,8 @@ class CharacterCard(BaseModel):
     figure: str = ""                     # "" | "female" | "male"
     # Voice and tone: how they talk, alongside the free-text personality.
     tone: Tone = Field(default_factory=Tone)
+    # The Menu: ids of the skills this bartender may use (services/skills). Opt-in per card.
+    skills: List[str] = []
     # Profile picture: where the card's picture comes from (cards, rail, chat header).
     # "" = automatic, the behaviour before this field: uploaded portrait, else the
     # neutral sprite. "image" = the uploaded portrait, "sprite" = one expression sprite

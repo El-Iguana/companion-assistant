@@ -37,6 +37,8 @@ services:
     environment:
       PANTHEON_PORT: ${PANTHEON_PORT:-7867}
       KOBOLD_URL: ${KOBOLD_URL:-http://host.docker.internal:5001}
+      ORPHEUS_MEDIA_URL: ${ORPHEUS_MEDIA_URL:-}
+      ORPHEUS_MEDIA_SCAN_CIDR: ${ORPHEUS_MEDIA_SCAN_CIDR:-}
       # The image is UTC; timestamps and "what time is it?" follow this.
       TZ: ${TZ:-UTC}
       # Read once, when the first account is created. Empty = a random one,

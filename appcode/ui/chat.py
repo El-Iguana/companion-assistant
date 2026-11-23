@@ -407,6 +407,16 @@ class ChatView:
                 elif "expr" in ev:
                     if v:
                         v.expr(str(ev["expr"]))      # timed to the audio when speaking
+                elif "skill" in ev:
+                    # A tool is running (the Menu): say what, in place of "is thinking", until
+                    # the answer streams. The tool call itself never reaches the bubble.
+                    live = by_id("ch-live")
+                    status = str((ev["skill"] or {}).get("status") or "Working on it…")
+                    if live:
+                        live.querySelector(".pt-bubble").innerHTML = (
+                            (md(acc) if acc else "")
+                            + '<div class="pt-skill"><span class="pt-typing"><i></i><i></i><i></i></span>'
+                            f' <span class="pt-dim">🎵 {esc(status)}</span></div>')
                 elif "error" in ev:
                     error = str(ev["error"])
                 elif ev.get("done"):

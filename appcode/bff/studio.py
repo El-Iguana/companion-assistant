@@ -21,7 +21,7 @@ EDITABLE = (
     "alternate_greetings", "system_prompt", "post_history_instructions",
     "tags", "appearance",
     "tts_voice", "tts_speed", "wake_word", "sleep_phrase", "farewell", "vrm", "avatar_mode", "figure",
-    "tone",
+    "tone", "skills",
     "portrait_source", "portrait_sprite",
 )
 
@@ -64,7 +64,14 @@ class Studio:
             "ok": True, "card": data, "is_new": not card_id,
             "voices": await asyncio.to_thread(tts.voices),
             "vrms": await self._vrms(),
+            "menu": self._menu(),
         }
+
+    @staticmethod
+    def _menu() -> list:
+        import main  # noqa: F401 — registers the skills
+        from services import skills
+        return skills.menu()
 
     async def _vrms(self) -> list:
         import main

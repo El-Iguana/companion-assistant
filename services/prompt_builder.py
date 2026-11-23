@@ -309,7 +309,8 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    longterm_note: str = "",
                    expr_labels: List[str] | None = None,
                    context_tokens: int = 0, trimmed: list | None = None,
-                   retake_of: List[str] | None = None) -> List[Dict]:
+                   retake_of: List[str] | None = None,
+                   skills_note: str = "") -> List[Dict]:
     """The chat prompt. With `context_tokens`, the oldest history turns are dropped
     until the whole prompt plus the reply fits that window (services/context.py);
     the count dropped is appended to `trimmed` when one is passed."""
@@ -337,6 +338,10 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
         sys_parts.append(char_def)
     if lb_after:
         sys_parts.append("\n".join(sub(b) for b in lb_after))
+    if skills_note:
+        # What the bartender's Menu can and can't do right now (services/skills). Changes
+        # only with a skill's state (e.g. pairing), so it sits with the static block.
+        sys_parts.append(skills_note)
 
     # memory, widest scope first: pinned facts (this chat, always-on) -> the pairing's
     # assistant memory. `longterm_note` arrives pre-rendered with real names, so it

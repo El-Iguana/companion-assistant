@@ -225,6 +225,7 @@ Open `.env` in a text editor. The settings you are most likely to change:
 | `PANTHEON_ADMIN_PASSWORD` | The first account's password, read **only** when the first account is created. Leave it empty to get a random one ([5](#5-start-cantinero-and-sign-in)). |
 | `PANTHEON_PORT` | The port on this computer, default `7867`. |
 | `KOBOLD_URL` | Where KoboldCPP is, if not on this computer's usual port. |
+| `ORPHEUS_MEDIA_URL` | Optional, for the DJ skill: your Orpheus media server, e.g. `http://192.168.1.97:8096`. Without it the DJ looks for Orpheus on the local network (`ORPHEUS_MEDIA_SCAN_CIDR`, e.g. `192.168.1.0/24`; `run-podman.sh` sets it from the host). |
 
 The rest of `.env.example` is for the KoboldCPP container ([4b](#4b-koboldcpp-in-a-container-nvidia))
 and is explained there.

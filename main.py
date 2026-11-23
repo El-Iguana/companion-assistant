@@ -31,7 +31,9 @@ from models.schema import (
     CharacterCard, Persona, ChatSession, ChatMessage, ChatRequest,
     AppSettings, AssistantMemory, MemoryFact, User,
 )
-from services.kobold import KoboldClient, ExprEvent
+from services.kobold import KoboldClient, ExprEvent, ToolCallsEvent
+from services import skills as skills_rt
+import services.skills.media  # noqa: F401 — registers the DJ skill
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -1423,12 +1425,19 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     settings = _load_settings(cur)
 
     window = await _context_tokens(settings)
+    # The Menu: the tools this bartender offers right now, and what their schemas cost.
+    skill_ctx = skills_rt.SkillContext(user_id=cur.user.id, root=cur.cards.parent,
+                                       card_id=card.id, session_id=session.id)
+    tools = skills_rt.tools_for(card, skill_ctx)
+    if tools:
+        window = max(2048, window - skills_rt.schema_tokens(tools))
     trimmed: list = []
     messages = prompt_builder.build_messages(
         card, persona, session, longterm_note=lt_note,
         # Beats only for a card whose 3D face can show them (expressions.card_emotions).
         expr_labels=expressions.card_emotions(card),
         context_tokens=window, trimmed=trimmed,
+        skills_note=skills_rt.notes_for(card, skill_ctx),
         # Another take: quote what is being replaced, so the new one differs from it.
         retake_of=_pending_swipes if req.regenerate else None)
     if trimmed and trimmed[0]:
@@ -1448,6 +1457,9 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
     params = prompt_builder.kobold_params(session)
     # Stop if the model starts writing {{user}}'s turn (prevents multi-turn / speaking for the user).
     params["stop"] = list(params.get("stop") or []) + [f"\n{persona.name}:", f"\n{persona.name} —"]
+    if tools:
+        params["tools"] = [t.schema() for t in tools]
+        params["tool_choice"] = "auto"
 
     # Inline [expr:x] beats the model emitted, in order. The last valid one wins for
     # the stored message; the classifier below is the fallback when there were none.
@@ -1457,16 +1469,38 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
 
     async def _turn():
         acc = ""
+        used_skill = False
+        convo = list(messages)
         try:
-            async for tok in kobold.chat_generate_stream(messages, params):
-                if isinstance(tok, ExprEvent):
-                    label = str(tok).strip().lower()
-                    if label in known:
-                        tagged.append(label)
-                        yield _sse({"expr": label})
-                    continue          # never reaches the transcript or the TTS text
-                acc += tok
-                yield _sse({"token": tok})
+            # A turn may take several passes: the model asks for tools, they run, and it
+            # answers with their results (SKILLS_PLAN.md, "Chat-flow change").
+            for _pass in range(MAX_TOOL_ROUNDS + 1):
+                calls = None
+                async for tok in kobold.chat_generate_stream(convo, params):
+                    if isinstance(tok, ToolCallsEvent):
+                        calls = list(tok)
+                        continue
+                    if isinstance(tok, ExprEvent):
+                        label = str(tok).strip().lower()
+                        if label in known:
+                            tagged.append(label)
+                            yield _sse({"expr": label})
+                        continue          # never reaches the transcript or the TTS text
+                    acc += tok
+                    yield _sse({"token": tok})
+                if not calls:
+                    break
+                used_skill = True
+                results = []
+                for call in calls[:MAX_TOOLS_PER_ROUND]:
+                    tool = next((t for t in tools if t.name == call["name"]), None)
+                    yield _sse({"skill": {"tool": call["name"],
+                                          "status": (tool.status if tool else "") or "Working on it…"}})
+                    results.append((call, await skills_rt.run(call, tools, skill_ctx)))
+                convo = _with_tool_results(convo, results)
+                if _pass == MAX_TOOL_ROUNDS - 1:
+                    params.pop("tools", None)          # last pass: answer, don't call again
+                    params.pop("tool_choice", None)
         except Exception as e:
             yield _sse({"error": str(e)})
             return
@@ -1477,7 +1511,10 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
         # Questions are for clarification only; a courtesy question tacked onto a
         # finished answer is the assistant making conversation, which is not the job.
         # See prompt_builder for why this is code and not just a rule.
-        reply = prompt_builder.strip_initiative_question(reply)
+        # A tool turn may end on the question the tool asked for ("the album or the live
+        # recording?"); that one is the point of the turn, not a courtesy question.
+        if not used_skill:
+            reply = prompt_builder.strip_initiative_question(reply)
         reply = prompt_builder.strip_closing_offer(reply)
         swipes = (_pending_swipes + [reply]) if _pending_swipes else [reply]
         msg = ChatMessage(role="char", content=reply, swipes=swipes,
@@ -1529,6 +1566,24 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx)):
                     "mood": session.mood.mood, "valence": session.mood.valence})
 
     return StreamingResponse(_keepalive(_turn), media_type="text/event-stream")
+
+
+MAX_TOOL_ROUNDS = 3             # find -> play is two; a third covers one retry
+MAX_TOOLS_PER_ROUND = 3
+
+
+def _with_tool_results(convo: list[dict], results: list) -> list[dict]:
+    """The conversation for the next pass: the assistant's tool calls and each result,
+    in OpenAI form, BEFORE the trailing system note, which must stay last (it carries the
+    reply-format rules; SKILLS_PLAN.md)."""
+    tail = [convo[-1]] if convo and convo[-1].get("role") == "system" else []
+    head = convo[:-1] if tail else list(convo)
+    calls = [{"id": c["id"], "type": "function",
+              "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c, _ in results]
+    out = head + [{"role": "assistant", "content": "", "tool_calls": calls}]
+    out += [{"role": "tool", "tool_call_id": c["id"], "content": skills_rt.result_text(r)}
+            for c, r in results]
+    return out + tail
 
 
 async def _keepalive(turn):
