@@ -68,7 +68,8 @@ def test_a_resident_reaches_the_desktop_routes_and_nothing_else(client, cur, ses
     # A POST with no CSRF token: a bearer call needs none.
     opened = client.post("/pdesk/open", json={"character_id": session.character_id}, headers=auth)
     assert opened.status_code == 200 and opened.json()["session_id"] == session.id
-    assert client.get("/resident/self", headers=auth).json()["account"] == cur.user.username
+    me = client.get("/resident/self", headers=auth).json()
+    assert me["account"] == cur.user.username and me["orpheus_url"] == ""     # no music server yet
     # Not on its allowlist: importing cards, uploading models, listing models.
     assert client.post("/pmedia/import", files={"file": ("x.json", b"{}")}, headers=auth).status_code == 401
     assert client.get("/pmedia/vrm", headers=auth).status_code == 401

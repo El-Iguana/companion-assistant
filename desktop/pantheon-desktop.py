@@ -46,6 +46,7 @@ from gi.repository import Gtk, Gdk, GLib, WebKit  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
+import player as orpheus_player  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
 # The tray icon: El Iguana behind the bar. The SNI host looks the icon name up here first.
@@ -57,9 +58,11 @@ HUD_STRIP_PX = 56
 
 
 class DesktopShell(Gtk.Application):
-    def __init__(self, url: str, width: int, height: int, tray: bool):
+    def __init__(self, url: str, width: int, height: int, tray: bool, music: bool = True):
         super().__init__(application_id=APP_ID)
         self.url, self.w, self.h, self.want_tray = url, width, height, tray
+        self.want_music = music
+        self.player = None             # the built-in Orpheus player (desktop/player.py)
         self.win: Gtk.Window | None = None
         self.view: WebKit.WebView | None = None
         self.click_through = True
@@ -159,6 +162,14 @@ class DesktopShell(Gtk.Application):
         self.win.connect("notify::default-height", lambda *_: self._apply_input_region())
         self.win.present()
         GLib.timeout_add(300, self._apply_input_region_once)
+
+        # The resident's Orpheus player: always on, so music from any chat plays here.
+        cfg = orpheus_player.resident_config()
+        if self.want_music and orpheus_player.configured(cfg):
+            self.player = orpheus_player.PlayerWindow(self, cfg)
+            self.player.start()
+        elif self.want_music:
+            print("[shell] no Orpheus player yet: python -m resident pair-orpheus")
 
         if self.want_tray:
             self._build_tray()
@@ -281,6 +292,8 @@ class DesktopShell(Gtk.Application):
             toggle=True, checked=False)
         items = [
             MenuItem(1, "Show / hide", self._menu_toggle_visible),
+            MenuItem(8, "Music player", lambda _i: self.player and self.player.toggle(),
+                     enabled=self.player is not None),
             self._mi_chars,
             self._mi_listen,
             self._mi_position,
@@ -442,11 +455,12 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=420)
     ap.add_argument("--height", type=int, default=620)
     ap.add_argument("--no-tray", action="store_true", help="run without a tray icon")
+    ap.add_argument("--no-music", action="store_true", help="don't run the built-in Orpheus player")
     ap.add_argument("--icon", default="cantinero",
                     help="tray icon: a name in desktop/icons/ (default: cantinero) or the icon theme")
     args = ap.parse_args()
 
-    app = DesktopShell(args.url, args.width, args.height, not args.no_tray)
+    app = DesktopShell(args.url, args.width, args.height, not args.no_tray, not args.no_music)
     app.icon_name = args.icon
     return app.run([])
 

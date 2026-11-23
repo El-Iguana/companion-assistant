@@ -38,6 +38,26 @@ FORWARD_GET = ("/pdesk/state", "/pdesk/card")
 FORWARD_POST = ("/pdesk/open", "/pdesk/chat", "/pdesk/sweep", "/pdesk/settings", "/pmedia/music/duck")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.on_event("startup")
+async def _register_player_soon():
+    """Make sure the server knows this resident's music player (R-6), whenever it is up."""
+    async def loop():
+        while True:
+            cfg = config.load()
+            if not (config.paired(cfg) and cfg.get("orpheus_device_id")):
+                return
+            try:
+                client, base, _ = upstream.get()
+                r = await client.put(base + "/resident/self", json={
+                    "orpheus_player_id": cfg["orpheus_device_id"], "orpheus_player_name": cfg.get("name", "")})
+                if r.status_code in (200, 401):
+                    return
+            except (httpx.HTTPError, HTTPException):
+                upstream.reset()
+            await asyncio.sleep(30)
+    asyncio.ensure_future(loop())
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 

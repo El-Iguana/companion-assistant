@@ -67,9 +67,27 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
 - **R-4 The built-in player is the Orpheus web player in a second WebKit view** of the same shell process:
   - its own window, hidden by default, shown from the tray;
   - autoplay allowed by the WebView setting, not a Chromium flag.
-  - **Spike first** (R3): Pyodide, MSE/HLS, `canPlayType` for mp3/flac, and a remote `play` making sound in
-    WebKitGTK. If WebKit can't run it, the fallback is a supervised Chromium `--app` window with
-    `install.sh --remote`.
+  - **Spike passed on predator, 2026-11-23** (Bazzite, WebKitGTK 6.0 / 2.54, GStreamer with mpg123, flac
+    and libav): the Orpheus player booted Pyodide in 4.6 s and held its control connection. WebAssembly,
+    MediaSource (AAC and H.264), and mp3/flac/ogg `canPlayType` "maybe" were all there. From amd-halo, with
+    no click on the window:
+    - `play` of a track was acked once sound started (413 ms);
+    - `volume 60` set the element to 0.60;
+    - `duck 25` brought it to 0.15 and `unduck` back to 0.60;
+    - `seek` to 60 s landed at 62 s;
+    - `pause` paused.
+
+    So **the second WebKit view is the plan; no Chromium fallback.** One trap found: a process started
+    over SSH dies with the session, so the spike ran as `systemd-run --user` (R4's units are the real
+    answer).
+  - **Built (R3, 2026-11-23):** `desktop/player.py`, a second window of the shell. It is signed in by
+    cookie from `resident.json`, minimized after load, minimized again instead of closing, reloaded if its
+    web process dies or it loses its control connection for 90 s, and listed in the tray as "Music player".
+    - Measured minimized on predator: album 351 ms, next 21 ms, duck 16 ms.
+    - **WebKit needs both autoplay gates:** the gesture setting *and*
+      `WebsitePolicies(autoplay=ALLOW)`. With only the first, media loaded and sat paused, with no error.
+    - `python -m resident pair-orpheus` pairs it with Orpheus as a player (approved there once), and
+      tells Cantinero its id (`PUT /resident/self`, repeated by the service on every start).
 - **R-5 The resident pairs with Orpheus as a `player`** (the Orpheus admin approves the code once). It then
   signs its player view in by setting the token as the `orpheus_session` cookie, as the Phase 5
   end-to-end test did. So the resident knows its player's exact device id, sends it to amd-halo
@@ -103,7 +121,7 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
    - `python -m resident pair <server>`, with CA pinning.
 
    Tests against a fake amd-halo. Runs on amd-halo itself for development (loopback to its own server).
-3. **R3 — the built-in player** (#39). The WebKit spike (R-4), then a second view in the shell: pairing with
+3. ✅ **R3 — the built-in player** (#39, built 2026-11-23). The WebKit spike (R-4), then a second view in the shell: pairing with
    Orpheus as a player, the cookie, `PUT /resident/self`, and the tray's Show/Hide player.
 4. **R4 — install** (#40). `resident/install.sh`: build or pull the image, a systemd user unit for the
    service container and for the shell, both pairings walked through, and an uninstall.

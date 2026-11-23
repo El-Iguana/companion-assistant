@@ -48,7 +48,12 @@ async def whoami(request: Request):
     rec = getattr(request.state, "resident", None)
     if rec is None:
         raise HTTPException(status_code=401, detail="residents only")
-    return {"resident": residents.public(rec), "account": cur.user.username}
+    from services.skills import orpheus_media as om
+
+    # Where the account's music server is, so the resident can pair its player with it.
+    music = om.load(cur.cards.parent)
+    return {"resident": residents.public(rec), "account": cur.user.username,
+            "orpheus_url": music.get("url", "") if om.paired(music) else ""}
 
 
 @router.put("/self")
