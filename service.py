@@ -218,6 +218,7 @@ def build_web_app():
     @asynccontextmanager
     async def lifespan(app_):
         async with base_lifespan(app_) as state:
+            main.start_sweep_catchup()      # chats a restart left unswept (main.py)
             yield state
         await main._shutdown()
 

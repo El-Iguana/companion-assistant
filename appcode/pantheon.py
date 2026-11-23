@@ -17,14 +17,16 @@ point of the rewrite; wapyt supplies the context menu, toasts and dialogs.
 """
 from __future__ import annotations
 
+import json
+
 import js
-from pyodide.ffi import create_once_callable, create_proxy
+from pyodide.ffi import create_proxy
 
 from wapyt import CellConfig, ContextMenu, ContextMenuConfig, LayoutConfig, MainWindow, MenuItem
 
 from bff.shell import Shell
-from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, esc, failed,
-                       persona_url, portrait_url, sign_out, spawn, toast)
+from ui.common import (Listeners, ago, attr, avatar_html, by_id, closest, csrf_token, esc,
+                       failed, persona_url, portrait_url, sign_out, spawn, toast)
 from bff.chat import Chat
 from ui.chat import ChatView
 from ui.chats import ChatsView
@@ -56,9 +58,6 @@ THEMES = [("bone", "Bone", "#f5f1e8"), ("ember", "Ember", "#e8a33d"), ("moss", "
 THEME_KEY = "pantheon.theme"     # per-browser cache only, to paint the right colours before
                                  # the account's own setting arrives; the account is the truth.
 STATUS_MS = 30_000
-# The idle fold into long-term memory: 5 minutes after a reply (the classic page's
-# SWEEP_IDLE_MS; static/js/desktop.js uses it too). The sweep is idempotent server-side.
-SWEEP_IDLE_MS = 5 * 60 * 1000
 
 _KEEP: list = []
 
@@ -104,7 +103,6 @@ class Pantheon(MainWindow):
         self.screen = None
         self.route = ("", "")
         self.query = ""
-        self.sweeps: dict = {}           # session id -> pending timer (one per chat)
         self.listeners = Listeners()
         self._sure_id = ""
         self._load_css()
@@ -275,23 +273,28 @@ class Pantheon(MainWindow):
             f"KoboldCPP: {'up · ' + str(k.get('model')) if k.get('online') else 'offline'}\n"
             f"ComfyUI: {'up' if c.get('online') else 'offline'}")
 
-    # --- memory sweep --------------------------------------------------------------
-    def schedule_sweep(self, session_id: str) -> None:
-        """Arm (or re-arm) the idle fold of one chat into long-term memory. Timers are
-        per chat, so moving on to another chat does not cancel the first one's fold."""
+    # --- memory save when a chat ends ----------------------------------------------
+    def end_chat(self, session_id: str, leaving: bool = False) -> None:
+        """A chat ended (left, another opened, the sleep phrase, the tab closing): save it
+        to long-term memory now (main.sweep_session), recent turns included. The server
+        also sweeps a chat that has gone quiet, and catches up after a restart, so this
+        is about saving promptly, not the only chance.
+
+        `leaving`: the page is going away, so a BFF call wouldn't finish. A keepalive
+        fetch to the plain /pdesk/sweep route outlives the page instead."""
         if not session_id:
             return
-        old = self.sweeps.pop(session_id, None)
-        if old is not None:
-            js.clearTimeout(old)
-
-        def fire(*_):
-            self.sweeps.pop(session_id, None)
-            spawn(Chat().sweep(session_id), "memory sweep")
-
-        # One-shot: frees itself after running (a re-armed timer's old callback is cleared
-        # before it fires and is collected with it).
-        self.sweeps[session_id] = js.setTimeout(create_once_callable(fire), SWEEP_IDLE_MS)
+        if not leaving:
+            spawn(Chat().sweep(session_id), "memory save")
+            return
+        options = js.JSON.parse(json.dumps({
+            "method": "POST", "credentials": "same-origin", "keepalive": True,
+            "headers": {"Content-Type": "application/json", "X-CSRF-Token": csrf_token()},
+            "body": json.dumps({"session_id": session_id})}))
+        try:
+            js.fetch("/pdesk/sweep", options)
+        except Exception:  # noqa: BLE001 — the server's idle sweep still catches it
+            pass
 
     # --- rail ----------------------------------------------------------------------
     def _render_rail(self) -> None:

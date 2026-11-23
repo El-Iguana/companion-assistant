@@ -503,7 +503,15 @@
     // talking to an empty room.
     if (!on && why !== "mic off") speakLine(activeFarewell());
     if (on) toast("Listening — say “" + (activeSleepPhrase() || "stop") + "” when done", "info");
+    if (!on) conversationEnded(why);
     repaint();
+  }
+
+  // A hands-free conversation ended (sleep phrase, timeout, mic off): the page and the
+  // desktop save the chat to long-term memory on this, rather than waiting for the idle
+  // sweep. Fired from both brains: this file's own (desktop) and the Python one (flags).
+  function conversationEnded(why) {
+    window.dispatchEvent(new CustomEvent("pvoice:asleep", { detail: { why: String(why || "") } }));
   }
 
   // Compare on words alone: Whisper decides its own punctuation, and contractions are
@@ -949,7 +957,12 @@
     hasBrain() { return !!brain; },
     brainOps() {
       return {
-        flags(isAwake, listening) { awake = !!isAwake; hfCapturing = !!listening; repaint(); },
+        flags(isAwake, listening) {
+          const wasAwake = awake;
+          awake = !!isAwake; hfCapturing = !!listening;
+          if (wasAwake && !awake) conversationEnded("brain");
+          repaint();
+        },
         abortNow() { if (ttsSource || streaming) abortAndWait(); },
         abortAndWait,
         transcribe(bytes, strict) {

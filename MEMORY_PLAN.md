@@ -228,7 +228,8 @@ copy when one of them next needs changing.
      instead of a fresh list; notes untouched for about two weeks leave the prompt.
   4. **#18 — "lately with this bartender".** The last few turns of her most recent conversation,
      whichever window it was in, so a new chat isn't a blank start.
-  5. **#19 — fold per episode.** An episode ends on the sleep phrase or a farewell, a quiet gap
+  5. **#19 — fold per episode.** *(The end-of-chat triggers and the server-side idle sweep
+     shipped first, on 2026-11-23: see "Closed since".)* An episode ends on the sleep phrase or a farewell, a quiet gap
      (about 10 minutes), the desktop window closing or the page hidden, or a new chat with her.
      One high-water mark per bartender, across sessions. The message-count trigger becomes context
      pressure: fold when `build_messages` is about to drop turns.
@@ -270,7 +271,10 @@ copy when one of them next needs changing.
 
 - ~~Idle threshold for the sweep trigger~~ — shipped as `SWEEP_IDLE_MS` = 5 min (`app.js`),
   deliberately **not** user-tunable: it's a safety net behind the threshold trigger, not a
-  preference, and a wrong value degrades quietly rather than visibly.
+  preference, and a wrong value degrades quietly rather than visibly. **Moved to the server on
+  2026-11-23** (`SWEEP_IDLE_S`): a browser timer died with the tab, so a chat closed before it
+  fired lost its recent turns. Ending a chat now saves it at once, and the server timer plus a
+  startup catch-up are the net (`MEMORY.md` → *When a sweep runs*). Part of Phase 7 step 5 (#19).
 - ~~Token budget split between the long-term block and the session summary~~ — the long-term block
   has its own character budget, Phase 4 recall **shares** it, and the session summary is bounded
   separately by `summary_max_tokens`. The remaining gap is the *total*, above.
