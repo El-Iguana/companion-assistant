@@ -1533,6 +1533,15 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                     yield _sse({"skill": {"tool": call["name"],
                                           "status": (tool.status if tool else "") or "Working on it…"}})
                     results.append((call, await skills_rt.run(call, tools, skill_ctx)))
+                # A tool that finished the job can say so itself ("Playing Rush on Predator."):
+                # no second pass, which costs ~15 s on the local model and was where she
+                # once contradicted a play that had worked.
+                finals = [r.get("final") for _c, r in results]
+                if finals and all(isinstance(f, str) and f for f in finals):
+                    text = " ".join(finals)
+                    acc += text
+                    yield _sse({"token": text})
+                    break
                 convo = _with_tool_results(convo, results)
                 if _pass == MAX_TOOL_ROUNDS - 1:
                     params.pop("tools", None)          # last pass: answer, don't call again

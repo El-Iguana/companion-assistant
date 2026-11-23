@@ -66,7 +66,8 @@ def test_a_clear_match_plays_at_once(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
     ctx = _ctx(tmp_path)
     out = asyncio.run(media._play(ctx, {"query": "sigur ros", "shuffle": True}))
-    assert out == {"ok": True, "played": True, "playing": "( ) — Sigur Rós", "player": "Predator"}
+    assert out == {"ok": True, "played": True, "playing": "( ) — Sigur Rós", "player": "Predator",
+                   "final": "Playing ( ) by Sigur Rós on Predator."}                # said without a second pass
     assert _plays(o) == [("p1", 9042)] and len(o.sent[0][1]["queue"]) == 3
     assert o.sent[0][1]["start_index"] == 0
 
@@ -102,10 +103,10 @@ def test_where_it_plays(tmp_path, monkeypatch):
     assert asyncio.run(media._play(ctx, {"query": "x"}))["error"] == "WHICH_PLAYER"
     assert asyncio.run(media._play(ctx, {"query": "x", "player": "lounge"}))["player"] == "Lounge"
     media.set_default_player(tmp_path, "p1", "Predator")
-    assert asyncio.run(media._play(ctx, {"query": "x"}))["player"] == "Predator"            # the default
+    assert asyncio.run(media._play(ctx, {"query": "y"}))["player"] == "Predator"            # the default
     resident = _ctx(tmp_path, player_id="p2")
-    assert asyncio.run(media._play(resident, {"query": "x"}))["player"] == "Lounge"         # its own wins
-    assert asyncio.run(media._play(resident, {"query": "x", "player": "predator"}))["player"] == "Predator"
+    assert asyncio.run(media._play(resident, {"query": "z"}))["player"] == "Lounge"         # its own wins
+    assert asyncio.run(media._play(resident, {"query": "z", "player": "predator"}))["player"] == "Predator"
     assert [d for d, _ in o.sent] == ["p2", "p1", "p2", "p1"]
 
 
@@ -208,3 +209,50 @@ def test_a_fast_command_never_reaches_the_model(cur, session, monkeypatch):
     assert {"token": "Paused."} in evs and any(e.get("done") for e in evs)
     assert o.sent == [("p1", {"type": "pause"})]
     assert _reload(cur, session).messages[-1].content == "Paused."
+
+
+def test_the_same_play_twice_doesnt_restart_the_music(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
+    ctx = _ctx(tmp_path)
+    asyncio.run(media._play(ctx, {"query": "sigur ros"}))
+    again = asyncio.run(media._play(ctx, {"query": "Sigur Ros"}))
+    assert again["already_playing"] and again["final"] == "It's playing." and len(o.sent) == 1
+
+
+def test_spoken_names():
+    assert media._spoken("Crash — Dave Matthews Band (1996)") == "Crash by Dave Matthews Band"
+    assert media._spoken("Road Trip — playlist") == "the Road Trip playlist"
+    assert media._spoken("Road Trip — Sam's playlist") == "Sam's Road Trip playlist"
+
+
+def test_the_note_says_what_is_true_now(tmp_path, monkeypatch):
+    now = {"status": "playing", "now": {"title": "Crash Into Me", "artist": "Dave Matthews Band"}}
+    FakeOrpheus(monkeypatch, [dict(PREDATOR, state=now), dict(PREDATOR, id="p2", name="Lounge", online=False)])
+    note = skills.REGISTRY["dj"].note(_ctx(tmp_path))
+    assert "Predator: playing (Crash Into Me by Dave Matthews Band)" in note and "Lounge: not connected" in note
+
+
+def test_a_finished_tool_ends_the_turn_without_a_second_pass(cur, session, monkeypatch):
+    card = main._load(cur.cards, session.character_id, CharacterCard)
+    card.skills = ["dj"]
+    main._save(card, cur.cards)
+    o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
+    om.save(cur.cards.parent, {"url": "http://o", "device_id": "ctl", "token": "t"})
+    passes = []
+
+    async def stream(messages, params):
+        passes.append(1)
+        yield main.ToolCallsEvent([{"id": "c1", "name": "media_play", "arguments": '{"query": "sigur ros"}'}])
+
+    async def neutral(*a, **k):
+        return "neutral"
+    monkeypatch.setattr(main.kobold, "chat_generate_stream", stream)
+    monkeypatch.setattr(main.expressions, "classify", neutral)
+    monkeypatch.setattr(main.assistant_memory, "fold", lambda *a, **k: asyncio.sleep(0, False))
+
+    async def go():
+        resp = await main.chat(main.ChatRequest(session_id=session.id, input_text="play sigur ros"), cur=cur)
+        return _events([c if isinstance(c, str) else c.decode() async for c in resp.body_iterator])
+    evs = asyncio.run(go())
+    assert len(passes) == 1 and {"token": "Playing ( ) by Sigur Rós on Predator."} in evs
+    assert _reload(cur, session).messages[-1].content == "Playing ( ) by Sigur Rós on Predator."
