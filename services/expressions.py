@@ -21,7 +21,7 @@ from services.kobold import KoboldClient
 from services.comfyui import ComfyUIClient, get_checkpoint_defaults
 
 # The label sets and their valence live in Muninn (shared with Rhapsode).
-from muninn.emotion import CORE_EMOTIONS, EMOTION_VALENCE, FULL_EMOTIONS, valence_of  # noqa: E402,F401
+from services.muninn.emotion import CORE_EMOTIONS, EMOTION_VALENCE, FULL_EMOTIONS, valence_of  # noqa: E402,F401
 
 # Default label vocabulary used when a caller doesn't specify one.
 EMOTIONS = CORE_EMOTIONS

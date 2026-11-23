@@ -4,15 +4,20 @@
 
 *El Iguana's bartender — at your service.*
 
+> **Alpha.** Cantinero works day to day on the author's machine, but it is early software:
+> expect rough edges, changes to settings and stored data between releases, and install
+> paths that have seen little testing outside Linux with an NVIDIA GPU. Bug reports are
+> welcome in [Issues](https://github.com/El-Iguana/companion-assistant/issues).
+
 A self-hosted, fully-local **voice assistant built on character cards**. You talk to it, it talks
 back, and it shows a face: expression sprites or a 3D VRM avatar, in the browser or in a corner of
 your desktop. A FastAPI backend and a [pytincture](https://github.com/pytincture/pytincture) page
 (Python in the browser). All inference runs on your own machine — no cloud, no external services,
 no database (state is plain JSON files).
 
-Split on 2026-11-07 from [El-Iguana/companion](https://github.com/El-Iguana/companion), which is now
-the text-only roleplay chat. This repo keeps the assistant half: voice, avatars, the desktop shell
-and assistant memory, with no roleplay, relationship system or narrator.
+Split on 2026-11-07 from companion, which is now Whimsy, the text-only roleplay chat. This repo
+keeps the assistant half: voice, avatars, the desktop shell and assistant memory, with no
+roleplay, relationship system or narrator.
 
 ## Features
 
@@ -51,7 +56,7 @@ docker compose logs companion-assistant  # the first ADMIN password
 - Everything a user makes lives in the `companion-assistant-data` volume (compose) or the `data/`
   folder (`run-podman.sh`). `manage.py` checks the backends and resets passwords.
 
-With [`ai-stack`](https://github.com/JotunheimPress/ai-stack) on the Linux workstation, `stack up`
+With [AI Ecosystem](https://github.com/JotunheimPress/ai_ecosystem) (`ai-stack`) on the Linux workstation, `stack up`
 then `stack companion-assistant`. It runs `run-podman.sh`, which joins the `ai-net` network when it
 exists (backends by name), falls back to host networking, keeps data in `data/`, mounts Piper
 voices from `../jarvis`, and derives `TZ` from the host. It runs beside the roleplay app
@@ -92,3 +97,9 @@ it's the thing to back up. Code is baked into the image, so rebuild after editin
 
 Local and private by design. Intended for personal, self-hosted use. The bundled `baseline.vrm` is
 pixiv's redistributable sample model; models you import stay in your own `data/vrm/`.
+
+## License
+
+[MIT](LICENSE). The bundled `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample and
+keeps pixiv's own terms. The models the image downloads when it builds (Kokoro, faster-whisper,
+rembg) keep their own licenses as well.

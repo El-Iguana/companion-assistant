@@ -33,23 +33,6 @@ RUN set -eu; \
     pip wheel --no-cache-dir --no-deps /dev-src -w /wheels/browser; \
     ls /wheels/server/wapyt-*.whl /wheels/browser/wapyt-99.99.99-py3-none-any.whl
 
-# ── Muninn, the shared memory package (../muninn; MEMORY_CORE_PLAN.md). Its own repo, used by
-# Pantheon and Rhapsode. The repository is PRIVATE, so builds pass a local checkout
-# (run-podman.sh and compose.yaml both use ../muninn); the pinned clone below is the
-# fallback and needs a credential that can read it. MUNINN_REF records the version tested:
-#   podman build --build-context muninn-src=../muninn .
-FROM ${PYTHON_IMAGE} AS muninn-git
-ARG MUNINN_REPO=https://github.com/JotunheimPress/muninn.git
-ARG MUNINN_REF=0b61f3dd4f8356c90a727d6faecb4e082ccd33ab
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-RUN git clone --filter=blob:none "$MUNINN_REPO" /src \
-    && git -C /src checkout --quiet "$MUNINN_REF" \
-    && rm -rf /src/.git
-
-FROM scratch AS muninn-src
-COPY --from=muninn-git /src /
-
 # ── Pantheon ─────────────────────────────────────────────────────────────────
 FROM ${PYTHON_IMAGE}
 
@@ -88,9 +71,6 @@ ENV WHISPER_MODEL=base.en
 ENV WHISPER_CACHE=/app/models/whisper
 RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8', download_root='${WHISPER_CACHE}')"
 
-# After the baked models, so a Muninn change doesn't re-download them.
-COPY --from=muninn-src / /tmp/muninn
-RUN pip install --no-cache-dir /tmp/muninn && rm -rf /tmp/muninn
 COPY main.py run.py manage.py service.py ./
 COPY models/ ./models/
 COPY services/ ./services/

@@ -1,5 +1,5 @@
 import httpx
-from muninn.text import strip_reasoning
+from services.muninn.text import strip_reasoning
 import json
 import re
 import time

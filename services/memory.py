@@ -8,10 +8,10 @@ from Muninn.
 """
 from __future__ import annotations
 
-from muninn import fold as _fold
-# The fold budget lives in Muninn (../muninn, MEMORY_CORE_PLAN.md); re-exported here
+from services.muninn import fold as _fold
+# The fold budget lives in Muninn (services/muninn, copied from Muninn; MEMORY_CORE_PLAN.md); re-exported here
 # under the names assistant_memory and the tests use.
-from muninn.fold import (FOLD_CHARS_PER_TOKEN, FOLD_CONTEXT_TOKENS,  # noqa: F401
+from services.muninn.fold import (FOLD_CHARS_PER_TOKEN, FOLD_CONTEXT_TOKENS,  # noqa: F401
                          FOLD_RESERVE_TOKENS, FOLD_TRANSCRIPT_CHARS, fold_budget)
 
 from models.schema import ChatSession

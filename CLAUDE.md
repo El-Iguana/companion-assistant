@@ -106,7 +106,6 @@ route table is **no longer served**; it stays as the handlers' contract and for 
 # host-side dev against a THROWAWAY library — never the real data/:
 uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt pip pytest \
     ~/Development/Pytinc/wa_pytincture_widgetset   # or git+https://github.com/WAwesome-AI/wa_pytincture_widgetset.git@<WAPYT_REF>
-uv pip install --python .venv/bin/python -e ../muninn                                 # the shared memory package
 PYTHON=$PWD/.venv/bin/python ~/Development/Pytinc/wa_pytincture_widgetset/scripts/dev_wheel.sh appcode
 PANTHEON_DATA_DIR=/tmp/cantinero-dev scripts/web-dev.sh start  # :7877 (PANTHEON_DEV_PORT), pidfile;
                                                                 # stop|restart|log; refuses the real data/
@@ -192,7 +191,7 @@ services/
   comfyui.py            # ComfyUI client: generate() txt2img + generate_img2img() + upload_image()
   card_io.py            # V2/V3 PNG (tEXt chara/ccv3) + JSON import/export
   prompt_builder.py     # macros, DEFAULT_ASSISTANT, lorebook scan, memory + date/time, the trailing note
-  context.py            # the context window: muninn.context + this app's CONTEXT_SIZES
+  context.py            # the context window: services/muninn/context.py + this app's CONTEXT_SIZES
   memory.py             # what the assistant fold shares: needs_summary, the transcript, fold_chunks/budget
   assistant_memory.py   # assistant memory: directives + facts + task notes (fold, extract, block)
   expressions.py        # emotion classify + valence map + sprite gen (img2img) + rembg cutout
@@ -200,11 +199,9 @@ services/
   stt.py                # local faster-whisper STT (base.en, CPU int8) — audio bytes -> text; WAV decoded
                         #   in-house (PyAV 19 breaks faster-whisper 1.2's decoder — see _wav_samples)
   auth.py               # scrypt password hash + HMAC-signed session token (stdlib only)
-../muninn/              # SEPARATE REPO, shared with companion and Rhapsode: context fit, fold passes (this app
-                        #   uses muninn.context + muninn.fold only; recall/relationship are companion's). PRIVATE repo (JotunheimPress/muninn), so
-                        #   builds take the sibling checkout: run-podman.sh and compose.yaml both pass
-                        #   ../muninn; MUNINN_REF in the Containerfile records the tested commit. Golden test
-                        #   pins behaviour — see ../muninn/README.md and MEMORY_CORE_PLAN.md
+  muninn/              # COPIED from Muninn (JotunheimPress/muninn, private) at 0b61f3d on 2026-11-23, so a
+                        #   public Cantinero builds on its own: context, fold, emotion, text. Not synced
+                        #   either way; fix it here. Tests: tests/test_muninn_*.py (copied with it)
 appcode/                # pytincture modules_path: pantheon.py (the page), ui/ (screens), bff/ (BFF classes),
                         #   static/pantheon.css (served at /pstatic), wapyt-99.99.99-*.whl (git-ignored)
 pantheon_web/           # server-side plain modules (never shipped to the browser): auth (login hook) ·
