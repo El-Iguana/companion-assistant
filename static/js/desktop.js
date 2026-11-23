@@ -254,12 +254,20 @@
     // Voice on by default here: a face in the corner that types silently is just a worse
     // chat window. The shell allows autoplay, so audio can start without a click.
     V.speaker(true);
-    try {
-      await refreshState();
-      await pickCharacter();
-    } catch (e) {
-      console.warn("[desktop] boot failed:", e);
-      caption("Could not load — is Cantinero running?", 0);
+    // On a resident the server is another machine, and it may be down or still starting:
+    // keep trying (every 10 s) rather than sit on an error until someone reloads.
+    for (let tries = 0; ; tries++) {
+      try {
+        await refreshState();
+        await pickCharacter();
+        break;
+      } catch (e) {
+        console.warn("[desktop] boot failed:", e);
+        caption(String(e && e.message || "").includes(": 403")
+          ? "This resident was removed from Cantinero — pair it again."
+          : "Can't reach Cantinero — trying again…", 0);
+        await new Promise((r) => setTimeout(r, 10000));
+      }
     }
     setInterval(paint, 500);
     // The window stays open for hours and read the card once: pick up a Studio edit (a

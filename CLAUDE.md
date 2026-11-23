@@ -727,7 +727,17 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   Settings → Residents, token hash in `data/auth/residents/`), `pantheon_web/resident_api.py`
   (`/resident/pair`, `/resident/self`), and the desktop page's routes taking a resident's bearer token where
   they say `_ctx(request, resident=True)`; Settings → Music picks the default player. Tests:
-  `tests/test_residents.py`.
+  `tests/test_residents.py`. ✅ **R2 (the resident service):** `resident/` — the same image with
+  `PANTHEON_ROLE=resident` runs `python -m resident serve` on 127.0.0.1 (`RESIDENT_PORT`, default 7867):
+  the `/desktop` page and `/static`, **local** `/pmedia/tts` and `/pmedia/stt`, and the allowlisted
+  routes forwarded unchanged with the token (the chat SSE streamed). `python -m resident pair <server>`
+  fetches the server's CA over HTTP, prints its fingerprint (compare with `/ca`), pairs over HTTPS with
+  that CA pinned (host names unchecked, so an IP works), and saves `resident.json` (0600) in
+  `$RESIDENT_DATA`. `.local` names resolve by one mDNS query when the container can't. Loopback Host
+  only, POSTs need the `X-CSRF-Token` header (any value), no CORS. Server down: a 502, and the chat
+  becomes her saying she can't reach the bar; a server 401 becomes a 403 so the page doesn't reload
+  for ever; desktop.js boot retries every 10 s. Measured in the image: Kokoro 1.0 s, Whisper 0.5 s,
+  round trip exact. Tests: `tests/test_resident_service.py`.
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
   per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the
