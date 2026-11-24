@@ -562,7 +562,11 @@ _POLITE_HEAD = re.compile(r"^(?:(?:hey|ok|okay|please|can you|could you|would yo
 _POLITE_TAIL = re.compile(r"(?:[ ,]*\b(?:please|thanks|thank you|for me|now|right now))+$")
 _IT = r"(?: (?:the|this|that))?(?: (?:music|song|track|tune|playback|it|one))?"
 _FAST = [
-    (re.compile(rf"^(?:pause|pause{_IT}|stop the (?:music|song|track|playback)|stop playing)$"), {"type": "pause"}),
+    (re.compile(rf"^(?:pause|pause{_IT})$"), {"type": "pause"}),
+    # "Mira, stop." went to the model (18.8 s, 2026-11-24), and "stop the music" only paused:
+    # the player has had a real stop since R7.
+    (re.compile(rf"^(?:stop|stop{_IT}|stop playing|that's enough|enough|turn{_IT} off|turn off{_IT}|"
+                rf"(?:the )?music off|kill{_IT}|shut{_IT} off|shut off{_IT})$"), {"type": "stop"}),
     # A bare "play" is a resume: after "pause" it went to the model (19 s) and restarted the
     # album (R5, 2026-11-24). "Continue" stays hers; it is as often about the conversation.
     (re.compile(rf"^(?:resume|unpause|keep playing|resume{_IT}|unpause{_IT}|continue the (?:music|song|track|playback)|"
@@ -595,7 +599,7 @@ def fast_command(text: str) -> dict | None:
     return None
 
 
-_SAID = {"pause": "Paused.", "resume": "Playing.", "next": "Skipping.", "previous": "Going back."}
+_SAID = {"pause": "Paused.", "resume": "Playing.", "stop": "Stopped.", "next": "Skipping.", "previous": "Going back."}
 
 # The fast lane for "play …": Fortuna says it's a play at this confidence or more, and Orpheus
 # finds one clear match, so it plays with no model turn (~1 s, not ~15 s). Anything less
