@@ -89,7 +89,7 @@ def test_a_session_sends_listening_heard_and_the_wake_gates_message(monkeypatch)
     async def go():
         s = listen.Session(send)
         await s.message({"config": {"wake_word": "Mira", "wake_mode": "phrase"}})
-        pcm = _pcm(frames(("speech", 1), ("quiet", 1), ("speech", 1), ("quiet", 1)))
+        pcm = _pcm(frames(("speech", 1), ("quiet", 2), ("speech", 1), ("quiet", 2)))   # past the 1.2 s look
         for i in range(0, len(pcm), 3000):                  # any chunking
             await s.audio(pcm[i:i + 3000])
         await asyncio.gather(*s.tasks)
@@ -109,7 +109,7 @@ def test_the_resident_streams_the_microphone_on_loopback_only(monkeypatch):
     c = TestClient(service.app, base_url="http://127.0.0.1:7867")
     with c.websocket_connect("ws://127.0.0.1:7867/pmedia/listen") as ws:   # a full URL: the Host header
         ws.send_text(json.dumps({"config": {"wake_word": "Mira"}}))
-        ws.send_bytes(_pcm(frames(("speech", 1), ("quiet", 1))))
+        ws.send_bytes(_pcm(frames(("speech", 1), ("quiet", 2))))
         got = [ws.receive_json() for _ in range(3)]
     assert got[-1]["type"] == "heard" and got[-1]["send"] == "next song"
     lan = TestClient(service.app, base_url="http://192.168.1.50:7867")
@@ -130,7 +130,7 @@ def test_a_continuous_conversation_opens_and_closes_with_awake_events(monkeypatc
     async def go():
         s = listen.Session(send)
         await s.message({"config": {"wake_word": "Mira", "wake_mode": "continuous", "sleep_phrase": "that will be all"}})
-        await s.audio(_pcm(frames(*[("speech", 1), ("quiet", 1)] * 3)))
+        await s.audio(_pcm(frames(*[("speech", 1), ("quiet", 2)] * 3)))
         await asyncio.gather(*s.tasks)
     asyncio.run(go())
     assert [(m["on"], m["why"]) for m in out if m["type"] == "awake"] == [(True, "wake word"), (False, "sleep phrase")]
@@ -190,3 +190,32 @@ def test_the_hold_never_outlives_its_utterance():
     us = run(seg, frames(("quiet", 2.2)))
     assert len(us) == 1 and seg.end_silence == listen.END_SILENCE_S
     assert seg.hold(us[0].n, 2.0) is False                                       # it ended
+
+
+def _waits(monkeypatch, early, final):
+    """A session that records how long each finished utterance waited after its speech."""
+    s, out = _session(monkeypatch, early, final)
+    finals, waits = iter(final), []
+
+    def transcribe(u, wake_word=""):
+        if u.partial:
+            return early
+        waits.append(round(u.decided - u.end, 2))
+        return next(finals)
+    monkeypatch.setattr(listen, "transcribe", transcribe)
+    return s, out, waits
+
+
+def test_a_request_said_in_one_breath_is_not_held_two_seconds(monkeypatch):
+    # The early look hears the name *and* the request: the usual 0.5 s ends it.
+    s, out, waits = _waits(monkeypatch, "Mira, play Pink", ["Mira, play Pink"])
+    _run(s, frames(("speech", 1.6), ("quiet", 2.5)))
+    assert [m["send"] for m in out if m["type"] == "heard"] == ["play Pink"]
+    assert waits[0] < 1.3                                        # not WAKE_HOLD_S
+
+
+def test_after_the_name_alone_the_request_ends_as_usual_once_it_starts(monkeypatch):
+    s, out, waits = _waits(monkeypatch, "Mira", ["Mira, play Pink"])
+    _run(s, frames(("speech", 0.6), ("quiet", 1.6), ("speech", 1.0), ("quiet", 2.5)))
+    assert [m["send"] for m in out if m["type"] == "heard"] == ["play Pink"]   # one utterance
+    assert waits[0] < 1.0                                        # the 2 s was only for the pause

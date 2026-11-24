@@ -35,8 +35,10 @@ MIN_UTTERANCE_S = 0.3        # shorter is a cough, not a command
 # play Pink") the request used to be cut off after the name, and over music the name was
 # often lost (user, 2026-11-24: "I have to give the command too fast after the wake word…
 # if music is playing it doesn't hear").
-WAKE_HOLD_S = 2.0
-EARLY_AT_S = (1.0, 1.8, 2.6) # into an utterance (pre-roll included): when the name is looked for
+WAKE_HOLD_S = 2.0            # the pause after her name alone; once the request starts, END_SILENCE_S
+CHECKING_HOLD_S = 1.2        # a pause while the look for her name is still running isn't an end yet
+EARLY_AT_S = (1.2, 2.4)      # into an utterance (pre-roll included): looked for then, and at each of
+EARLY_MAX = 3                #   its first pauses; at most this many looks per utterance
 
 
 class Vad:
@@ -100,15 +102,22 @@ class Segmenter:
         self.start = 0.0
         self.strict = False
         self.n = 0                                       # utterances started so far
-        self.end_silence = END_SILENCE_S                 # this utterance's; hold() lengthens it
+        self.end_silence = END_SILENCE_S                 # this utterance's; hold() changes it
+        self.hold_to_speech = False                      # back to END_SILENCE_S once speech resumes
 
-    def hold(self, n: int, seconds: float) -> bool:
-        """Let utterance ``n`` pause this long before it counts as over (her name was heard
-        in it). False when it has already ended."""
+    def hold(self, n: int, seconds: float, until_speech: bool = False) -> bool:
+        """How long utterance ``n`` may pause before it counts as over: WAKE_HOLD_S after her
+        name alone (``until_speech``: only that pause, then the usual), the usual again when
+        the look found no name. False when it has already ended."""
         if not self.speaking or self.n != n:
             return False
-        self.end_silence = max(self.end_silence, seconds)
+        self.end_silence = seconds
+        self.hold_to_speech = until_speech
         return True
+
+    @property
+    def pausing(self) -> bool:
+        return self.speaking and self.quiet_since is not None
 
     def so_far(self) -> np.ndarray:
         """The audio of the utterance in progress."""
@@ -127,7 +136,7 @@ class Segmenter:
             if self.above >= START_FRAMES:
                 self.speaking, self.quiet_since = True, None
                 self.n += 1
-                self.end_silence = END_SILENCE_S
+                self.end_silence, self.hold_to_speech = END_SILENCE_S, False
                 self.buf, self.pre = self.pre, []
                 self.start = self.t - len(self.buf) * FRAME / RATE
                 self.strict = her_turn
@@ -135,6 +144,8 @@ class Segmenter:
         self.buf.append(x)
         self.strict = self.strict or her_turn
         if p >= END_PROB:
+            if self.quiet_since is not None and self.hold_to_speech:
+                self.end_silence, self.hold_to_speech = END_SILENCE_S, False   # the request began
             self.quiet_since = None
         elif self.quiet_since is None:
             self.quiet_since = self.t - FRAME / RATE
@@ -147,7 +158,7 @@ class Segmenter:
                 out = Utterance(audio, self.start, end, self.t, self.strict, self.n)
             self.speaking, self.buf, self.above, self.quiet_since = False, [], 0, None
             self.strict = False
-            self.end_silence = END_SILENCE_S
+            self.end_silence, self.hold_to_speech = END_SILENCE_S, False
         return out
 
 
@@ -223,6 +234,8 @@ class Session:
         self.lock = asyncio.Lock()
         self.tasks: set = set()
         self.early_next = 0                  # index into EARLY_AT_S for the utterance in progress
+        self.early_looks = 0                 # looks taken in it
+        self.was_pausing = False
         self.early_busy = False
         self.named: set[int] = set()         # utterances whose start was heard to be her name
 
@@ -248,9 +261,16 @@ class Session:
             u = self.seg.frame(frame, self.audible, self.turn)
             if self.seg.speaking != was:
                 await self.send({"type": "listening", "on": self.seg.speaking})
-                self.early_next = 0
-            if self.seg.speaking and self._early_due():
-                self.early_next += 1
+                self.early_next = self.early_looks = 0
+                self.was_pausing = False
+            pause_began = self.seg.pausing and not self.was_pausing
+            self.was_pausing = self.seg.pausing
+            if self.seg.speaking and self._early_due(pause_began):
+                self.early_looks += 1
+                while self.early_next < len(EARLY_AT_S) and self.seg.t - self.seg.start >= EARLY_AT_S[self.early_next]:
+                    self.early_next += 1
+                if pause_began:
+                    self.seg.hold(self.seg.n, CHECKING_HOLD_S)    # don't end while we look
                 self.early_busy = True
                 t = asyncio.ensure_future(self._early(self.seg.n, self.seg.so_far(), self.seg.strict))
                 self.tasks.add(t)
@@ -260,10 +280,10 @@ class Session:
                 self.tasks.add(t)
                 t.add_done_callback(self.tasks.discard)
 
-    def _early_due(self) -> bool:
+    def _early_due(self, pause_began: bool = False) -> bool:
         """Look for her name in the utterance still going? Only in phrase mode with a wake
-        word, outside a summons (the next thing said is the request anyway), once per
-        checkpoint, one at a time, and not once it was found."""
+        word, outside a summons (the next thing said is the request anyway), one look at a
+        time, not once it was found: at a checkpoint, or the moment a pause begins."""
         import time
         g = self.gate
         if not self.wake_word or self.early_busy or self.seg.n in self.named:
@@ -272,9 +292,10 @@ class Session:
             return False
         if g.summoned_until and time.time() * 1000 <= g.summoned_until:
             return False
-        if self.early_next >= len(EARLY_AT_S):
+        if self.early_looks >= EARLY_MAX:
             return False
-        return self.seg.t - self.seg.start >= EARLY_AT_S[self.early_next]
+        at_mark = self.early_next < len(EARLY_AT_S) and self.seg.t - self.seg.start >= EARLY_AT_S[self.early_next]
+        return pause_began or at_mark
 
     async def _early(self, n: int, audio: np.ndarray, strict: bool) -> None:
         """Her name at the start of what is still being said: duck the music and wait up to
@@ -286,10 +307,15 @@ class Session:
             u = Utterance(audio, self.seg.start, self.seg.t, self.seg.t, strict, n, partial=True)
             async with self.lock:
                 text = await asyncio.to_thread(transcribe, u, self.wake_word)
-            if not _voicecore().starts_with(text, self.wake_word):
+            vc = _voicecore()
+            if not vc.starts_with(text, self.wake_word):
+                self.seg.hold(n, END_SILENCE_S)          # not her name: end as usual
                 return
             self.named.add(n)
-            self.seg.hold(n, WAKE_HOLD_S)
+            if vc.strip_prefix(text, self.wake_word):
+                self.seg.hold(n, END_SILENCE_S)          # the request is under way: end as usual
+            else:
+                self.seg.hold(n, WAKE_HOLD_S, until_speech=True)   # her name alone: wait for it
             await self.send({"type": "action", "do": "wake_heard"})
         finally:
             self.early_busy = False
