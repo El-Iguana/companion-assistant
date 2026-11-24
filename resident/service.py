@@ -92,6 +92,17 @@ async def _register_player_soon():
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
+@app.middleware("http")
+async def revalidate_assets(request: Request, call_next):
+    # As on the server (service.py): StaticFiles sends an ETag but no Cache-Control, so the
+    # shell's WebView kept running the old voice.js after an --update (seen on predator,
+    # 2026-11-24). no-cache = always revalidate, a 304 when unchanged.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # --- the server -----------------------------------------------------------------------------
 
 class Upstream:
