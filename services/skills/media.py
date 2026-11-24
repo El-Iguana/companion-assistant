@@ -356,6 +356,15 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
     if not st:
         return NOT_PAIRED
     choice_id, query = args.get("id", ""), args.get("query", "")
+    song = args.get("album_of", "") or album_of(query)
+    if song:
+        try:
+            said = await _play_album_of(ctx, st, song, query or song)
+        except om.OrpheusError as e:
+            return _refusal(e)
+        played = isinstance(said, Done)
+        return {"ok": played or said.startswith("Which one"), "played": played,
+                "asked": not played and said.startswith("Which one"), "final": said}
     if not choice_id and not query:
         return error("BAD_ARGUMENTS", "Give the query the user said, or the id of a choice.")
     try:
@@ -575,6 +584,12 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     if got is None or got[0] != "play_music" or got[1] < LANE_LOW:
         return None
     sure = got[1] >= LANE_MIN
+    song = album_of(query)
+    if song:
+        try:
+            return await _play_album_of(ctx, st, song, query)
+        except om.OrpheusError:
+            return None
     music_catalog.refresh_soon(ctx.root, st)          # kept warm for the next vague play (#80)
     try:
         # Named ("play Crash") or described ("play something upbeat")? Asked while Orpheus
@@ -621,9 +636,61 @@ async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str
                             playlist_id="" if pick["id"].isdigit() else pick["id"])
     if not queue:
         return None
-    await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
+    # An album asked for by one of its songs starts at that song (#87).
+    start = next((i for i, e in enumerate(queue) if e.get("id") == pick.get("start_track")), 0)
+    await _send(dev["id"], {"type": "play", "queue": queue, "start_index": start})
     _remember_play(ctx, query, dev["id"])
-    return Done(f"Playing {_spoken(pick['name'])} on {dev.get('name')}.")
+    song = f" from {pick['start_title']}" if pick.get("start_title") and start else ""
+    return Done(f"Playing {_spoken(pick['name'])}{song} on {dev.get('name')}.")
+
+
+# --- "the album with <song>" (#87) -------------------------------------------------------------
+# It took the model 67 s and three searches (2026-11-24). A song can be on several albums (a
+# live set, a best-of): one plays from that song, several get the either-or question.
+
+_ALBUM_OF = re.compile(r"^(?:the\s+)?(?:album|record|cd)\s+(?:with|that has|that's got|that has got|containing|"
+                       r"which has|featuring|that contains)\s+(?:(?:the\s+)?song\s+)?(.+)$", re.I)
+
+
+def album_of(query: str) -> str:
+    """"put on the album with Ants Marching" -> "Ants Marching"; "" when it isn't that ask."""
+    m = _ALBUM_OF.match(_PLAY_WORDS.sub("", query).strip())
+    return m.group(1).strip().strip("\"'") if m else ""
+
+
+async def _albums_with(st: dict, song: str) -> list[dict]:
+    """The albums the best-matching song is on, as candidates that start at it."""
+    cands, how = await _search(st, song, ["track"])
+    raw = how["raw"]
+    if not cands or not raw:
+        return []
+    top = max(float(c.get("score") or 0) for c in raw)
+    tied = [r for r in raw if float(r.get("score") or 0) >= top - TIE_GAP and r.get("playable", True)]
+    full = await asyncio.gather(*[om._request("GET", f"{st['url']}/api/v1/items/{r['item_id']}", token=st["token"])
+                                  for r in tied], return_exceptions=True)
+    out, seen = [], set()
+    for r, it in zip(tied, full):
+        album = (it.get("parent") or {}) if isinstance(it, dict) else {}
+        if not album.get("id") or album["id"] in seen:
+            continue
+        seen.add(album["id"])
+        artist = (r.get("display") or "").rpartition(" — ")[2]
+        artist = re.sub(r"\s*\(\d{4}\)$", "", artist)
+        out.append({"id": str(album["id"]), "kind": "album", "playable": True,
+                    "name": f"{album.get('title', '')} — {artist}" if artist else album.get("title", ""),
+                    "start_track": int(r["item_id"]), "start_title": r.get("title") or song})
+    return out[:ASK_MAX]
+
+
+async def _play_album_of(ctx: SkillContext, st: dict, song: str, query: str) -> str | None:
+    """Play the album with this song from it, ask which album, or say it isn't there."""
+    albums = await _albums_with(st, song)
+    if not albums:
+        return f"I can't find a song called {song} in your music."
+    if len(albums) == 1:
+        return await _play_pick(ctx, st, albums[0], query)
+    _pending[_ask_key(ctx)] = {"options": albums, "query": query, "at": time.monotonic()}
+    return question(albums)
 
 
 # --- either-or, without her (#81) -------------------------------------------------------------
@@ -762,6 +829,8 @@ PLAY = Tool(
     {"type": "object", "properties": {
         "query": {"type": "string", "maxLength": 200, "description": "What to play, as the user said it"},
         "id": {"type": "string", "maxLength": 64, "description": "The id of a choice you offered"},
+        "album_of": {"type": "string", "maxLength": 200,
+                     "description": "A song, when the user wants the album that has it"},
         "kinds": {"type": "array", "maxItems": 4, "items": {"type": "string", "enum": KINDS}},
         "shuffle": {"type": "boolean"},
         "player": {"type": "string", "maxLength": 60, "description": "Only if the user named a player"}}},
