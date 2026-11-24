@@ -190,7 +190,7 @@ LIST = Tool(
     {"type": "object", "properties": {
         "about": {"type": "string", "maxLength": 200, "description": "A topic, if they named one"},
     }},
-    _list, status="Checking my notes…", icon="📝")
+    _list, status="Checking my notes…", icon="📝", answer_next=True)
 
 
 def _tools(ctx: SkillContext) -> list[Tool]:

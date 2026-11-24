@@ -61,6 +61,9 @@ class Tool:
     status: str = ""                           # what the page shows while it runs
     timeout: float = 0                         # seconds; 0 = TOOL_TIMEOUT_S
     icon: str = ""                             # the page's mark beside the status; "" = 🎵
+    # A read whose result is the whole answer: the next pass gets no tools, so the model
+    # answers instead of calling it again (live, memory_list was called three times: +35 s).
+    answer_next: bool = False
 
     def schema(self) -> dict:
         return {"type": "function", "function": {

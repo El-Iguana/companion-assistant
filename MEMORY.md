@@ -247,7 +247,7 @@ Mira has it from the seed) acts on memory requests at once, by tool calling, on 
 | `memory_forget(about)` | removes the instructions, facts and task notes that name it (every word, else the best half-match); more than three matches asks which | fixed: "Forgotten: …." |
 | `memory_list(about?)` | instructions, live facts (recalled by topic if one is named) and threads, up to 1,500 characters | she answers in her own words |
 
-The fixed lines mean remember and forget cost one model pass, like any reply. Two guards keep the
+The fixed lines mean remember and forget cost one model pass, like any reply. After `memory_list` the next pass gets no tools (`Tool.answer_next`): live, she called it three times before answering (51 s; 27 s with this). Measured live on Cydonia-24B, 2026-11-24: remember 17–20 s, forget 19 s, list 27 s, an empty list 17 s; a joke called no tool. Two guards keep the
 fold from undoing them: the user turn that ran remember or forget is marked
 `ChatMessage.memory_command` and the extractor never reads it, and what was forgotten goes on
 `AssistantMemory.forgotten` (shared store, last 30), which the extractor sees as known (last 10)

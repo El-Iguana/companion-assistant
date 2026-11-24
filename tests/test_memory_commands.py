@@ -172,3 +172,29 @@ def test_a_remember_turn_answers_in_one_pass_and_marks_the_turn(cur, monkeypatch
     assert saved.messages[-2].memory_command is True
     facts = main._load_assistant_memory(cur, card.id, pid).facts
     assert [(f.text, f.origin) for f in facts] == [("Brian is allergic to peanuts", "user")]
+
+
+def test_after_the_list_she_answers_instead_of_calling_it_again(cur, monkeypatch):
+    card, _, pid, ctx = _setup(cur)
+    _call(ctx, "memory_remember", text="Brian lives in Porto", kind="fact")
+    s = ChatSession(character_id=card.id, persona_id=pid)
+    main._save(s, cur.sessions)
+    passes = []
+
+    async def fake_stream(messages, params):
+        passes.append(dict(params))
+        if "tools" in params:                              # live, she asked for the list again
+            yield ToolCallsEvent([{"id": f"c{len(passes)}", "name": "memory_list", "arguments": "{}"}])
+            return
+        yield "You live in Porto."
+
+    monkeypatch.setattr(main.kobold, "chat_generate_stream", fake_stream)
+    monkeypatch.setattr(main.assistant_memory, "fold", lambda *a, **k: asyncio.sleep(0, False))
+
+    async def go():
+        resp = await main.chat(main.ChatRequest(session_id=s.id, input_text="what do you remember?"), cur=cur)
+        return [c async for c in resp.body_iterator]
+    asyncio.run(go())
+    assert len(passes) == 2 and "tools" not in passes[1]
+    assert main._load(cur.sessions, s.id, ChatSession).messages[-1].content == "You live in Porto."
+    assert not main._load(cur.sessions, s.id, ChatSession).messages[-2].memory_command   # a read, not a change
