@@ -15,8 +15,8 @@ Code: `services/memory.py`, `services/assistant_memory.py`, Muninn (`services/mu
 `prompt_builder.build_messages`, and the chat flow in `main.py`.
 
 Phases 1–6 have all shipped. Phases 1–5 built the companion's memory; Phase 6 split a second
-pipeline out of it for assistant-mode cards. **Phase 7 is planned**: memory that belongs to the
-bartender rather than to a chat, folded per episode and recalled per turn (issues #15–#23).
+pipeline out of it for assistant-mode cards. **Phase 7 is complete** (2026-11-24): memory that
+belongs to the bartender rather than to a chat, folded per episode and recalled per turn (issues #15–#23).
 
 ## Settled design decisions
 
@@ -191,7 +191,7 @@ copy when one of them next needs changing.
     worth running, so the test was that the fact-side expectation was untouched and the fixture still
     fails. It does.
 
-- **Phase 7 — Memory that belongs to the bartender. ◻ PLANNED (2026-11-23).** Cantinero is a voice
+- **Phase 7 — Memory that belongs to the bartender. ✅ DONE (planned 2026-11-23, finished 2026-11-24).** Cantinero is a voice
   assistant, and its memory should follow the character, not the chat session. The long-term store
   is already per character, but the session still decides when a fold runs, what it reads, and
   what is in the prompt.
@@ -246,8 +246,11 @@ copy when one of them next needs changing.
      on Mira's menu from the seed. Remember and forget answer with a fixed line (one model pass);
      the command turn is never mined by the fold, and what was forgotten is shown to the extractor
      as known so the next fold doesn't write it back.
-  9. **#23 — Fortuna gate (optional).** A yes/no from Fortuna on whether an episode holds anything
-     lasting, to skip extraction on small talk. Only if episode folds turn out to cost too much.
+  9. ✅ **#23 — Fortuna gate** (2026-11-23, built ahead of the episode folds as #52 and #53). Fortuna
+     leaves out of the extraction each user turn it is at least 0.9 sure holds nothing
+     (`assistant_memory.worth_reading`), and a chunk of pure small talk skips the fold's model calls.
+     Fold eval Run 4: forbidden 3/15 → 1/15, missed unchanged (5/15). Fortuna off or down: every
+     turn is read.
 
 ## Open decisions
 
