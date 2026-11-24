@@ -24,6 +24,7 @@ finish one.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import re
@@ -31,6 +32,7 @@ import time
 from datetime import datetime, timezone
 
 from services.skills import SkillContext, Skill, Tool, error, register
+from services.skills import music_catalog
 from services.skills import orpheus_media as om
 
 # Music only: Orpheus also holds films and shows, and an unrestricted search for a band it
@@ -483,6 +485,32 @@ class Done(str):
     stays a plain str, so it is still said aloud."""
 
 
+_PLAY_KINDS = {"named": "names a specific song, album, artist or playlist",
+               "described": "describes a kind, mood or style of music, or asks for any music"}
+DESCRIBED_MIN = 0.8
+# A name scores 1.00 in Orpheus ("some Dave Matthews Band", "Santana"); a description 0.78 at
+# most ("some music" found a Doors track, not ambiguous), so above this a name wins.
+NAMED_SCORE = 0.9
+
+
+async def _play_described(ctx: SkillContext, st: dict, query: str) -> str | None:
+    """"play something upbeat": an album Fortuna picks from the catalog, shuffled (#80).
+    ~1 s, against ~60 s through the model. None (hers) when there is no catalog yet or
+    Fortuna can't say."""
+    album = await music_catalog.pick(ctx.root, st, query)
+    if album is None:
+        return None
+    dev = await _target(ctx, st)
+    queue = await om.expand(st["url"], st["token"], item_id=int(album["id"]))
+    if not queue:
+        return None
+    random.shuffle(queue)
+    await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
+    _remember_play(ctx, query, dev["id"])
+    by = f" by {album['artist']}" if album.get("artist") else ""
+    return Done(f"Playing {album['title']}{by}, shuffled, on {dev.get('name')}.")
+
+
 async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     """A plain "play …" done without the model: what she says, or None to hand it to her."""
     from services import fortuna
@@ -500,8 +528,17 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     if got is None or got[0] != "play_music" or got[1] < LANE_LOW:
         return None
     sure = got[1] >= LANE_MIN
+    music_catalog.refresh_soon(ctx.root, st)          # kept warm for the next vague play (#80)
     try:
-        cands, how = await _search(st, query, None)
+        # Named ("play Crash") or described ("play something upbeat")? Asked while Orpheus
+        # searches, so a play by name waits no longer for it.
+        (cands, how), kind = await asyncio.gather(
+            _search(st, query, None),
+            fortuna.choose(query, "Does the user name what to play, or describe the kind of music they want?",
+                           _PLAY_KINDS))
+        clear = cands and not how["ambiguous"] and how["top"] >= NAMED_SCORE
+        if kind and kind[0] == "described" and kind[1] >= DESCRIBED_MIN and not clear:
+            return await _play_described(ctx, st, query)
         if not cands and sure:
             # A plain play of something the library doesn't have: say so now. Through the
             # model this took three media_play calls and 68 s to reach the same answer (R5).

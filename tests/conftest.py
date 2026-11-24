@@ -46,6 +46,11 @@ def _backend_context(monkeypatch, request):
 
     monkeypatch.setattr(KoboldClient, "abort", abort)
 
+    # The music catalog rebuilds itself in the background from Orpheus (#80): never in a test
+    # (test_music_catalog calls build() itself, against a fake).
+    from services.skills import music_catalog
+    monkeypatch.setattr(music_catalog, "refresh_soon", lambda root, st: None)
+
     # A model call a test didn't stub fails at once, as a dead backend would,
     # instead of trying the network. Tests stub the instance (main.kobold), which wins.
     # test_generate_answer tests those methods themselves, over a stubbed HTTP client.
