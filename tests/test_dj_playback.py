@@ -127,7 +127,9 @@ def test_control_and_its_refusals(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("said,cmd", [
     ("Pause.", {"type": "pause"}), ("pause the music please", {"type": "pause"}),
-    ("Stop the music", {"type": "pause"}), ("could you resume", {"type": "resume"}),
+    ("Stop the music", {"type": "stop"}), ("Stop.", {"type": "stop"}), ("stop it", {"type": "stop"}),
+    ("stop playing", {"type": "stop"}), ("turn the music off", {"type": "stop"}), ("That's enough.", {"type": "stop"}),
+    ("could you resume", {"type": "resume"}),
     ("Skip this song", {"type": "next"}), ("next track", {"type": "next"}), ("Next.", {"type": "next"}),
     ("go back", {"type": "previous"}), ("play the previous song", {"type": "previous"}),
     ("Turn it up", {"type": "volume", "step": 15}), ("a bit quieter", {"type": "volume", "step": -15}),
@@ -136,9 +138,10 @@ def test_control_and_its_refusals(tmp_path, monkeypatch):
 ])
 def test_fast_commands(said, cmd):
     assert media.fast_command(said) == cmd
+    assert media.fast_command(f"Mira, {said}", "Mira") == cmd        # her name in front, typed
 
 
-@pytest.mark.parametrize("said", ["stop", "continue", "I paused the movie earlier", "play Sigur Rós", "what's next on my list",
+@pytest.mark.parametrize("said", ["stop the timer", "continue", "I paused the movie earlier", "play Sigur Rós", "what's next on my list",
                                   "skip the intro and tell me about the weather", "turn it up to eleven, the meeting"])
 def test_not_fast_commands(said):
     assert media.fast_command(said) is None                           # these go to her
