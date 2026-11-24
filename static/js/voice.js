@@ -357,6 +357,8 @@
       const fd = new FormData();
       fd.append("file", blob, "speech.wav");
       if (strict) fd.append("strict", "1");
+      // Named to Whisper, so "Mira" isn't written "Mirror" (services/stt.py, eval/listen).
+      if (activeWakeWord()) fd.append("wake_word", activeWakeWord());
       const r = await fetch("/pmedia/stt", { method: "POST", credentials: "same-origin",
         headers: { "X-CSRF-Token": csrf() }, body: fd });
       return r.ok ? ((await r.json()).text || "") : "";
@@ -705,6 +707,101 @@
     if (!hfRAF) hfRAF = requestAnimationFrame(hfFrame);   // one pending frame, never a pile
   }
 
+  // ---- the streaming listener (#6) ------------------------------------------------
+  // Where the page is served by a resident, the open mic streams to its /pmedia/listen:
+  // Silero VAD decides what is speech and Whisper is told the wake word (services/listen.py).
+  // On the synthetic set: 27 of 28 wake commands against 10 for the level gate below, none of
+  // the 25 Whisper calls on knocks and room tone, and 0.67 s from the end of a command to the
+  // message against 1.01 s (eval/listen/RESULTS.md). Without it (the server's own page, or the
+  // socket drops) the level gate below takes over by itself.
+  let lsWs = null, lsHer = "", lsPos = 0;
+  const listenerUrl = () => (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/pmedia/listen";
+
+  function listenerConfig() {
+    if (!lsWs || lsWs.readyState !== 1) return;
+    lsWs.send(JSON.stringify({ config: {
+      wake_word: activeWakeWord(), sleep_phrase: activeSleepPhrase(), farewell: activeFarewell(),
+      wake_mode: settings.wake_mode || "phrase", sleep_after_s: settings.sleep_after_s,
+      full_duplex: !!settings.full_duplex } }));
+  }
+
+  function openListener() {
+    return new Promise((resolve) => {
+      let ws, settled = false;
+      const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+      try { ws = new WebSocket(listenerUrl()); } catch { return done(false); }
+      ws.binaryType = "arraybuffer";
+      const timer = setTimeout(() => { try { ws.close(); } catch {} done(false); }, 1500);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        lsWs = ws; lsHer = ""; lsPos = 0;
+        listenerConfig();
+        console.log("[mic] listening through the resident (Silero VAD)");
+        done(true);
+      };
+      ws.onerror = () => { clearTimeout(timer); done(false); };
+      ws.onclose = () => {
+        clearTimeout(timer);
+        done(false);
+        if (lsWs !== ws) return;
+        lsWs = null; hfCapturing = false;
+        // The next audio block finds hfTick stale and the level gate takes over.
+        if (hfActive) console.warn("[mic] the listener closed; back to the level gate");
+        repaint();
+      };
+      ws.onmessage = (e) => {
+        let d; try { d = JSON.parse(e.data); } catch { return; }
+        if (d.type === "listening") { hfCapturing = !!d.on; repaint(); }
+        else if (d.type === "heard") onHeard(d);
+        else if (d.type === "awake") setAwake(!!d.on, d.why || "listener");
+      };
+    });
+  }
+
+  // 16 kHz int16 for the listener: each output sample is the mean of the input samples it
+  // covers (48 kHz -> 3), a cheap low-pass against aliasing.
+  function to16k(block, rate) {
+    const step = rate / 16000, out = [];
+    for (; lsPos + step <= block.length; lsPos += step) {
+      let sum = 0, n = 0;
+      for (let i = Math.floor(lsPos); i < Math.floor(lsPos + step); i++) { sum += block[i]; n++; }
+      out.push(n ? sum / n : 0);
+    }
+    lsPos -= block.length;
+    const pcm = new Int16Array(out.length);
+    for (let i = 0; i < out.length; i++) {
+      const x = Math.max(-1, Math.min(1, out[i]));
+      pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+    }
+    return pcm.buffer;
+  }
+
+  function listenerBlock(block) {
+    const now = performance.now();
+    const her = (!!ttsSource || now < ttsHangoverUntil ? "a" : "") + (herTurn(now) ? "t" : "");
+    if (her !== lsHer) {                         // her state, only when it changes
+      lsHer = her;
+      lsWs.send(JSON.stringify({ her: { audible: her.includes("a"), turn: her.includes("t") } }));
+    }
+    lsWs.send(to16k(block, (hfCtx && hfCtx.sampleRate) || 48000));
+  }
+
+  async function onHeard(d) {
+    const raw = String(d.text || "").trim();
+    console.log("[mic] heard" + (d.strict ? " (strict)" : "") + " in " + d.ms + " ms: " +
+                JSON.stringify(raw) + (d.send ? " -> " + JSON.stringify(d.send) : ""));
+    if (!raw || !hfActive) return;
+    if (awake) awakeUntil = Date.now() + wakeTimeoutMs();   // any speech keeps it open
+    if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
+    selfHeardCount = 0;
+    const msg = String(d.send || "").trim();
+    if (!msg) return;
+    // The listener is deaf while she is audible (half duplex), so speech that got through
+    // during her reply is the user: a real interruption.
+    if (ttsSource || speechConsuming || streaming) await abortAndWait();
+    if (!streaming) sendText(msg);
+  }
+
   async function engageHandsFree() {
     if (hfActive) return true;
     hfLastError = "";
@@ -743,6 +840,7 @@
         } catch (err) { console.error("[mic] brain:", err); }
         return;
       }
+      if (lsWs && lsWs.readyState === 1) { listenerBlock(block); return; }   // the resident decides
       if (performance.now() - hfLastTick > HF_TICK_STALL_MS) hfTick();   // no frames: see hfLastTick
       if (hfCapturing) { hfPcm.push(block); return; }
       // Rolling pre-roll: the gate opens once speech is already loud, and the wake word
@@ -758,17 +856,19 @@
     // Expire on a timer, not on the next utterance: an empty room never speaks.
     if (!hfWakeTimer) hfWakeTimer = setInterval(() => {
       if (brain) { try { brain.tick(Date.now()); } catch {} return; }
+      if (lsWs) return;                         // the listener keeps the conversation's time
       if (awake && Date.now() > awakeUntil) setAwake(false, "idle timeout");
     }, 2000);
     console.log("[mic] hands-free engaged; device=" + ((hfStream.getAudioTracks()[0] || {}).label || "?")
                 + (brain ? " (Python brain)" : ""));
-    if (!brain) hfTick();
+    if (!brain && !(await openListener())) hfTick();
     repaint();
     return true;
   }
 
   function disengageHandsFree() {
     hfActive = false; hfSpeaking = false; hfCapturing = false; hfPendingBargeIn = false;
+    if (lsWs) { const ws = lsWs; lsWs = null; try { ws.close(); } catch {} }
     if (hfWakeTimer) { clearInterval(hfWakeTimer); hfWakeTimer = null; }
     if (brain) { try { brain.reset(); } catch {} } else setAwake(false, "mic off");
     if (hfRAF) { cancelAnimationFrame(hfRAF); hfRAF = null; }
@@ -789,6 +889,7 @@
 
   // What the brain needs to decide: the merged phrases (the card's win) and the gate.
   function configureBrain() {
+    listenerConfig();
     if (!brain) return;
     try {
       brain.configure(JSON.stringify({
