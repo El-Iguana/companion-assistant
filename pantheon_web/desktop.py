@@ -175,6 +175,7 @@ PAGE = """<!doctype html>
     <div id="dt-bar">
       <button id="dt-mic" class="dt-btn" title="Hands-free listening" aria-label="Hands-free listening">&#127897;</button>
       <button id="dt-tts" class="dt-btn" title="Voice output" aria-label="Voice output">&#128264;</button>
+      <button id="dt-settings" class="dt-btn" title="Settings" aria-label="Settings" hidden>&#9881;&#65039;</button>
       <span id="dt-state" class="dt-state"></span>
       <a href="/pantheon/" class="dt-btn" title="Open the full window" target="_blank">&#10530;</a>
     </div>

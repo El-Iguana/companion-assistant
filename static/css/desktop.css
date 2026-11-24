@@ -34,6 +34,7 @@ body:hover #dt-hud #dt-bar { opacity: 1; }
 .dt-btn { background: none; border: none; cursor: pointer; font-size: 15px; line-height: 1;
   padding: 4px 6px; border-radius: 999px; color: #e7e7ef; text-decoration: none; }
 .dt-btn:hover { background: #ffffff22; }
+.dt-btn[hidden] { display: none; }
 .dt-btn.active { background: #5aa9e055; }
 .dt-btn.awake { box-shadow: 0 0 0 2px #5ac47a88; }
 .dt-state { font-size: 11px; color: #9a9aa8; min-width: 4.5em; }

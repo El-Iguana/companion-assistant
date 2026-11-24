@@ -236,6 +236,12 @@
 
   $("#dt-tts").addEventListener("click", () => V.speaker());
   $("#dt-mic").addEventListener("click", () => V.handsFree());
+  // The resident shell's Settings (R6.2): only in the shell, which listens for the message.
+  const toShell = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cantinero;
+  if (shell && toShell) {
+    $("#dt-settings").hidden = false;
+    $("#dt-settings").addEventListener("click", () => toShell.postMessage("settings"));
+  }
 
   // ---- hooks for the native shell's tray menu -----------------------------------
   // The page holds the session, so the shell asks it rather than the API. Re-read in

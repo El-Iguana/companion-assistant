@@ -113,10 +113,14 @@ class DesktopShell(Gtk.Application):
         self.view = WebKit.WebView(network_session=nm)
         # What she does at start comes from this machine's Settings, handed to the page
         # before its own scripts run (desktop.js reads window.__cantineroShell).
-        self.view.get_user_content_manager().add_script(WebKit.UserScript.new(
+        ucm = self.view.get_user_content_manager()
+        ucm.add_script(WebKit.UserScript.new(
             shellsettings.page_script(self.prefs),
             WebKit.UserContentInjectedFrames.TOP_FRAME,
             WebKit.UserScriptInjectionTime.START, None, None))
+        # The page's ⚙ button asks for Settings: window.webkit.messageHandlers.cantinero.
+        ucm.connect("script-message-received::cantinero", self._on_page_message)
+        ucm.register_script_message_handler("cantinero", None)
         s = self.view.get_settings()
         for prop, val in (
             ("enable-webgl", True),
@@ -390,6 +394,14 @@ class DesktopShell(Gtk.Application):
             self._show()
         else:
             self._hide()
+
+    def _on_page_message(self, _ucm, value):
+        try:
+            msg = value.to_string()
+        except Exception:                                  # noqa: BLE001
+            return
+        if msg == "settings":
+            self._menu_settings()
 
     def _menu_settings(self, *_):
         if self.settings_win is None:
