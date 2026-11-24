@@ -36,8 +36,9 @@ MIN_UTTERANCE_S = 0.3        # shorter is a cough, not a command
 # often lost (user, 2026-11-24: "I have to give the command too fast after the wake word…
 # if music is playing it doesn't hear").
 WAKE_HOLD_S = 2.0            # the pause after her name alone; once the request starts, END_SILENCE_S
+RESUME_FRAMES = 4            # 128 ms of speech after her name: the request has begun
 CHECKING_HOLD_S = 1.2        # a pause while the look for her name is still running isn't an end yet
-EARLY_AT_S = (1.2, 2.4)      # into an utterance (pre-roll included): looked for then, and at each of
+EARLY_AT_S = (0.9, 1.8)      # into an utterance (pre-roll included): looked for then, and at each of
 EARLY_MAX = 3                #   its first pauses; at most this many looks per utterance
 
 
@@ -104,6 +105,7 @@ class Segmenter:
         self.n = 0                                       # utterances started so far
         self.end_silence = END_SILENCE_S                 # this utterance's; hold() changes it
         self.hold_to_speech = False                      # back to END_SILENCE_S once speech resumes
+        self.resumed = 0                                 # frames of speech since the held pause
 
     def hold(self, n: int, seconds: float, until_speech: bool = False) -> bool:
         """How long utterance ``n`` may pause before it counts as over: WAKE_HOLD_S after her
@@ -112,7 +114,7 @@ class Segmenter:
         if not self.speaking or self.n != n:
             return False
         self.end_silence = seconds
-        self.hold_to_speech = until_speech
+        self.hold_to_speech, self.resumed = until_speech, 0
         return True
 
     @property
@@ -143,9 +145,13 @@ class Segmenter:
             return None
         self.buf.append(x)
         self.strict = self.strict or her_turn
-        if p >= END_PROB:
-            if self.quiet_since is not None and self.hold_to_speech:
+        if self.hold_to_speech:
+            # The request begins when speech is sustained, not on a stray frame: sung vocals
+            # in the ducked music used to end the hold (predator test, 2026-11-24).
+            self.resumed = self.resumed + 1 if p >= START_PROB else 0
+            if self.resumed >= RESUME_FRAMES:
                 self.end_silence, self.hold_to_speech = END_SILENCE_S, False   # the request began
+        if p >= END_PROB and not (self.hold_to_speech and self.quiet_since is not None and self.resumed == 0):
             self.quiet_since = None
         elif self.quiet_since is None:
             self.quiet_since = self.t - FRAME / RATE

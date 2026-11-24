@@ -219,3 +219,14 @@ def test_after_the_name_alone_the_request_ends_as_usual_once_it_starts(monkeypat
     _run(s, frames(("speech", 0.6), ("quiet", 1.6), ("speech", 1.0), ("quiet", 2.5)))
     assert [m["send"] for m in out if m["type"] == "heard"] == ["play Pink"]   # one utterance
     assert waits[0] < 1.0                                        # the 2 s was only for the pause
+
+
+def test_a_blip_in_the_pause_after_her_name_does_not_end_the_wait():
+    # Sung vocals in the ducked music: two frames of "speech" in the pause.
+    seg = listen.Segmenter(vad=LoudVad())
+    run(seg, frames(("speech", 0.6)))
+    assert seg.hold(seg.n, listen.WAKE_HOLD_S, until_speech=True)
+    us = run(seg, frames(("quiet", 0.6), ("speech", 0.064), ("quiet", 0.9)))
+    assert us == [] and seg.end_silence == listen.WAKE_HOLD_S                # still waiting
+    us = run(seg, frames(("speech", 0.5), ("quiet", 0.7)))                    # the request
+    assert len(us) == 1 and us[0].decided - us[0].end < 0.6                    # ends as usual
