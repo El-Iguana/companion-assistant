@@ -582,9 +582,12 @@ _FAST = [
 _SET_VOLUME = re.compile(r"^(?:set )?(?:the )?volume (?:to |at )?(\d{1,3})(?: ?%| percent)?$")
 
 
-def fast_command(text: str) -> dict | None:
+def fast_command(text: str, name: str = "") -> dict | None:
     """A music command said plainly enough to do without the model, else None. Whole
-    utterances only ("pause the music"), so "I paused the movie earlier" goes to her."""
+    utterances only ("pause the music"), so "I paused the movie earlier" goes to her. Her name
+    in front ("Mira, stop the music", typed) is dropped like "can you"."""
+    if name:
+        text = re.sub(rf"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?{re.escape(name)}\b[ ,!.]*", "", text or "", flags=re.I)
     t = re.sub(r"[^\w%' ]+", " ", (text or "").lower())
     t = re.sub(r"\s+", " ", t).strip()
     if not t or len(t) > 60:

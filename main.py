@@ -1698,7 +1698,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
     # model (a tool turn costs ~25 s on the local model). None = not a music command.
     fast = None
     if not req.regenerate and "dj" in (card.skills or []):
-        fast = media_skill.fast_command(req.input_text)
+        fast = media_skill.fast_command(req.input_text, card.name)
 
     async def _turn():
         acc = ""

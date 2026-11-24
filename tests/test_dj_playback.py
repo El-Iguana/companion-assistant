@@ -144,6 +144,7 @@ def test_control_and_its_refusals(tmp_path, monkeypatch):
 ])
 def test_fast_commands(said, cmd):
     assert media.fast_command(said) == cmd
+    assert media.fast_command(f"Mira, {said}", "Mira") == cmd        # her name in front, typed
 
 
 @pytest.mark.parametrize("said", ["stop the timer", "continue", "I paused the movie earlier", "play Sigur Rós", "what's next on my list",
