@@ -69,3 +69,34 @@ def test_the_state_carries_the_modes():
     q.load(TRACKS)
     st = core.state_message("playing", q, core.Volume(), 0, 0)
     assert st["shuffle"] is True and st["repeat"] == "one"
+
+
+# --- the library browser (Music M3) ---
+
+ALBUM = {"id": 140, "title": "Best of AcDc", "artwork_id": 273,
+         "album": {"album_artist": {"id": 9, "kind": "artist", "title": "ACDC"}}}
+KIDS = [
+    {"id": 3, "kind": "track", "title": "C", "playable": True, "disc_number": 1, "track_number": 3, "duration_ms": 1000},
+    {"id": 1, "kind": "track", "title": "A", "playable": True, "disc_number": 1, "track_number": 1},
+    {"id": 9, "kind": "track", "title": "Z", "playable": True, "disc_number": 2, "track_number": 1},
+    {"id": 2, "kind": "track", "title": "B", "playable": False, "disc_number": 1, "track_number": 2},
+]
+
+
+def test_album_queue_is_in_disc_and_track_order_and_playable_only():
+    q = core.album_queue(ALBUM, KIDS)
+    assert [e["id"] for e in q] == [1, 3, 9]
+    assert q[0] == {"id": 1, "title": "A", "artist": "ACDC", "album": "Best of AcDc",
+                    "artwork_id": None, "duration_ms": None}
+
+
+def test_guest_credits_are_not_browsable_artists():
+    items = [{"kind": "artist", "title": "ACDC", "child_count": 1},
+             {"kind": "artist", "title": "X & Y", "child_count": 0}]
+    assert [a["title"] for a in core.browsable_artists(items)] == ["ACDC"]
+
+
+def test_album_line():
+    assert core.album_line({"year": 1998, "child_count": 11}) == "1998 · 11 tracks"
+    assert core.album_line({"child_count": 1}) == "1 track"
+    assert core.album_line({}) == ""

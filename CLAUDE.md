@@ -769,7 +769,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   `cantinero --exit`) stops the music, the shell and the resident; nothing restarts until the launcher or login.
   **R7 (a formal music player, #71–#73):** ✅ a micro player under her bar while music plays (the shell
   pushes the player's state to the page; buttons come back as `music:<action>` messages); ✅ the full
-  player with stop/shuffle/repeat, a polished layout and keys (`musiccore.Queue` shuffle/repeat); ◻ browse and search the library.
+  player with stop/shuffle/repeat, a polished layout and keys (`musiccore.Queue` shuffle/repeat); ✅ browse and search the library
+  (the full player's Library tab, `desktop/library.py`).
 - **Fortuna** (2026-11-23, `services/fortuna.py`): ai-stack's typed-decision backend
   (`http://fortuna:8009` on ai-net; `FORTUNA_URL`, `FORTUNA=off`). It answers "pick one of these" in
   0.15–0.25 s, against 7–12 s for a KoboldCPP generation.

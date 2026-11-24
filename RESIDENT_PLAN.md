@@ -212,7 +212,16 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       track that won't play is skipped even on repeat one, and a whole queue failing in a row stops
       the player rather than going round for ever on repeat all. The state carries `shuffle` and
       `repeat`.
-   3. **Browse and search the library by hand** (#73).
+   3. ✅ **Browse and search the library by hand** (#73). The full player has two tabs, Now playing and
+      Library (`desktop/library.py`). Library: a search box; Albums or Artists, 60 at a time with
+      "More…"; an album opens to its cover, artist, year, Play, Shuffle and its tracks (a click plays from
+      that one); an artist to Play all and its albums. Search asks for artists, albums and tracks
+      separately (a plain search also returns TV episodes), and a track plays its album from that track.
+      Artists with no albums (a guest credit on one track) are left out (`core.browsable_artists`). The
+      queue entries are the same as the DJ's (`core.album_queue` mirrors `orpheus_media.expand`). A play
+      by hand goes through `MusicPlayer.play_entries` and switches to Now playing. Keys are ignored while
+      typing in the search box. Checked against predator's library through the player's own Orpheus
+      token: 46 albums, 14 artists, a search, an album page, a track from a search queueing its album.
 
 ## Not in this plan
 
