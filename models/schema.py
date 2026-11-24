@@ -294,6 +294,11 @@ class MemoryFact(BaseModel):
     text: str = ""
     origin: str = "user"                 # "user" (hand-written) | "auto" (written by a sweep)
     created_at: str = Field(default_factory=_now)
+    # Memory Phase 7 (#16). A directive is this bartender's own ("") or for every bartender
+    # ("all"). Facts are always shared. A fact may carry a persona's id when it is really
+    # about that persona; untagged facts are about the user and every persona sees them.
+    scope: str = ""
+    persona_id: str = ""
 
 
 class AssistantMemory(BaseModel):

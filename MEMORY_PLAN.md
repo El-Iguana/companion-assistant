@@ -219,9 +219,10 @@ copy when one of them next needs changing.
   degrading to nothing, and the Memory modal as the correction surface.
 
   **Steps, in order** (each a GitHub issue; mechanics go in `MEMORY.md` as each ships):
-  1. **#15 — eval fixtures first.** Cross-session thread, shared basics, expiry, recall precision;
-     baseline totals recorded before any behaviour changes.
-  2. **#16 — the bartender owns memory.** Shared user facts plus per-character instructions and
+  1. ✅ **#15 — eval fixtures first** (2026-11-23). Done as `eval/memory_phase7/`: five scenarios
+     run through `main.memory_for_turn` on a scratch library. Baseline **2/15**. The Fortuna part,
+     `eval/memory_decisions`, is #52 and #53.
+  2. ✅ **#16 — the bartender owns memory** (2026-11-23; scenarios 2/15 → 5/15, shared basics 3/3). Shared user facts plus per-character instructions and
      notes; persona as a tag; pinned facts move into the store; a one-time merge of the
      `{cid}__{pid}.json` files, old files kept until checked.
   3. **#17 — notes as items.** `id`, `status`, `created`, `touched`; a fold returns changes by id

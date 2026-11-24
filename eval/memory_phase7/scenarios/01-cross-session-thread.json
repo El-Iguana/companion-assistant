@@ -1,0 +1,20 @@
+{
+  "name": "cross-session-thread",
+  "issue": "#17",
+  "why": "Notes are rewritten whole from one session's transcript, so folding chat B can drop an open thread only chat A knew about. Memory belongs to the bartender, not the chat.",
+  "steps": [
+    {"chat": "Mira", "messages": [
+      ["user", "I'm moving my blog to the new server this week."],
+      ["char", "Good plan. How far along are you?"],
+      ["user", "Files are copied. I still have to switch the DNS over, and I keep forgetting."],
+      ["char", "Noted: the DNS switch is still to do."]]},
+    {"chat": "Mira", "messages": [
+      ["user", "Can you find me a lasagne recipe for Saturday? Eight people."],
+      ["char", "A classic beef lasagne scales well to eight."],
+      ["user", "Great, I'll need to buy the pasta sheets on Friday."],
+      ["char", "Pasta sheets on Friday, then."]]},
+    {"check": {"bartender": "Mira", "user_says": "What's left on my list?",
+               "expect": [{"label": "chat A's open thread (DNS)", "pattern": "DNS"},
+                          {"label": "chat B's open thread (pasta sheets)", "pattern": "pasta|lasagne"}]}}
+  ]
+}

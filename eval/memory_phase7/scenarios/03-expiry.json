@@ -1,0 +1,16 @@
+{
+  "name": "expiry",
+  "issue": "#20",
+  "why": "A time-bound fact must leave the prompt after its date, or the assistant keeps announcing a visit that happened months ago. The lasting part of the same sentence stays.",
+  "steps": [
+    {"chat": "Mira", "messages": [
+      ["user", "My friends Tom and Bill are coming to stay next month, for a week."],
+      ["char", "That'll be fun. Anything to plan?"],
+      ["user", "Not yet, just remember they're coming."],
+      ["char", "I will."]]},
+    {"check": {"bartender": "Mira", "at_days": 1, "user_says": "What's coming up?",
+               "expect": [{"label": "the visit, still ahead", "pattern": "(Tom|Bill).{0,60}(visit|com|stay)|(visit|com|stay).{0,60}(Tom|Bill)"}]}},
+    {"check": {"bartender": "Mira", "at_days": 75, "user_says": "What's coming up?",
+               "forbid": [{"label": "the visit, two months gone", "pattern": "next month|com(e|ing) to stay|visit(ing)?"}]}}
+  ]
+}
