@@ -306,3 +306,12 @@ def test_a_change_of_mind_in_front_is_not_what_to_play(tmp_path, monkeypatch, te
     asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
     asyncio.run(media.fast_play(_ctx(tmp_path), text, "Mira"))
     assert asked[0] == "play Santana" and o.expanded == [7]
+
+
+def test_an_artist_tied_with_their_own_work_is_the_artist():
+    raw = [{"kind": "artist", "title": "Jimi Hendrix", "display": "Jimi Hendrix", "score": 0.7},
+           _track(5, "Purple Haze", "Jimi Hendrix (2010)", 0.7),
+           {"kind": "album", "title": "Greatest Hits", "display": "Greatest Hits — Jimi Hendrix (2010)", "score": 0.7}]
+    assert media.artist_pick(raw) == 0
+    raw[1] = _track(5, "Purple Haze", "Someone Else", 0.7)
+    assert media.artist_pick(raw) is None                     # someone else's track tied too

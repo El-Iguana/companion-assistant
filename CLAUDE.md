@@ -793,6 +793,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     line is matched to up to five options by Fortuna (≥ 0.7) and played. Anything else clears it and
     the turn goes on as usual. A change of mind in front ("never mind, play …") is stripped like
     "can you".
+  - **One model pass for what still reaches her** (#82). `media_play` does what the lane does (a
+    described request from the catalog, a tie by title or by the artist over their own work
+    (`artist_pick`), else Fortuna, else the fixed either-or) and every outcome carries a `final`
+    line, a miss included, so the turn ends after the tool: ~20 s, against 60–66 s. `media_find`
+    says never to search before playing.
   - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
     marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of

@@ -89,3 +89,43 @@ def test_build_reads_orpheus_marks_spoken_word_and_asks_once(tmp_path, monkeypat
     n = len(asked)
     asyncio.run(music_catalog.build(tmp_path, st))
     assert len(asked) == n                                          # already known: not asked again
+
+
+# --- media_play ends the turn itself (#82) ---
+
+from test_fortuna import BACK_IN_BLACK, _track  # noqa: E402
+
+
+def test_the_tool_plays_a_described_request_and_says_so(tmp_path, monkeypatch):
+    _catalog(tmp_path)
+    o = FakeOrpheus(monkeypatch, [PREDATOR], [])
+    fake_fortuna(monkeypatch, {"name what to play": ("described", 0.97),
+                               "Which album": ("BEST SONGS OF MAROON 5 — Maroon 5 (2013)", 0.3)})
+    out = asyncio.run(media._play(_ctx(tmp_path), {"query": "something upbeat"}))
+    assert out["ok"] and "Maroon 5" in out["final"] and o.expanded == [11]
+
+
+def test_the_tool_says_a_miss_itself(tmp_path, monkeypatch):
+    FakeOrpheus(monkeypatch, [PREDATOR], [])
+    fake_fortuna(monkeypatch, {"name what to play": ("named", 0.97)})
+    out = asyncio.run(media._play(_ctx(tmp_path), {"query": "play Rush"}))
+    assert not out["ok"] and out["final"] == "I can't find Rush in your music."
+
+
+def test_the_tool_settles_a_tie_by_title(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    fake_fortuna(monkeypatch, {"name what to play": ("named", 0.97)})
+    out = asyncio.run(media._play(_ctx(tmp_path), {"query": "Back in Black"}))
+    assert out["played"] and o.expanded == [141]
+
+
+def test_the_tool_asks_either_or_itself_and_the_answer_takes_the_fast_lane(tmp_path, monkeypatch):
+    two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
+    fake_fortuna(monkeypatch, {"name what to play": ("named", 0.97), "Which of these": None,
+                               "Which did the user choose": ("1", 0.9)})
+    ctx = _ctx(tmp_path, session_id="s1")
+    out = asyncio.run(media._play(ctx, {"query": "Crash"}))
+    assert out["asked"] and out["final"].startswith("Which one: Crash by Dave Matthews Band")
+    said = asyncio.run(media.fast_play(ctx, "the first one", "Mira"))
+    assert isinstance(said, media.Done) and o.expanded == [1]
