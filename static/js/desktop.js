@@ -236,6 +236,7 @@
   window.addEventListener("pvoice:toast", (e) => { console.log("[desktop]", e.detail.msg); caption(e.detail.msg, 7000); });
   // Her name alone: she waves (voice.js) and this says she's listening for the rest.
   window.addEventListener("pvoice:summoned", () => caption("Yes?", 4000));
+window.addEventListener("pvoice:wakeheard", () => caption("Listening…", 2500));
   window.addEventListener("avatar:active", () => portrait());
 
   $("#dt-tts").addEventListener("click", () => V.speaker());

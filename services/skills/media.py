@@ -632,6 +632,24 @@ async def _play_described(ctx: SkillContext, st: dict, query: str) -> str | None
     return Done(f"Playing {album['title']}{by}, shuffled, on {dev.get('name')}.")
 
 
+# Words that really start with "play": anything else Whisper wrote that way is "play" glued to
+# a name ("Mira, playpink." for "play Pink", predator 2026-11-24).
+_PLAY_WORDS_REAL = {"playback", "player", "players", "playlist", "playlists", "playing", "played", "plays",
+                    "playful", "playground", "playoff", "playoffs", "playtime", "playhouse", "playmate",
+                    "playwright", "playable", "playboy", "playbook", "playdate", "playroom", "playthrough"}
+
+
+def _unglue_play(query: str) -> str:
+    """"played Neil Young" -> "play Neil Young"; "playpink" -> "play pink"."""
+    m = re.match(r"^(?:played|plays)\s+(.+)$", query, flags=re.I)
+    if m:
+        return "play " + m.group(1)
+    m = re.match(r"^(play)([a-z]{2,})\b(.*)$", query, flags=re.I)
+    if m and (m.group(1) + m.group(2)).lower() not in _PLAY_WORDS_REAL:
+        return f"play {m.group(2)}{m.group(3)}"
+    return query
+
+
 async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     """A plain "play …" done without the model: what she says, or None to hand it to her."""
     from services import fortuna
@@ -648,6 +666,8 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     m = re.match(r"^playback\b\s*(.*)$", query, flags=re.I)
     if m:
         query = "play " + ("Back " + m.group(1)).strip().title()
+    else:
+        query = _unglue_play(query)
     if not query:
         return None
     # Fortuna is asked about the request itself: "Mira, can you play some Dave Matthews
