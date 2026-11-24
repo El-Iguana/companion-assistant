@@ -227,7 +227,7 @@ copy when one of them next needs changing.
      `{cid}__{pid}.json` files, old files kept until checked.
   3. ✅ **#17 — notes as items** (2026-11-23; scenarios 5/15 → 9/15, cross-session thread 3/3). `id`, `status`, `created`, `touched`; a fold returns changes by id
      instead of a fresh list; notes untouched for about two weeks leave the prompt.
-  4. **#18 — "lately with this bartender".** The last few turns of her most recent conversation,
+  4. ✅ **#18 — "lately with this bartender"** (2026-11-23; scenarios 9/15 → 12/15). The last few turns of her most recent conversation,
      whichever window it was in, so a new chat isn't a blank start.
   5. **#19 — fold per episode.** *(The end-of-chat triggers and the server-side idle sweep
      shipped first, on 2026-11-23: see "Closed since".)* An episode ends on the sleep phrase or a farewell, a quiet gap
