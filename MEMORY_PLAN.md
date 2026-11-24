@@ -225,7 +225,7 @@ copy when one of them next needs changing.
   2. ✅ **#16 — the bartender owns memory** (2026-11-23; scenarios 2/15 → 5/15, shared basics 3/3). Shared user facts plus per-character instructions and
      notes; persona as a tag; pinned facts move into the store; a one-time merge of the
      `{cid}__{pid}.json` files, old files kept until checked.
-  3. **#17 — notes as items.** `id`, `status`, `created`, `touched`; a fold returns changes by id
+  3. ✅ **#17 — notes as items** (2026-11-23; scenarios 5/15 → 9/15, cross-session thread 3/3). `id`, `status`, `created`, `touched`; a fold returns changes by id
      instead of a fresh list; notes untouched for about two weeks leave the prompt.
   4. **#18 — "lately with this bartender".** The last few turns of her most recent conversation,
      whichever window it was in, so a new chat isn't a blank start.

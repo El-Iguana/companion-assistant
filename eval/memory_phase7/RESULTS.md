@@ -35,3 +35,22 @@ TOTAL 5/15   cross-session-thread 2/3 · shared-basics 3/3 · expiry 0/3 · reca
 ```
 
 Shared basics pass. The rest is unchanged, as it should be: those are #17, #18, #20 and #21.
+
+## After #17, notes changed by number (2026-11-23)
+
+```
+TOTAL 9/15   cross-session-thread 3/3 · shared-basics 3/3 · expiry 3/3 · recall-precision 0/3 · lately 0/3
+```
+
+- **cross-session-thread 3/3** (was 2/3). Chat A's thread now survives chat B's fold in every run.
+- **The first wording of the change prompt scored 0/3.** It kept "not what was merely discussed"
+  from the rewrite prompt, and the model answered NONE to "I'll need to buy pasta sheets on Friday".
+  Saying plainly that something the user still has to do *is* a thread, and that DONE needs the
+  activity to say it's finished ("a different topic is not a reason"), fixed both halves.
+- **expiry 3/3, but not for #20's reason.** The visit was stored as a task note, and notes leave
+  the prompt after 14 untouched days. A visit stored as a *fact* would still fail here. #20 (fact
+  lifetimes) is still to do, so this pass is partly incidental.
+
+The fold eval on the same code (`eval/assistant_memory`, 5 × 3): clean 9/15, misfiled 0/15,
+**forbidden 0/15**, missed 6/15. Forbidden is the best yet; missed is the same extraction misses as
+before.

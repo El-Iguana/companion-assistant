@@ -86,23 +86,28 @@ EXTRACT_PROMPT = (
 # summary grew because prose accretes; a list of task state should shrink when the
 # task is done.
 NOTES_PROMPT = (
-    "Track where things stand between {char} and {user}. Rewrite the list below so "
-    "it also covers the new activity.\n\n"
-    "- Terse lines, one clause each. No preamble, no prose, no narration.\n"
-    "- Only open threads, decisions taken, and state {char} would need to pick the "
-    "work back up. Not chit-chat, not what was merely discussed.\n"
-    "- Do NOT repeat standing instructions or facts about {user}. Those are stored "
-    "separately and injected already; a line here that restates one is waste, and "
-    "two copies of an instruction can drift apart.\n"
-    "- DROP anything finished, answered, or no longer true. A shorter list is a "
-    "better list, and an empty list is correct when nothing is outstanding.\n"
-    "- Never record what {char} said, offered, knows, or its own status. "
-    "\"{char} is operational\" and \"{char} knows X\" are not open threads.\n"
-    "- Never record a time, a date, or a clock reading. This list is injected into "
-    "every future conversation, where a timestamp from tonight is simply wrong.\n"
-    "- At most {max_notes} lines.\n\n"
-    "Current list:\n{notes}\n\nNew activity:\n{transcript}\n\nUpdated list:"
+    "Track where things stand between {char} and {user}: open threads, decisions taken, and the "
+    "state {char} would need to pick the work back up. Something {user} still has to do, or is "
+    "planning, or asked {char} to help with, IS a thread (\"buy pasta sheets on Friday\", "
+    "\"switch the DNS\").\n\n"
+    "The current threads are numbered below. Read the new activity and write ONLY what changes, "
+    "one per line:\n"
+    "  DONE <number>          a thread that is finished, answered, or no longer true\n"
+    "  EDIT <number>: <text>  a thread that moved on (the new wording)\n"
+    "  NEW: <text>            a thread the new activity opens\n"
+    "Threads you don't mention stay as they are, so never repeat one. If nothing changes, "
+    "write NONE.\n\n"
+    "- Terse, one clause each. No preamble, no prose, no narration.\n"
+    "- Not chit-chat or small talk.\n"
+    "- DONE only when the new activity says the thread is finished; a different topic is not "
+    "a reason.\n"
+    "- Do NOT record standing instructions or facts about {user}; those are stored separately.\n"
+    "- Never record what {char} said, offered, knows, or its own status.\n"
+    "- Never record a time, a date, or a clock reading.\n\n"
+    "Current threads:\n{notes}\n\nNew activity:\n{transcript}\n\nChanges:"
 )
+NOTE_STALE_DAYS = 14         # a thread untouched this long leaves the prompt (kept in the store)
+_OP = re.compile(r"^(DONE|EDIT|NEW)\b\s*(\d+)?\s*:?\s*(.*)$", re.I)
 
 
 def _clean(line: str, cap: int) -> str:
@@ -125,6 +130,77 @@ _JUNK_NOTE = re.compile(
 
 def _junk_notes(notes: list[str]) -> list[str]:
     return [n for n in notes if not _JUNK_NOTE.search(n)]
+
+
+def apply_note_changes(mem: AssistantMemory, raw: str, char: str, user: str,
+                       now: datetime | None = None) -> None:
+    """Apply a fold's changes to the notes (Memory Phase 7, #17). A note the fold doesn't name
+    stays as it is: folding chat B can no longer drop a thread only chat A knew about, which
+    rewriting the whole list did. A plain line where a change was asked for is read as NEW
+    unless it restates a note already there (a model falling back to rewriting the list)."""
+    now_s = (now or datetime.now()).isoformat(timespec="seconds")
+    notes = list(mem.notes)
+    known = [d.text for d in mem.directives] + [f.text for f in mem.facts]
+    done_idx: set[int] = set()
+    edits: dict[int, str] = {}
+    new: list[str] = []
+    for line in raw.splitlines():
+        line = _clean(line, NOTE_MAX_CHARS + 12)
+        if not line or line.upper().startswith("NONE"):
+            continue
+        m = _OP.match(line)
+        if m:
+            op, num, text = m.group(1).upper(), m.group(2), m.group(3).strip()
+            i = int(num) - 1 if num else -1
+            if op == "DONE" and 0 <= i < len(notes):
+                done_idx.add(i)
+            elif op == "EDIT" and 0 <= i < len(notes) and text:
+                edits[i] = text[:NOTE_MAX_CHARS]
+            elif op == "NEW" and text:
+                new.append(text[:NOTE_MAX_CHARS])
+        else:
+            new.append(line[:NOTE_MAX_CHARS])
+    # Filters for what the model writes: status lines, junk, restated instructions or facts.
+    def keep(t: str) -> bool:
+        return bool(_junk_notes(_drop_status_notes([t], char, user))) and bool(_drop_restated([t], known))
+    out, touched = [], dict(mem.notes_touched)
+    for i, n in enumerate(notes):
+        if i in done_idx:
+            touched.pop(n, None)
+            continue
+        if i in edits and keep(edits[i]):
+            touched.pop(n, None)
+            n = edits[i]
+            touched[n] = now_s
+        out.append(n)
+    for t in new:
+        if not keep(t):
+            continue
+        if any(len(_content(t) & _content(x)) / max(1, min(len(_content(t)), len(_content(x)))) >= 0.6
+               for x in out if _content(x)):
+            continue                                  # a restatement of a thread already there
+        out.append(t)
+        touched[t] = now_s
+    if len(out) > MAX_NOTES:                          # over the cap: the stalest go
+        out = sorted(out, key=lambda n: touched.get(n, mem.updated_at))[-MAX_NOTES:]
+    mem.notes = out
+    mem.notes_touched = {n: touched.get(n, mem.updated_at) for n in out}
+
+
+def live_notes(mem: AssistantMemory, now: datetime | None = None) -> list[str]:
+    """The notes for the prompt: those touched in the last NOTE_STALE_DAYS."""
+    now = now or datetime.now()
+    out = []
+    for n in mem.notes:
+        try:
+            t = datetime.fromisoformat(mem.notes_touched.get(n) or mem.updated_at)
+        except ValueError:
+            t = now
+        if t.tzinfo is not None:
+            t = t.replace(tzinfo=None)
+        if (now - t).days < NOTE_STALE_DAYS:
+            out.append(n)
+    return out
 
 
 def _norm(t: str) -> str:
@@ -310,24 +386,15 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
             # junk notes). Fortuna down or unsure keeps every turn, so this never fires.
             done = lo = end
             continue
-        prompt = NOTES_PROMPT.format(char=char, user=user, max_notes=MAX_NOTES,
-                                     notes="\n".join(f"- {n}" for n in mem.notes) or "(empty)",
+        prompt = NOTES_PROMPT.format(char=char, user=user,
+                                     notes="\n".join(f"{i}. {n}" for i, n in enumerate(mem.notes, 1)) or "(none)",
                                      transcript=transcript)
         try:
             raw = await kobold.generate_answer(prompt, {
                 "max_length": max_tokens, "temperature": 0.3, "top_p": 0.9, "rep_pen": 1.05})
         except Exception:
             break
-        # An empty list IS a valid answer here — unlike the companion summary,
-        # where empty meant the pass failed. "Nothing outstanding" is the goal
-        # state for a task assistant, so only a hard failure stops the fold.
-        notes = [_clean(l, NOTE_MAX_CHARS) for l in (raw or "").splitlines()]
-        notes = [n for n in notes if n and not n.upper().startswith("NONE")]
-        # Extraction runs after this, so the check is against what is already
-        # stored; a directive learned in this same pass is caught on the next fold.
-        notes = _junk_notes(_drop_status_notes(notes, char, user))
-        mem.notes = _drop_restated(
-            notes, [d.text for d in mem.directives] + [f.text for f in mem.facts])[:MAX_NOTES]
+        apply_note_changes(mem, raw or "", char, user)
         done = end
 
         if extract_items and left > 0:
@@ -384,7 +451,7 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
 
 
 def block(mem: AssistantMemory | None, char: str, user: str,
-          budget_chars: int = BUDGET_CHARS) -> str:
+          budget_chars: int = BUDGET_CHARS, now: datetime | None = None) -> str:
     """Render for the system prompt, or "" if there is nothing to say.
 
     Directives are laid out FIRST and are never truncated. They are instructions:
@@ -396,7 +463,7 @@ def block(mem: AssistantMemory | None, char: str, user: str,
         return ""
     directives = [d.text.strip() for d in mem.directives if d.text.strip()]
     facts = [f.text.strip() for f in mem.facts if f.text.strip()]
-    notes = [n.strip() for n in mem.notes if n.strip()]
+    notes = [n.strip() for n in live_notes(mem, now) if n.strip()]
     if not (directives or facts or notes):
         return ""
 

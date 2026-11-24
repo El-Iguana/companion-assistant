@@ -328,6 +328,10 @@ class AssistantMemory(BaseModel):
     facts: List[MemoryFact] = []
     notes: List[str] = []
     swept_sessions: Dict[str, int] = {}
+    # When each note was last written or changed, by its text (Memory Phase 7, #17): a fold
+    # changes notes by number instead of rewriting the list, and a note untouched for two
+    # weeks leaves the prompt. A note without an entry counts as touched at updated_at.
+    notes_touched: Dict[str, str] = {}
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 
