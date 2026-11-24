@@ -154,9 +154,11 @@ def test_fast_control_answers_in_words(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR])
     ctx = _ctx(tmp_path)
     assert asyncio.run(media.fast_control(ctx, {"type": "volume", "step": -15})) == "Volume 55."
-    assert asyncio.run(media.fast_control(ctx, {"type": "pause"})) == "Paused."
+    paused = asyncio.run(media.fast_control(ctx, {"type": "pause"}))
+    assert paused == "Paused." and isinstance(paused, media.Done)          # worked: not spoken
     o.refuse = "NOTHING_PLAYING"
-    assert asyncio.run(media.fast_control(ctx, {"type": "next"})) == "Nothing's playing."
+    nothing = asyncio.run(media.fast_control(ctx, {"type": "next"}))
+    assert nothing == "Nothing's playing." and not isinstance(nothing, media.Done)   # said aloud
     o.players[0]["online"] = False
     assert asyncio.run(media.fast_control(ctx, {"type": "pause"})) == "The music player isn't on."
 

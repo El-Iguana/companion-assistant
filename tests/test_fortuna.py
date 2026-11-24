@@ -67,6 +67,7 @@ def test_fast_lane_plays_a_clear_match_without_the_model(tmp_path, monkeypatch):
     asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.88)})
     said = asyncio.run(media.fast_play(_ctx(tmp_path), "Mira, can you play some Sigur Ros?", "Mira"))
     assert said == "Playing ( ) by Sigur Rós on Predator." and o.sent[0][1]["type"] == "play"
+    assert isinstance(said, media.Done)                         # it worked: shown, not said
     assert seen == asked == ["play some Sigur Ros"]            # her name and "can you" gone, for both
 
 
@@ -190,5 +191,6 @@ def test_a_sure_play_of_something_missing_is_answered_at_once(tmp_path, monkeypa
     fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.95)})
     said = asyncio.run(media.fast_play(_ctx(tmp_path), "Mira, play Ágætis byrjun", "Mira"))
     assert said == "I can't find Ágætis byrjun in your music." and not o.sent
+    assert not isinstance(said, media.Done)                     # a miss is said aloud
     fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.7)})   # unsure: hers
     assert asyncio.run(media.fast_play(_ctx(tmp_path), "play some Agaetis", "Mira")) is None
