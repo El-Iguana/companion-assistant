@@ -9,6 +9,9 @@
 > paths that have seen little testing outside Linux with an NVIDIA GPU. Bug reports are
 > welcome in [Issues](https://github.com/El-Iguana/companion-assistant/issues).
 
+**New here? Start with the [wiki](https://github.com/El-Iguana/companion-assistant/wiki):** installing,
+meeting Mira, talking to her hands-free, music, memory, making your own bartenders, and troubleshooting.
+
 A self-hosted, fully-local **voice assistant built on character cards**. You talk to it, it talks
 back, and it shows a face: a 3D VRM avatar (or a portrait), in the browser or in a corner of your
 desktop. A FastAPI backend and a [pytincture](https://github.com/pytincture/pytincture) page
@@ -75,7 +78,8 @@ With `run-podman.sh`, other devices can talk to it too: open `http://<this compu
 on the device, trust Cantinero's local certificate once (the page walks through it), then use
 `https://<this computer>.local:7868/`.
 
-The in-app **Guide** (Settings → Guide) documents custom system prompts and memory.
+The [wiki](https://github.com/El-Iguana/companion-assistant/wiki) is the user guide. The in-app **Guide**
+(Settings → Guide) documents custom system prompts and memory.
 
 ## Architecture
 
