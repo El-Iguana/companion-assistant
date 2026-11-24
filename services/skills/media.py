@@ -474,8 +474,11 @@ _LANE_INTENTS = {
     "music_question": "ask what is playing, or what music there is",
     "other": "anything else: conversation, questions, tasks",
 }
-_HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?(?:(?:can|could|would|will) you\b[ ,]*)?"
-                   r"(?:please\b[ ,]*)?", re.I)
+# A change of mind in front ("never mind, play Santana") isn't part of what to play: it used to
+# send that request through the model (22 s, 2026-11-24).
+_HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?"
+                   r"(?:(?:never ?mind|actually|instead|no|nah|oh|wait)\b[ ,!.]*)*"
+                   r"(?:(?:can|could|would|will) you\b[ ,]*)?(?:please\b[ ,]*)?", re.I)
 
 
 class Done(str):
@@ -522,6 +525,10 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     query = head.sub("", text).strip().rstrip("?.!")
     if not query:
         return None
+    if _ask_key(ctx) in _pending:                       # she just asked "which one?" (#81)
+        answered = await _answer(ctx, st, query)
+        if answered:
+            return answered
     # Fortuna is asked about the request itself: "Mira, can you play some Dave Matthews
     # Band?" scored 0.77, under the bar, where "play some Dave Matthews Band" scored 0.87.
     got = await fortuna.choose(query, "What does the user want the assistant to do?", _LANE_INTENTS)
@@ -550,24 +557,97 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         if how["ambiguous"]:
             i = await _settle(query, how["raw"])        # a tie: the exact title, else Fortuna
             if i is None:
-                return None                           # she asks
+                opts = either_or(cands, how["raw"])
+                if not opts:
+                    return None                       # she sorts it out
+                _pending[_ask_key(ctx)] = {"options": opts, "query": query, "at": time.monotonic()}
+                return question(opts)                 # said aloud: it's a question
             pick = cands[i]
         elif not sure and how["top"] < EXACT_SCORE:
             return None                               # unsure, and no exact name: hers
         if not pick.get("playable", True):
             return None
-        dev = await _target(ctx, st)
-        if _just_played(ctx, query, dev):
-            return Done("It's playing.")
-        queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
-                                playlist_id="" if pick["id"].isdigit() else pick["id"])
-        if not queue:
-            return None
-        await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
+        return await _play_pick(ctx, st, pick, query)
     except om.OrpheusError:
         return None                                   # let her explain it
+
+
+async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str | None:
+    """Play one candidate where she is; her line, or None. Orpheus errors go to the caller."""
+    dev = await _target(ctx, st)
+    if _just_played(ctx, query, dev):
+        return Done("It's playing.")
+    queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
+                            playlist_id="" if pick["id"].isdigit() else pick["id"])
+    if not queue:
+        return None
+    await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
     _remember_play(ctx, query, dev["id"])
     return Done(f"Playing {_spoken(pick['name'])} on {dev.get('name')}.")
+
+
+# --- either-or, without her (#81) -------------------------------------------------------------
+# A tie neither the title nor Fortuna can settle: a fixed question at once ("Which one: Crash by
+# Dave Matthews Band, or Crash by Someone Else?"), and the answer mapped to the options by
+# Fortuna (~0.2 s). Both used to be model passes (~18 s each). Anything else said next clears it.
+
+ASK_FOR_S = 90.0
+CHOICE_MIN = 0.7
+ASK_MAX = 5                  # matched against the answer; the first SAY_MAX are said
+SAY_MAX = 3
+_ORDINALS = ("first", "second", "third", "fourth", "fifth")
+_pending: dict[str, dict] = {}
+
+
+def _ask_key(ctx: SkillContext) -> str:
+    return ctx.session_id or ctx.user_id
+
+
+def either_or(cands: list[dict], raw: list[dict]) -> list[dict]:
+    """The tied, playable candidates worth a question: up to three, each said differently."""
+    if not raw:
+        return []
+    top = max(float(c.get("score") or 0) for c in raw)
+    out, said = [], set()
+    for c, r in zip(cands, raw):
+        if float(r.get("score") or 0) < top - TIE_GAP or not c.get("playable", True):
+            continue
+        name = _spoken(c["name"])
+        if name.lower() in said:
+            continue                                  # two the same aloud: a question can't tell them apart
+        said.add(name.lower())
+        out.append(c)
+        if len(out) == ASK_MAX:
+            break
+    return out if len(out) >= 2 else []
+
+
+def question(options: list[dict]) -> str:
+    """"Which one: A, B, or C?"; past three, "Which one: A, B, C, or one of 2 more?" (an answer
+    naming one of those still counts: _answer matches against them all)."""
+    names = [_spoken(o["name"]) for o in options]
+    if len(names) > SAY_MAX:
+        return "Which one: " + ", ".join(names[:SAY_MAX]) + f", or one of {len(names) - SAY_MAX} more?"
+    return "Which one: " + ", ".join(names[:-1]) + ", or " + names[-1] + "?"
+
+
+async def _answer(ctx: SkillContext, st: dict, text: str) -> str | None:
+    """The answer to her either-or, played; None when it isn't one (the turn goes on as usual)."""
+    from services import fortuna
+
+    pend = _pending.pop(_ask_key(ctx), None)
+    if not pend or time.monotonic() - pend["at"] > ASK_FOR_S:
+        return None
+    opts = pend["options"]
+    labels = {str(i + 1): f"the {_ORDINALS[i]} one: {_spoken(o['name'])}" for i, o in enumerate(opts)}
+    labels["none"] = "none of these: something else, or a new request"
+    got = await fortuna.choose(text, f'She asked: "{question(opts)}" Which did the user choose?', labels)
+    if got is None or got[0] not in labels or got[0] == "none" or got[1] < CHOICE_MIN:
+        return None
+    try:
+        return await _play_pick(ctx, st, opts[int(got[0]) - 1], pend["query"])
+    except om.OrpheusError:
+        return None
 
 
 async def fast_control(ctx: SkillContext, cmd: dict) -> str:
