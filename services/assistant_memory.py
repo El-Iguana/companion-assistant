@@ -20,7 +20,7 @@ What it keeps, and nothing else:
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from models.schema import (AssistantMemory, CharacterCard, ChatSession,
                            MemoryFact, Persona)
@@ -185,6 +185,93 @@ def apply_note_changes(mem: AssistantMemory, raw: str, char: str, user: str,
         out = sorted(out, key=lambda n: touched.get(n, mem.updated_at))[-MAX_NOTES:]
     mem.notes = out
     mem.notes_touched = {n: touched.get(n, mem.updated_at) for n in out}
+
+
+# --- fact lifetimes (Memory Phase 7, #20) ---------------------------------------------------
+
+DEFAULT_TIMEBOUND_DAYS = 30
+_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+        "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "a": 1, "an": 1, "a couple of": 2, "a few": 3}
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september",
+           "october", "november", "december"]
+_TIME_WORDS = re.compile(r"\b(today|tonight|tomorrow|this (?:week|weekend|month)|next (?:week|weekend|month|year)|"
+                         r"on (?:the )?\d|in \w+ (?:days?|weeks?|months?)|"
+                         + "|".join(_WEEKDAYS) + "|" + "|".join(_MONTHS) + r")\b", re.I)
+
+
+def expires_from(text: str, now: datetime) -> datetime:
+    """When a time-bound fact stops being true, read from its words, with a day's grace:
+    "tomorrow", "next weekend", "on Thursday", "on the 12th", "in three weeks", "in March".
+    No date in it: DEFAULT_TIMEBOUND_DAYS."""
+    t = text.lower()
+    day = timedelta(days=1)
+    if re.search(r"\b(today|tonight)\b", t):
+        return now + day
+    if "tomorrow" in t:
+        return now + 2 * day
+    m = re.search(r"\bin (a couple of|a few|an?|\d+|" + "|".join(k for k in _NUM if " " not in k) +
+                  r") (day|week|month)s?\b", t)
+    if m:
+        word = m.group(1)
+        n = int(word) if word.isdigit() else _NUM[word]
+        unit = {"day": 1, "week": 7, "month": 31}[m.group(2)]
+        return now + timedelta(days=n * unit + 2)
+    if re.search(r"\bthis weekend\b", t):
+        return now + timedelta(days=(6 - now.weekday()) + 1)
+    if re.search(r"\bnext weekend\b", t):
+        return now + timedelta(days=(6 - now.weekday()) + 8)
+    if re.search(r"\bthis week\b", t):
+        return now + timedelta(days=(6 - now.weekday()) + 1)
+    if re.search(r"\bnext week\b", t):
+        return now + timedelta(days=(6 - now.weekday()) + 8)
+    if re.search(r"\bthis month\b", t):
+        return (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+    if re.search(r"\bnext month\b", t):
+        return (now.replace(day=1) + timedelta(days=63)).replace(day=1)
+    if re.search(r"\bnext year\b", t):
+        return now.replace(year=now.year + 2, month=1, day=1)
+    for i, wd in enumerate(_WEEKDAYS):
+        if re.search(rf"\b{wd}\b", t):
+            return now + timedelta(days=((i - now.weekday()) % 7 or 7) + 1)
+    m = re.search(r"\b(?:on )?the (\d{1,2})(?:st|nd|rd|th)?\b", t)
+    if m and 1 <= int(m.group(1)) <= 31:
+        d = int(m.group(1))
+        target = now.replace(day=min(d, 28)) if d > 28 else now.replace(day=d)
+        if target.date() < now.date():
+            target = (now.replace(day=1) + timedelta(days=32)).replace(day=min(d, 28))
+        return target + day
+    for i, mon in enumerate(_MONTHS, 1):
+        if re.search(rf"\b{mon}\b", t):
+            year = now.year + (1 if i < now.month else 0)
+            end = datetime(year + (i == 12), i % 12 + 1, 1)          # the first of the month after
+            return end + day
+    return now + timedelta(days=DEFAULT_TIMEBOUND_DAYS)
+
+
+async def lifetime(text: str, now: datetime | None = None) -> tuple[str, str]:
+    """A new fact's kind and end date: ("", "") for lasting, ("timebound", iso date) for a plan,
+    appointment, visit or state that ends. Fortuna decides (it labelled events at 0.85-0.97 in
+    eval/memory_decisions); without it, the time words in the text do."""
+    from services import fortuna
+
+    now = now or datetime.now()
+    got = await fortuna.choose(text, "Will this fact about the user stay true, or does it end?", {
+        "lasting": "lasting: true for the foreseeable future (a name, a home, a family member, a preference)",
+        "timebound": "time-bound: a plan, appointment, visit, trip or passing state that ends"})
+    bound = (got[0] == "timebound" and got[1] >= 0.6) if got is not None else bool(_TIME_WORDS.search(text))
+    if not bound:
+        return "", ""
+    return "timebound", expires_from(text, now).date().isoformat()
+
+
+def expired(f: MemoryFact, now: datetime | None = None) -> bool:
+    if not f.expires:
+        return False
+    try:
+        return (now or datetime.now()).date().isoformat() > f.expires
+    except (TypeError, ValueError):
+        return False
 
 
 def live_notes(mem: AssistantMemory, now: datetime | None = None) -> list[str]:
@@ -417,7 +504,8 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
             for t in new_d:
                 mem.directives.append(MemoryFact(text=t, origin="auto"))
             for t in new_f:
-                mem.facts.append(MemoryFact(text=t, origin="auto"))
+                kind, expires = await lifetime(t)
+                mem.facts.append(MemoryFact(text=t, origin="auto", kind=kind, expires=expires))
             left -= len(new_d) + len(new_f)
             if new_d or new_f:
                 print(f"[assistant-memory] +{len(new_d)} directive(s) +{len(new_f)} fact(s)",
@@ -462,7 +550,7 @@ def block(mem: AssistantMemory | None, char: str, user: str,
     if mem is None:
         return ""
     directives = [d.text.strip() for d in mem.directives if d.text.strip()]
-    facts = [f.text.strip() for f in mem.facts if f.text.strip()]
+    facts = [f.text.strip() for f in mem.facts if f.text.strip() and not expired(f, now)]
     notes = [n.strip() for n in live_notes(mem, now) if n.strip()]
     if not (directives or facts or notes):
         return ""

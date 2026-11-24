@@ -1106,6 +1106,8 @@ async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
                 prev.text = text
                 if "scope" in item and field == "directives":
                     prev.scope = scope           # "only her" / "every bartender" (#16)
+                if field == "facts" and item.get("renew"):
+                    prev.kind, prev.expires = "", ""     # "keep it": an expired fact made lasting (#20)
                 kept.append(prev)
             else:
                 kept.append(MemoryFact(text=text, origin="user", scope=scope))
