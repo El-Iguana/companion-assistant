@@ -253,10 +253,28 @@ def exact_pick(query: str, raw: list[dict]) -> int | None:
     return hits[0] if len(hits) == 1 else None
 
 
+def artist_pick(raw: list[dict]) -> int | None:
+    """An artist tied with their own albums and tracks: the artist ("some Hendrix" asked
+    "Jimi Hendrix, Greatest Hits by Jimi Hendrix, or Purple Haze by Jimi Hendrix?", 2026-11-24)."""
+    if not raw:
+        return None
+    top = max(float(c.get("score") or 0) for c in raw)
+    tied = [(i, c) for i, c in enumerate(raw) if float(c.get("score") or 0) >= top - TIE_GAP]
+    artists = [(i, c) for i, c in tied if c.get("kind") == "artist"]
+    if len(artists) != 1:
+        return None
+    i, a = artists[0]
+    name = _norm(a.get("title") or a.get("display") or "")
+    by = lambda c: _norm((c.get("display") or "").rpartition(" — ")[2]).startswith(name)   # noqa: E731
+    return i if name and all(j == i or by(c) for j, c in tied) else None
+
+
 async def _settle(query: str, raw: list[dict]) -> int | None:
-    """Which tied candidate was meant: the exact title, else Fortuna when it is sure, else None
-    (she asks)."""
+    """Which tied candidate was meant: the exact title, the artist over their own work, else
+    Fortuna when it is sure, else None (she asks)."""
     i = exact_pick(query, raw)
+    if i is None:
+        i = artist_pick(raw)
     if i is not None:
         return i
     from services import fortuna
