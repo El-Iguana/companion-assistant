@@ -122,6 +122,13 @@ async def answer(text: str, name: str = "", *, players=None, prefer: str = "",
     user's residents with their state, for "what's playing"; None when the card has no DJ."""
     from services import fortuna
 
+    # A holiday's date ("when is Thanksgiving?", "how many days until Christmas?"): worked out
+    # in code (#103); the model counted days wrong.
+    from services import calendar_facts
+    head = re.compile(_HEAD.replace("{name}", re.escape(name) if name else "(?!)"), re.I)
+    said = calendar_facts.holiday_answer(head.sub("", text or "").strip(), now)
+    if said:
+        return said
     q = candidate(text, name)
     if not q:
         return None

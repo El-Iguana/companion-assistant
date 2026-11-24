@@ -57,7 +57,9 @@ def test_fortuna_sure_answers_and_unsure_is_hers(monkeypatch):
     assert said == "It's quarter past three in the afternoon." and asked == ["what time is it?"]
     assert _ask(monkeypatch, "what day is it", ("date", 0.9))[0] == "It's Tuesday, November the twenty-fourth."
     assert _ask(monkeypatch, "what time is it", ("time", 0.6))[0] is None
-    assert _ask(monkeypatch, "What day is Thanksgiving?", ("date", 0.87))[0] is None   # not today
+    assert _ask(monkeypatch, "What day is Thanksgiving?", ("date", 0.87))[0] == (       # a holiday: worked out
+        "Thanksgiving is Thursday, November the twenty-sixth, in two days.")
+    assert _ask(monkeypatch, "What day is the party?", ("date", 0.87))[0] is None      # not today
     assert _ask(monkeypatch, "I love this song.", ("playing", 0.9), lambda: [])[0] is None   # not a question
     assert _ask(monkeypatch, "I had a great day", ("other", 0.9))[0] is None
     assert _ask(monkeypatch, "what time is it", None)[0] is None           # Fortuna down: hers
