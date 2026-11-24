@@ -55,6 +55,7 @@ DEFAULT_URL = "http://127.0.0.1:7867/desktop"
 # The HUD lives in a strip along the bottom. Only that strip accepts clicks;
 # everything above it passes through to whatever is on the desktop behind her.
 HUD_STRIP_PX = 56
+CORNER = "bottom-right"   # where she sits until dragged (geometry.json "anchor")
 
 
 class DesktopShell(Gtk.Application):
@@ -201,18 +202,47 @@ class DesktopShell(Gtk.Application):
             with open(self._geom_file, encoding="utf-8") as f:
                 g = json.load(f)
             if all(isinstance(g.get(k), int) for k in ("x", "y", "w", "h")):
+                # A file from before the corner anchor has no "anchor": it gets the corner,
+                # which is where she belongs unless dragged somewhere since.
+                g.setdefault("anchor", CORNER)
                 return g
         except Exception:                                    # noqa: BLE001
             pass
         return None
 
-    def _restore_geometry(self):
-        """Put the window back. Safe to call whenever a surface appears."""
+    def _anchor(self) -> str:
         g = self._geom or self._load_geometry()
-        if g and self.kwin:
+        return g.get("anchor", CORNER) if g else CORNER
+
+    def _restore_geometry(self):
+        """Put the window back. Safe to call whenever a surface appears. By default she sits
+        in the bottom-right corner; once dragged, where she was dropped."""
+        if not self.kwin:
+            return False
+        g = self._geom or self._load_geometry()
+        if self._anchor() == CORNER:
+            if g:
+                self.kwin.apply(g["x"], g["y"], g["w"], g["h"])   # her size, then the corner
+            GLib.timeout_add(300, lambda: self.kwin.anchor() and False)
+            print("[shell] restored to the bottom-right corner")
+        elif g:
             self.kwin.apply(g["x"], g["y"], g["w"], g["h"])
             print(f"[shell] restored to {g['x']},{g['y']} {g['w']}x{g['h']}")
         return False                                          # never repeats itself
+
+    def _menu_corner(self, *_):
+        """Back to the corner: forget the drag."""
+        self._set_anchor(CORNER)
+        if self.kwin:
+            self.kwin.anchor()
+
+    def _set_anchor(self, anchor: str) -> None:
+        g = dict(self._geom or self._load_geometry() or {})
+        if not g:
+            g = {"x": 0, "y": 0, "w": 420, "h": 620}
+        g["anchor"] = anchor
+        self._geom = None
+        self._write_geometry(g)
 
     def _poll_geometry(self):
         # Only while mapped: a hidden window has no surface, so KWin either
@@ -222,13 +252,16 @@ class DesktopShell(Gtk.Application):
         return True
 
     def _on_geometry(self, x, y, w, h):
-        g = {"x": x, "y": y, "w": w, "h": h}
+        g = {"x": x, "y": y, "w": w, "h": h, "anchor": self._anchor()}
         if g == self._geom:
             return                                            # unchanged; no write
         # Ignore a bogus report rather than persist a position that would put her
         # off-screen on the next launch.
         if w < 80 or h < 80:
             return
+        self._write_geometry(g)
+
+    def _write_geometry(self, g: dict) -> None:
         self._geom = g
         try:
             os.makedirs(os.path.dirname(self._geom_file), exist_ok=True)
@@ -315,6 +348,7 @@ class DesktopShell(Gtk.Application):
             self._mi_chars,
             self._mi_listen,
             self._mi_position,
+            MenuItem(9, "Put her in the corner", self._menu_corner),
             self._mi_through,
             MenuItem(3, is_sep=True),
             MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
@@ -451,6 +485,8 @@ class DesktopShell(Gtk.Application):
         """
         self.position_mode = item.checked
         self.drag_bar.set_visible(self.position_mode)
+        if self.position_mode:
+            self._set_anchor("")                  # dragged: where she is dropped, not the corner
         if self.position_mode:
             self._saved_click_through = self.click_through
             self.click_through = False
