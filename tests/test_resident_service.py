@@ -109,7 +109,7 @@ def test_voice_is_local(server, client, monkeypatch):
     seen, _ = server
     from services import stt, tts
     monkeypatch.setattr(tts, "synth_wav", lambda text, voice, speed: b"RIFF" + text.encode())
-    monkeypatch.setattr(stt, "transcribe", lambda audio, lang, strict: f"heard {len(audio)} strict={strict}")
+    monkeypatch.setattr(stt, "transcribe", lambda audio, lang, strict, wake_word="": f"heard {len(audio)} strict={strict}")
     r = client.post("/pmedia/tts", json={"text": "Hello", "voice": "af_sarah"}, headers=H)
     assert r.content == b"RIFFHello" and r.headers["content-type"] == "audio/wav"
     r = client.post("/pmedia/stt", files={"file": ("a.wav", b"12345")}, data={"strict": "1"}, headers=H)

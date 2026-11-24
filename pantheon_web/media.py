@@ -185,14 +185,16 @@ async def tts(request: Request):
 
 
 @router.post("/stt")
-async def stt(request: Request, file: UploadFile = File(...), strict: str = Form("")):
+async def stt(request: Request, file: UploadFile = File(...), strict: str = Form(""),
+              wake_word: str = Form("")):
     """A recorded utterance (WAV) -> {text} (``main.stt_transcribe``). ``strict=1`` when
-    the clip overlapped the character speaking (voice.js herTurn)."""
+    the clip overlapped the character speaking (voice.js herTurn). ``wake_word`` is named to
+    Whisper, so "Mira" isn't written "Mirror" (stt.transcribe)."""
     import main
 
     _ctx(request)
     _require_csrf(request)
-    return await main.stt_transcribe(file, None, strict=strict == "1")
+    return await main.stt_transcribe(file, None, strict=strict == "1", wake_word=wake_word)
 
 
 @router.get("/card/{card_id}/avatar.vrm")

@@ -111,13 +111,20 @@ def _accept(segments, speech_s: float, strict: bool = False) -> str:
     return text
 
 
-def transcribe(audio: bytes, language: str | None = None, strict: bool = False) -> str:
+def transcribe(audio: bytes, language: str | None = None, strict: bool = False,
+               wake_word: str = "") -> str:
     """Transcribe audio bytes (any ffmpeg-decodable container) to plain text.
 
     `vad_filter` trims leading/trailing silence so push-to-talk clips with a bit
     of dead air don't hallucinate; `beam_size=1` keeps it snappy. Not conditioning
     on previous text stops one invented segment from seeding the next, which is
     how a hallucination turns into a run. `_accept` drops what is left over.
+
+    `wake_word`: named to Whisper in a sentence of context ("The assistant's name is Mira.").
+    Without it base.en wrote "Mira" as "Mirror", "Miro" or "MIRO" and the exact wake-word match
+    failed: 17 of 28 synthetic wake commands began with "Mira", 28 of 28 with it. faster-whisper's
+    ``hotwords`` is the wrong tool: it reads as text already heard, so Whisper left the wake word
+    out altogether (15 of 28). eval/listen, 2026-11-24.
     """
     samples = _wav_samples(audio)
     segments, info = _whisper().transcribe(
@@ -126,5 +133,6 @@ def transcribe(audio: bytes, language: str | None = None, strict: bool = False) 
         beam_size=1,
         vad_filter=True,
         condition_on_previous_text=False,
+        initial_prompt=(f"The assistant's name is {wake_word.strip()}." if wake_word.strip() else None),
     )
     return _accept(list(segments), info.duration_after_vad or info.duration or 0.0, strict)
