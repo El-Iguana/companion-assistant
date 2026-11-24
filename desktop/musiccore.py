@@ -195,3 +195,25 @@ class StateThrottle:
 def fmt_time(seconds: float) -> str:
     s = int(max(0, seconds))
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+# The micro player under her bar (Music M1) sends its buttons as "music:<action>[:<value>]"
+# through the shell's message handler. These are the ones it may send.
+PAGE_ACTIONS = ("toggle", "previous", "next", "stop", "seek", "volume", "open")
+
+
+def page_command(msg: str) -> Optional[tuple]:
+    """("seek", 81.5), ("next", None)…, or None for anything else."""
+    parts = str(msg or "").split(":")
+    if len(parts) < 2 or parts[0] != "music" or parts[1] not in PAGE_ACTIONS:
+        return None
+    action = parts[1]
+    if action in ("seek", "volume"):
+        try:
+            value = float(parts[2])
+        except (IndexError, ValueError):
+            return None
+        if value != value or value < 0:          # NaN or negative
+            return None
+        return (action, min(value, 100.0) if action == "volume" else value)
+    return (action, None)

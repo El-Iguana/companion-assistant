@@ -38,3 +38,22 @@ body:hover #dt-hud #dt-bar { opacity: 1; }
 .dt-btn.active { background: #5aa9e055; }
 .dt-btn.awake { box-shadow: 0 0 0 2px #5ac47a88; }
 .dt-state { font-size: 11px; color: #9a9aa8; min-width: 4.5em; }
+
+/* The micro player (Music M1): always shown while music plays or is paused, under the bar,
+   which moves up by its height (--dm-h, set by desktop.js; the shell's click strip grows too). */
+#dt-music { position: fixed; left: 10px; right: 10px; bottom: 8px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 3px; padding: 7px 10px 5px;
+  background: #0b0b12dd; color: #e7e7ef; border-radius: 14px; backdrop-filter: blur(6px);
+  font-size: 12px; }
+body.dm-on #dt-hud { bottom: var(--dm-h, 0px); }
+.dm-now { display: flex; gap: 6px; white-space: nowrap; min-width: 0; }
+#dm-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 60%; }
+#dm-sub { color: #9a9aa8; overflow: hidden; text-overflow: ellipsis; }
+.dm-seek { display: flex; align-items: center; gap: 6px; }
+.dm-t { font-size: 10.5px; color: #9a9aa8; font-variant-numeric: tabular-nums; min-width: 2.7em; }
+#dm-dur { text-align: right; }
+#dt-music input[type=range] { accent-color: #d4a24c; margin: 0; }
+#dm-seekbar { flex: 1; min-width: 0; }
+.dm-row { display: flex; align-items: center; gap: 2px; }
+.dm-vol { display: flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 4px; }
+#dm-volume { width: 78px; }

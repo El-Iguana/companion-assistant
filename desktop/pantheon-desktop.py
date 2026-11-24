@@ -78,6 +78,8 @@ class DesktopShell(Gtk.Application):
         self.hidden = False            # see-through and click-through (see _hide)
         self.prefs = shellsettings.load()   # this machine's Settings (R6.2)
         self.settings_win = None
+        self.hud_extra = 0             # px the page's micro player adds to the clickable strip
+        self._music_pushed = ""
         self._exiting = False
         # `cantinero --exit` reaches this over D-Bus (org.gtk.Actions.Activate "exit").
         exit_action = Gio.SimpleAction.new("exit", None)
@@ -186,6 +188,9 @@ class DesktopShell(Gtk.Application):
         # 3 s rather than leaving an empty window for the session (found on predator,
         # 2026-11-23: the page had never loaded since the install).
         self.view.connect("load-failed", self._on_load_failed)
+        # A fresh page has no micro player yet: send it the music state again.
+        self.view.connect("load-changed", lambda _v, ev: ev == WebKit.LoadEvent.FINISHED
+                          and setattr(self, "_music_pushed", ""))
         self.view.load_uri(self.url)
 
         self.win.connect("notify::default-width", lambda *_: self._apply_input_region())
@@ -201,6 +206,7 @@ class DesktopShell(Gtk.Application):
         if self.want_music and music.configured(cfg):
             self.player = music.MusicPlayer(self, cfg, int(os.environ.get("RESIDENT_PORT") or 7867))
             self.player.start()
+            GLib.timeout_add(500, self._push_music)
         elif self.want_music:
             print("[shell] no music yet: pair the resident, then python -m resident pair-orpheus")
 
@@ -341,7 +347,8 @@ class DesktopShell(Gtk.Application):
             if self.hidden:
                 surface.set_input_region(cairo.Region())          # nothing: clicks pass through
             elif self.click_through and not self.position_mode:
-                strip = cairo.RectangleInt(0, max(0, h - HUD_STRIP_PX), w, HUD_STRIP_PX)
+                tall = HUD_STRIP_PX + self.hud_extra
+                strip = cairo.RectangleInt(0, max(0, h - tall), w, tall)
                 surface.set_input_region(cairo.Region(strip))
             else:
                 surface.set_input_region(cairo.Region(cairo.RectangleInt(0, 0, w, h)))
@@ -408,6 +415,28 @@ class DesktopShell(Gtk.Application):
             return
         if msg == "settings":
             self._menu_settings()
+        elif msg.startswith("hud:"):
+            # The micro player shows or goes: the page says how much taller the strip is.
+            try:
+                extra = max(0, min(400, int(float(msg[4:]))))
+            except ValueError:
+                return
+            if extra != self.hud_extra:
+                self.hud_extra = extra
+                print(f"[shell] micro player {'shown, ' + str(extra) + ' px' if extra else 'gone'}")
+                self._apply_input_region()
+        elif self.player and (cmd := music.core.page_command(msg)):
+            self.player.control(*cmd)
+            self._push_music()
+
+    def _push_music(self):
+        """The micro player under her bar (Music M1): the player's state, when it changed."""
+        if self.player and self.view and not self._exiting:
+            js = "window.__cantineroMusic && window.__cantineroMusic(%s)" % json.dumps(self.player.snapshot())
+            if js != self._music_pushed:
+                self._music_pushed = js
+                self.view.evaluate_javascript(js, -1, None, None, None, None, None)
+        return True                                        # the timer keeps going
 
     def _menu_settings(self, *_):
         if self.settings_win is None:
