@@ -810,6 +810,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of
     speaking over the music. A miss ("I can't find …") stays a plain str and is said aloud. The web
     chat ignores the event.
+  - **Quick answers** (#101, `services/quick.py`): the time, today's date and what's playing are
+    answered in code, said aloud ("It's quarter past three in the afternoon.", ~0.2 s, against
+    ~20 s through the model). A word gate, a question (a "?" or a question word: "I love this
+    song." is not one), nothing about another day or event (tomorrow, timer, meeting…), then
+    Fortuna names it at ≥ 0.8; a date answer also needs "it/today/now/the date" in the question
+    ("What day is Thanksgiving?" read as the date at 0.87). "What's playing" only for a DJ card.
+    Measured on 36 lines: 35 right, 1 left to her ("Time check."), 0 wrong.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
   - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns
