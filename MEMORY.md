@@ -96,6 +96,20 @@ chat's transcript let folding chat B drop a thread only chat A knew about.
   a model falling back to rewriting the list must not double it.
 - The status, junk and restated-instruction filters apply to every NEW and EDIT.
 
+**Tiered recall (Memory Phase 7, #21, 2026-11-23).** `main.memory_for_turn` splits the facts.
+- **Always, in the system block:** directives (never cut), the notes, and a core of facts
+  (`core_facts`): hand-written first, then the most used, then the newest, within `CORE_CHARS` (500).
+  A small library fits whole and behaves as before.
+- **Per turn, after the history:** the other facts that share words with the latest user message
+  (`recall`). Common words and the user's own name don't count, recent facts get a small bonus, at
+  least one real word must match, and at most `RECALL_MAX` (6) are recalled. Each recalled fact's
+  `uses` and `last_used` are updated, which in turn feeds the core.
+- **Why the split:** the system block now changes only when the store does, not per turn, so
+  KoboldCPP's cached prefix survives.
+- **No model in recall:** keyword overlap measured 3/3 on the scenario that needs it. Embeddings
+  only if this measures poorly later.
+- **The silent drop is gone:** before, the newest facts were the ones cut once the store was full.
+
 **Facts that end (Memory Phase 7, #20, 2026-11-23).** A new fact gets a lifetime from
 `assistant_memory.lifetime`:
 - Fortuna decides lasting or time-bound (at 0.6 or more); without Fortuna, time words in the text
