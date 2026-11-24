@@ -1,0 +1,14 @@
+{
+  "name": "lately-with-this-bartender",
+  "issue": "#18",
+  "why": "A new chat with her mustn't be a blank start: the last few turns of her most recent conversation, whichever window it was in, come along.",
+  "steps": [
+    {"chat": "Mira", "fold": false, "messages": [
+      ["user", "Remind me which hotel we picked for Lisbon?"],
+      ["char", "The Memmo Alfama, the one with the rooftop pool."],
+      ["user", "Right, thanks."],
+      ["char", "Any time."]]},
+    {"check": {"bartender": "Mira", "new_chat": true, "user_says": "What was the name of that hotel again?",
+               "expect": [{"label": "the last conversation's answer", "pattern": "Memmo"}]}}
+  ]
+}

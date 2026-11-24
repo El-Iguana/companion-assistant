@@ -1,0 +1,114 @@
+{
+  "name": "recall-precision",
+  "issue": "#21",
+  "why": "With a full store, the facts that matter to this turn must be in the prompt and the unrelated ones out. Today block() injects in list order and drops what doesn't fit, so the NEWEST facts are the ones lost, silently. The store here (70 facts) is over the 2,400-character budget, so the newest fact is the one at risk.",
+  "steps": [
+    {
+      "seed": {
+        "bartender": "Mira",
+        "facts": [
+          "Brian drives a 2014 Toyota Corolla",
+          "Brian is allergic to penicillin",
+          "Brian works night shifts at the hospital",
+          "Brian's favourite band is Rush",
+          "Brian supports FC Porto",
+          "Brian's sister is called Marta",
+          "Brian is learning Portuguese",
+          "Brian takes his coffee black",
+          "Brian's birthday is the 3rd of March",
+          "Brian's car insurance renews in June",
+          "Brian prefers aisle seats on planes",
+          "Brian has a cat called Pixel",
+          "Brian's office is on the fourth floor",
+          "Brian runs 5 km on Sundays",
+          "Brian's dentist is Dr Sousa",
+          "Brian's laptop is a ThinkPad X1",
+          "Brian's mother lives in Braga",
+          "Brian dislikes country music",
+          "Brian's wifi password hint is the cat's name",
+          "Brian collects vinyl records",
+          "Brian's bank is Millennium",
+          "Brian's passport expires in 2029",
+          "Brian is left-handed",
+          "Brian's flat has a balcony facing west",
+          "Brian's favourite film is Blade Runner",
+          "Brian's daughter Ana goes to school in Matosinhos",
+          "Brian's GP surgery is on Rua da Boavista",
+          "Brian plays five-a-side on Wednesdays",
+          "Brian's partner is called Inês",
+          "Brian's gym membership is at Fitness Hut",
+          "Brian's neighbour is called Rui",
+          "Brian's flat number is 3B",
+          "Brian's favourite beer is Super Bock",
+          "Brian's guitar is a Fender Telecaster",
+          "Brian's boss is called Carla",
+          "Brian's team at work is radiology",
+          "Brian's car was serviced in October",
+          "Brian's bike is a Brompton",
+          "Brian's favourite restaurant is Cantinho do Avillez",
+          "Brian's phone is a Pixel 8",
+          "Brian's electricity is with EDP",
+          "Brian's barber is on Rua de Cedofeita",
+          "Brian's mother-in-law is called Rosa",
+          "Brian prefers window blinds closed in the morning",
+          "Brian's backup drive is a 4 TB WD",
+          "Brian's podcast of choice is Radiolab",
+          "Brian's coffee machine is a Delonghi",
+          "Brian's favourite author is Saramago",
+          "Brian's least favourite food is olives",
+          "Brian's shoe size is 43",
+          "Brian's spare key is with Rui",
+          "Brian's train pass is Andante",
+          "Brian's photography camera is a Fujifilm X100",
+          "Brian's printer is a Brother laser",
+          "Brian's tax adviser is Paulo",
+          "Brian's pet insurance is with Ageas",
+          "Brian's TV is a 55-inch LG",
+          "Brian's router is in the hall cupboard",
+          "Brian's favourite holiday spot is the Douro valley",
+          "Brian's book club meets on the first Tuesday",
+          "Brian's chess rating is about 1400",
+          "Brian's football boots are Adidas",
+          "Brian's vinyl player is a Rega Planar",
+          "Brian's watch is a Seiko 5",
+          "Brian's sister Marta lives in Lyon",
+          "Brian's plants need watering on Saturdays",
+          "Brian's water bill is paid by direct debit",
+          "Brian's car parks on level -2",
+          "Brian's favourite podcast host is Jad Abumrad",
+          "Brian's daughter Ana is vegetarian"
+        ]
+      }
+    },
+    {
+      "check": {
+        "bartender": "Mira",
+        "user_says": "What should I cook for Ana tonight?",
+        "expect": [
+          {
+            "label": "Ana is vegetarian (the newest fact)",
+            "pattern": "vegetarian"
+          }
+        ],
+        "forbid": [
+          {
+            "label": "the car",
+            "pattern": "Corolla"
+          },
+          {
+            "label": "the passport",
+            "pattern": "passport"
+          },
+          {
+            "label": "the bank",
+            "pattern": "Millennium"
+          },
+          {
+            "label": "the wifi hint",
+            "pattern": "wifi"
+          }
+        ]
+      }
+    }
+  ]
+}

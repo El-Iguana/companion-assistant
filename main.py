@@ -306,6 +306,17 @@ def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str) -> Assi
     return AssistantMemory(character_id=character_id, persona_id=persona_id)
 
 
+def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: ChatSession,
+                    now: datetime | None = None) -> dict:
+    """What this bartender's memory puts in the prompt for this turn: ``system`` (in the system
+    block) and ``trailing`` (after the history, which may change per turn without invalidating
+    KoboldCPP's cached prefix). The one place Memory Phase 7 changes what she remembers, and
+    what eval/memory_phase7 measures. ``session``'s last user message is the turn; ``now`` is
+    when (the eval moves it to test expiry)."""
+    mem = _load_assistant_memory(cur, session.character_id, persona.id)
+    return {"system": assistant_memory.block(mem, card.name, persona.name), "trailing": ""}
+
+
 def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
     (cur.assistant / f"{mem.character_id}__{mem.persona_id}.json").write_text(
         mem.model_dump_json(indent=2))
@@ -1442,8 +1453,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         _pending_swipes, _pending_exprs = [], []
         session.messages.append(ChatMessage(role="user", content=req.input_text))
 
-    asst_mem = _load_assistant_memory(cur, session.character_id, persona.id)
-    lt_note = assistant_memory.block(asst_mem, card.name, persona.name)
+    lt_note = memory_for_turn(cur, card, persona, session)["system"]
     settings = _load_settings(cur)
 
     window = await _context_tokens(settings)
