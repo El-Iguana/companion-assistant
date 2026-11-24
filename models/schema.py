@@ -299,6 +299,13 @@ class MemoryFact(BaseModel):
     # about that persona; untagged facts are about the user and every persona sees them.
     scope: str = ""
     persona_id: str = ""
+    # Memory Phase 7 (#20): a fact is lasting ("") or time-bound ("timebound"), with the date
+    # it stops being true; once past it, it leaves the prompt. last_used and uses are set when
+    # recall puts it in a prompt (#21).
+    kind: str = ""
+    expires: str = ""
+    last_used: str = ""
+    uses: int = 0
 
 
 class AssistantMemory(BaseModel):

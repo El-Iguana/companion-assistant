@@ -46,7 +46,12 @@ class Memory:
         cur, s, card, pid = scope
         out = {"ok": True, "long": None, "character": card.name if card else ""}
         if card is not None:
+            from services import assistant_memory as am
+            from models.schema import MemoryFact
+
             out["long"] = await main.get_assistant_memory(card.id, pid, cur=cur)
+            for f in out["long"].get("facts") or []:            # #20: say which have run out
+                f["expired"] = am.expired(MemoryFact(**{k: v for k, v in f.items() if k in MemoryFact.model_fields}))
         return out
 
     async def save(self, session_id: str, long: dict | None = None) -> dict:

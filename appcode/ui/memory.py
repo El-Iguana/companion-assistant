@@ -23,9 +23,17 @@ def _row(kind: str, item: dict, placeholder: str, char: str = "") -> str:
         scope = (f'<button class="pt-mbtn pt-scope" data-scope="{"all" if everyone else ""}" type="button" '
                  f'title="Who follows this: click to switch">'
                  f'{"every bartender" if everyone else "only " + esc(char or "her")}</button>')
+    life = ""
+    if kind == "fact" and item.get("expires"):
+        # A time-bound fact (Memory Phase 7, #20): when it ends, or that it has and is out of
+        # the prompt. One click keeps an expired one, as lasting.
+        life = ('<button class="pt-mbtn pt-scope" data-renew="0" type="button" '
+                'title="Out of the prompt since its date. Click to keep it, with no end date">expired · keep?</button>'
+                if item.get("expired") else
+                f'<span class="pt-tag" title="Time-bound: leaves the prompt after this date">until {esc(item["expires"])}</span>')
     return (f'<div class="pt-memrow" data-row="{kind}" data-id="{esc(item.get("id") or "")}">'
             f'<input type="text" value="{esc(item.get("text") or "")}" placeholder="{esc(placeholder)}">'
-            + scope
+            + scope + life
             + ('<span class="pt-tag" title="Written automatically from a chat — edit or remove it">auto</span>' if auto else "")
             + '<button class="pt-mbtn" data-rm="1" title="Remove"><i class="mdi mdi-close"></i></button></div>')
 
@@ -75,6 +83,12 @@ class MemoryModal:
             '<button class="pt-btn primary" data-save="1">Save</button></div></div>')
 
     def _on_click(self, ev) -> None:
+        rn = closest(ev, "[data-renew]")
+        if rn:
+            keep = attr(rn, "data-renew") != "1"
+            rn.setAttribute("data-renew", "1" if keep else "0")
+            rn.textContent = "kept" if keep else "expired · keep?"
+            return
         sc = closest(ev, "[data-scope]")
         if sc:
             now_all = attr(sc, "data-scope") != "all"
@@ -104,6 +118,9 @@ class MemoryModal:
                 sc = row.querySelector("[data-scope]")
                 if sc is not None:
                     item["scope"] = attr(sc, "data-scope") or ""
+                rn = row.querySelector("[data-renew]")
+                if rn is not None and attr(rn, "data-renew") == "1":
+                    item["renew"] = True
                 out.append(item)
         return out
 

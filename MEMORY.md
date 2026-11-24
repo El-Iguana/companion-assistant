@@ -96,6 +96,19 @@ chat's transcript let folding chat B drop a thread only chat A knew about.
   a model falling back to rewriting the list must not double it.
 - The status, junk and restated-instruction filters apply to every NEW and EDIT.
 
+**Facts that end (Memory Phase 7, #20, 2026-11-23).** A new fact gets a lifetime from
+`assistant_memory.lifetime`:
+- Fortuna decides lasting or time-bound (at 0.6 or more); without Fortuna, time words in the text
+  decide.
+- `expires_from` reads the end date: "tomorrow", "next weekend", "on Thursday", "the 28th", "in
+  three weeks", "next month", "in March", each with a day's grace. With no date, 30 days.
+- An expired fact leaves the prompt (`block`, `expired()`). The Memory modal shows "until <date>"
+  or "expired · keep?"; keeping one makes it lasting.
+- `last_used` and `uses` are on the fact for #21.
+
+Live check: "Tom and Bill are visiting next month" → time-bound until 1 January; "lives in Porto"
+and "vegetarian" stay lasting.
+
 **"Lately with this bartender" (Memory Phase 7, #18, 2026-11-23).** `main._lately` puts the end of
 her most recent *other* conversation into the turn's trailing note (`memory_for_turn` →
 `build_messages(memory_tail=…)`):

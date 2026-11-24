@@ -234,7 +234,7 @@ copy when one of them next needs changing.
      (about 10 minutes), the desktop window closing or the page hidden, or a new chat with her.
      One high-water mark per bartender, across sessions. The message-count trigger becomes context
      pressure: fold when `build_messages` is about to drop turns.
-  6. **#20 — fact lifetimes.** `kind` lasting or time-bound with `expires`; `created`,
+  6. ✅ **#20 — fact lifetimes** (2026-11-23). `kind` lasting or time-bound with `expires`; `created`,
      `last_used`, `uses`. Answers the open decay question below.
   7. **#21 — tiered recall.** Always: directives plus a small core of user-written and most-used
      facts, in the system block. Per turn: other facts and notes scored against the latest user
