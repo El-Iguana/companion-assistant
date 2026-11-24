@@ -10,6 +10,7 @@ carry an ``id`` and get an ack):
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -17,6 +18,7 @@ DUCK_EXPIRES_S = 60.0       # a duck nobody undoes restores itself
 STATE_EVERY_S = 5.0
 UPCOMING = 5                # titles after the current one, in the state
 PREVIOUS_RESTARTS_AFTER_S = 3.0
+REPEATS = ("off", "all", "one")      # the full player's repeat button cycles through these
 
 COMMANDS = ("play", "pause", "resume", "stop", "next", "previous", "seek", "volume", "duck", "unduck")
 
@@ -77,20 +79,62 @@ class Volume:
 
 @dataclass
 class Queue:
+    """What plays, in the order it plays. ``shuffle`` reorders it: the current item first, the
+    rest at random, so "what's next?" and the window's list stay true; switching it off puts
+    the order it came in back, still on the same item. ``repeat``: off, all (wrap at the end)
+    or one (a track that ends starts again; next and previous still move)."""
+
     items: list = field(default_factory=list)
     index: int = 0
+    shuffle: bool = False
+    repeat: str = "off"
+    original: list = field(default_factory=list)      # the order it was loaded in
 
     @property
     def current(self) -> Optional[dict]:
         return self.items[self.index] if 0 <= self.index < len(self.items) else None
 
-    def load(self, items: list, start: int = 0) -> None:
+    def load(self, items: list, start: int = 0, rng: random.Random | None = None) -> None:
         self.items, self.index = list(items), max(0, min(int(start), max(0, len(items) - 1)))
+        self.original = list(self.items)
+        if self.shuffle:
+            self._shuffle(rng)
 
-    def advance(self) -> bool:
-        """To the next item; False at the end (the queue stays, stopped on its last item)."""
+    def _shuffle(self, rng: random.Random | None = None) -> None:
+        cur = self.current
+        rest = [e for i, e in enumerate(self.items) if i != self.index]
+        (rng or random).shuffle(rest)
+        self.items, self.index = ([cur] if cur is not None else []) + rest, 0
+
+    def set_shuffle(self, on: bool, rng: random.Random | None = None) -> None:
+        on = bool(on)
+        if on == self.shuffle:
+            return
+        self.shuffle = on
+        if on:
+            self._shuffle(rng)
+            return
+        cur = self.current
+        self.items = list(self.original)
+        self.index = next((i for i, e in enumerate(self.items) if e is cur), 0)
+
+    def cycle_repeat(self) -> str:
+        self.repeat = REPEATS[(REPEATS.index(self.repeat) + 1) % len(REPEATS)]
+        return self.repeat
+
+    def advance(self, auto: bool = False) -> bool:
+        """To the next item: True when there is one to play (``auto``: the track ended by itself,
+        so repeat one plays it again). False at the end without repeat all (the queue stays,
+        stopped on its last item)."""
+        if not self.items:
+            return False
+        if auto and self.repeat == "one":
+            return True
         if self.index + 1 < len(self.items):
             self.index += 1
+            return True
+        if self.repeat == "all":
+            self.index = 0
             return True
         return False
 
@@ -173,6 +217,8 @@ def state_message(status: str, queue: Queue, volume: Volume, position_s: float, 
         "duration_ms": int(max(0.0, duration_s) * 1000),
         "volume": volume.level,
         "ducked": volume.ducked,
+        "shuffle": queue.shuffle,
+        "repeat": queue.repeat,
     }
 
 
@@ -217,3 +263,39 @@ def page_command(msg: str) -> Optional[tuple]:
             return None
         return (action, min(value, 100.0) if action == "volume" else value)
     return (action, None)
+
+
+# --- the library browser (Music M3) ------------------------------------------------------------
+# What the full player's Library tab makes of Orpheus's answers. The same queue entries as the
+# server's DJ builds (services/skills/orpheus_media.expand), so a play by hand looks the same.
+
+def entry(item: dict, artist: str = "", album: str = "") -> dict:
+    return {"id": int(item["id"]), "title": item.get("title") or "", "artist": artist, "album": album,
+            "artwork_id": item.get("artwork_id"), "duration_ms": item.get("duration_ms")}
+
+
+def album_artist(album: dict) -> str:
+    """An album item's artist (GET /items/{id} carries album.album_artist)."""
+    return ((album.get("album") or {}).get("album_artist") or {}).get("title", "") or ""
+
+
+def album_queue(album: dict, children: list, artist: str = "") -> list:
+    """An album's playable tracks in disc and track order, as queue entries."""
+    artist = artist or album_artist(album)
+    kids = sorted((k for k in children or [] if k.get("kind") == "track" and k.get("playable")),
+                  key=lambda k: (k.get("disc_number") or 0, k.get("track_number") or 0, k.get("sort_title") or ""))
+    return [entry(k, artist, album.get("title", "")) for k in kids]
+
+
+def browsable_artists(items: list) -> list:
+    """Artists worth a row: a guest credit on one track is an artist item with no albums."""
+    return [i for i in items or [] if i.get("kind") == "artist" and (i.get("child_count") or 0) > 0]
+
+
+def album_line(album: dict) -> str:
+    """The second line of an album row: year and track count."""
+    bits = [str(album["year"])] if album.get("year") else []
+    n = album.get("child_count") or 0
+    if n:
+        bits.append(f"{n} track{'s' if n != 1 else ''}")
+    return " · ".join(bits)

@@ -29,6 +29,7 @@ gi.require_version("Soup", "3.0")
 from gi.repository import Gdk, GLib, Gst, GstAudio, Gtk, Soup  # noqa: E402
 
 import musiccore as core  # noqa: E402
+from library import LibraryBrowser  # noqa: E402
 
 RECONNECT_FIRST, RECONNECT_MAX = 1.0, 30.0
 PLAY_ACK_WAIT_S = 4.0
@@ -37,14 +38,27 @@ DEBUG = os.environ.get("CANTINERO_MUSIC_DEBUG") == "1"
 
 CSS = b"""
 .cm-window { background: #1b1714; color: #f3e9dc; }
-.cm-cover { border-radius: 10px; background: #2a231e; }
-.cm-title { font-size: 1.25em; font-weight: 700; }
+.cm-cover { border-radius: 8px; background: #2a231e; }
+.cm-title { font-size: 1.2em; font-weight: 700; }
 .cm-sub { color: #c9b79f; }
+.cm-meta { color: #a8957c; font-size: 0.85em; }
 .cm-time { color: #a8957c; font-size: 0.85em; font-feature-settings: "tnum"; }
-.cm-queue row { padding: 4px 8px; }
-.cm-queue row.cm-now { background: alpha(#d4a24c, 0.18); border-radius: 6px; }
-.cm-btn { min-width: 40px; min-height: 40px; border-radius: 20px; }
+.cm-head { color: #a8957c; font-size: 0.8em; font-weight: 700; letter-spacing: 0.08em; }
+.cm-queue { background: transparent; }
+.cm-queue row { padding: 5px 8px; border-radius: 6px; }
+.cm-queue row.cm-now { background: alpha(#d4a24c, 0.18); }
+.cm-queue row.cm-now .cm-num { color: #d4a24c; }
+.cm-num { color: #a8957c; font-feature-settings: "tnum"; min-width: 2em; }
+.cm-btn { min-width: 38px; min-height: 38px; border-radius: 19px; }
+.cm-play { min-width: 52px; min-height: 52px; border-radius: 26px; background: #d4a24c; color: #1b1714; }
+.cm-play:hover { background: #e2b35d; }
+.cm-off { opacity: 0.45; }
+.cm-on { color: #d4a24c; }
 .cm-status { color: #a8957c; font-size: 0.85em; }
+.cm-keys { color: #7d6d5b; font-size: 0.75em; }
+.cm-play-small { background: #d4a24c; color: #1b1714; font-weight: 700; border-radius: 16px; padding: 2px 16px; }
+.cm-play-small:hover { background: #e2b35d; }
+.cm-tabs { margin-bottom: 4px; }
 """
 
 
@@ -77,6 +91,7 @@ class MusicPlayer:
         self.pending_play = None              # (command id, deadline) until the first sound
         self.want_playing = False             # what was asked: a seek's flush passes through PAUSED
         self.last_progress = 0.0
+        self.failed_in_a_row = 0              # tracks that would not play; a whole queue of them stops
         self.http = Soup.Session(timeout=15)
 
         self.pipe = Gst.ElementFactory.make("playbin3", "music")
@@ -99,23 +114,38 @@ class MusicPlayer:
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.win = Gtk.Window(application=app, title="Cantinero — Music")
-        self.win.set_default_size(400, 620)
+        self.win.set_default_size(440, 660)
         self.win.add_css_class("cm-window")
         self.win.connect("close-request", lambda *_: (self.win.set_visible(False), True)[1])
+        # Keys, caught before the focused button sees them (space would press it).
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_key)
+        self.win.add_controller(keys)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=16, margin_bottom=16,
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=16, margin_bottom=12,
                       margin_start=16, margin_end=16)
-        self.cover = Gtk.Picture(can_shrink=True, content_fit=Gtk.ContentFit.COVER)
-        self.cover.set_size_request(368, 368)
-        self.cover.add_css_class("cm-cover")
-        box.append(self.cover)
 
-        self.title = Gtk.Label(label="Nothing playing", xalign=0, ellipsize=3)
+        # Header: the cover beside what is playing.
+        head = Gtk.Box(spacing=14)
+        self.cover = Gtk.Picture(can_shrink=True, content_fit=Gtk.ContentFit.COVER)
+        self.cover.set_size_request(132, 132)
+        self.cover.add_css_class("cm-cover")
+        head.append(self.cover)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, valign=Gtk.Align.CENTER, hexpand=True)
+        self.title = Gtk.Label(label="Nothing playing", xalign=0, wrap=True, lines=2, ellipsize=3,
+                               max_width_chars=24)
         self.title.add_css_class("cm-title")
         self.sub = Gtk.Label(label="Ask the bartender for some music.", xalign=0, ellipsize=3)
         self.sub.add_css_class("cm-sub")
-        box.append(self.title)
-        box.append(self.sub)
+        self.album = Gtk.Label(label="", xalign=0, ellipsize=3)
+        self.album.add_css_class("cm-meta")
+        self.where = Gtk.Label(label="", xalign=0)
+        self.where.add_css_class("cm-meta")
+        for w in (self.title, self.sub, self.album, self.where):
+            info.append(w)
+        head.append(info)
+        box.append(head)
 
         self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1)
         self.seek.set_draw_value(False)
@@ -129,14 +159,22 @@ class MusicPlayer:
             times.append(t)
         box.append(times)
 
-        row = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER)
-        self.b_prev = Gtk.Button(icon_name="media-skip-backward-symbolic")
-        self.b_play = Gtk.Button(icon_name="media-playback-start-symbolic")
-        self.b_next = Gtk.Button(icon_name="media-skip-forward-symbolic")
-        for b, act in ((self.b_prev, "previous"), (self.b_play, "toggle"), (self.b_next, "next")):
+        # Transport: shuffle, previous, play, next, stop, repeat.
+        row = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
+        self.b_shuffle = Gtk.Button(icon_name="media-playlist-shuffle-symbolic", tooltip_text="Shuffle (S)")
+        self.b_prev = Gtk.Button(icon_name="media-skip-backward-symbolic", tooltip_text="Previous (Ctrl+←)")
+        self.b_play = Gtk.Button(icon_name="media-playback-start-symbolic", tooltip_text="Play / pause (Space)")
+        self.b_next = Gtk.Button(icon_name="media-skip-forward-symbolic", tooltip_text="Next (Ctrl+→)")
+        self.b_stop = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop")
+        self.b_repeat = Gtk.Button(icon_name="media-playlist-repeat-symbolic", tooltip_text="Repeat: off (R)")
+        for b, act in ((self.b_shuffle, "shuffle"), (self.b_prev, "previous"), (self.b_play, "toggle"),
+                       (self.b_next, "next"), (self.b_stop, "stop"), (self.b_repeat, "repeat")):
             b.add_css_class("cm-btn")
+            b.add_css_class("flat")
             b.connect("clicked", lambda _b, a=act: self._local(a))
             row.append(b)
+        self.b_play.remove_css_class("flat")
+        self.b_play.add_css_class("cm-play")
         box.append(row)
 
         vol = Gtk.Box(spacing=8)
@@ -145,21 +183,71 @@ class MusicPlayer:
         self.vol.set_hexpand(True)
         self.vol.set_draw_value(False)
         self.vol.set_value(self.volume.level)
+        self.vol.set_tooltip_text("Volume (↑ ↓)")
         self.vol.connect("value-changed", self._on_volume_slider)
         vol.append(self.vol)
         box.append(vol)
 
+        self.q_head = Gtk.Label(label="UP NEXT", xalign=0, margin_top=4)
+        self.q_head.add_css_class("cm-head")
+        box.append(self.q_head)
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.add_css_class("cm-queue")
         self.list.connect("row-activated", lambda _l, r: self._jump(r.get_index()))
-        scroll = Gtk.ScrolledWindow(vexpand=True, min_content_height=120)
+        scroll = Gtk.ScrolledWindow(vexpand=True, min_content_height=140)
         scroll.set_child(self.list)
         box.append(scroll)
 
         self.status_label = Gtk.Label(label="", xalign=0)
         self.status_label.add_css_class("cm-status")
         box.append(self.status_label)
-        self.win.set_child(box)
+        keys_help = Gtk.Label(label="Space play/pause · ←/→ 10 s · Ctrl+←/→ track · ↑/↓ volume · S shuffle · R repeat",
+                              xalign=0, wrap=True)
+        keys_help.add_css_class("cm-keys")
+        box.append(keys_help)
+        # Two tabs: what is playing, and the library to pick from (Music M3).
+        self.tabs = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self.tabs.add_titled(box, "now", "Now playing")
+        self.library = LibraryBrowser(self)
+        lib = self.library.widget
+        for side in ("top", "bottom", "start", "end"):
+            getattr(lib, f"set_margin_{side}")(14)
+        self.tabs.add_titled(lib, "library", "Library")
+        self.tabs.connect("notify::visible-child-name",
+                          lambda st, _p: st.get_visible_child_name() == "library" and self.library.shown())
+        switcher = Gtk.StackSwitcher(stack=self.tabs, halign=Gtk.Align.CENTER, margin_top=10)
+        switcher.add_css_class("cm-tabs")
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.append(switcher)
+        outer.append(self.tabs)
+        self.win.set_child(outer)
+        self._show_modes()
+
+    def _on_key(self, _ctl, keyval, _code, state):
+        # Typing in the library's search box: its keys are letters, not commands.
+        focus = self.win.get_focus()
+        if isinstance(focus, (Gtk.Text, Gtk.Editable)):
+            return False
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        k = Gdk.keyval_name(keyval) or ""
+        if k == "space":
+            self._local("toggle")
+        elif k in ("Left", "Right") and ctrl:
+            self._local("previous" if k == "Left" else "next")
+        elif k in ("Left", "Right"):
+            if self.queue.current is not None:
+                self._seek_to(max(0.0, self._position() + (10 if k == "Right" else -10)))
+        elif k in ("Up", "Down"):
+            self.vol.set_value(self.volume.level + (5 if k == "Up" else -5))
+        elif k in ("s", "S"):
+            self._local("shuffle")
+        elif k in ("r", "R"):
+            self._local("repeat")
+        elif k == "Escape":
+            self.win.set_visible(False)
+        else:
+            return False
+        return True
 
     def show(self):
         self.win.present()
@@ -171,6 +259,19 @@ class MusicPlayer:
         """Exit Cantinero: stop, report where it stopped, close the Orpheus session."""
         if self.status != "idle":
             self._stop()
+
+    def play_entries(self, entries: list, start: int = 0):
+        """A play by hand, from the library: the same as Cantinero's play, with no ack."""
+        if not entries:
+            return
+        self.queue.load(entries, start)
+        self.failed_in_a_row = 0
+        self.pending_play = None
+        self._show_modes()
+        self._show_queue()
+        self._load_current()
+        self._report(force=True)
+        self.tabs.set_visible_child_name("now")
 
     def snapshot(self) -> dict:
         """The state the micro player under her bar shows (the same message Cantinero gets)."""
@@ -257,6 +358,7 @@ class MusicPlayer:
             self._ack(cid, False, act.error)
             return
         if act.kind == "load":
+            self.failed_in_a_row = 0
             self._show_queue()
             self.pending_play = (cid, time.monotonic() + PLAY_ACK_WAIT_S)
             self._load_current()
@@ -352,9 +454,19 @@ class MusicPlayer:
         self._close_session()
         self._set_status("idle")
 
-    def _advance(self, auto: bool = False):
+    def _advance(self, auto: bool = False, failed: bool = False):
+        """``auto``: the track ended by itself (repeat one plays it again). ``failed``: it
+        would not play, so it is skipped even on repeat one, and once every track in the queue
+        has failed in a row the player stops instead of going round for ever on repeat all."""
         self._report_progress(final=True)
-        if self.queue.advance():
+        if failed:
+            self.failed_in_a_row += 1
+            if self.failed_in_a_row >= len(self.queue.items):
+                print("[music] nothing in the queue would play; stopping", flush=True)
+                self.failed_in_a_row = 0
+                self._stop()
+                return
+        if self.queue.advance(auto=auto and not failed):
             self._load_current()
         elif auto:
             self.want_playing = False
@@ -394,10 +506,25 @@ class MusicPlayer:
             self._syncing = False
 
     def _local(self, action: str):
-        """A button on the window: the same rules as a command, no ack."""
+        """A button or key on the window: the same rules as a command, no ack."""
+        if action == "shuffle":
+            self.queue.set_shuffle(not self.queue.shuffle)
+            self._show_modes()
+            self._show_queue()
+            self._report(force=True)
+            return
+        if action == "repeat":
+            self.queue.cycle_repeat()
+            self._show_modes()
+            self._report(force=True)
+            return
         if action == "toggle":
             action = "pause" if self.status == "playing" else "resume"
         if self.queue.current is None:
+            return
+        if action == "stop":
+            if self.status != "idle":
+                self._stop()
             return
         {"pause": self._pause, "resume": self._resume, "next": lambda: self._advance(),
          "previous": self._previous}[action]()
@@ -451,7 +578,7 @@ class MusicPlayer:
 
         def go():
             self._skipping = False
-            self._advance(auto=True)
+            self._advance(auto=True, failed=True)
             return False
         GLib.timeout_add(800, go)
 
@@ -515,20 +642,39 @@ class MusicPlayer:
 
     def _set_status(self, status: str):
         self.status = status
+        if status == "playing":
+            self.failed_in_a_row = 0
         self.b_play.set_icon_name("media-playback-pause-symbolic" if status == "playing"
                                   else "media-playback-start-symbolic")
         if status == "idle":
             self.title.set_label("Nothing playing")
             self.sub.set_label("Ask the bartender for some music.")
+            self.album.set_label("")
+            self.where.set_label("")
             self.cover.set_paintable(None)
         self._report(force=True)
 
     def _line(self, text: str):
         self.status_label.set_label(text)
 
+    def _show_modes(self):
+        """Shuffle and repeat: lit when on; repeat's icon says one or all."""
+        q = self.queue
+        for b, on in ((self.b_shuffle, q.shuffle), (self.b_repeat, q.repeat != "off")):
+            b.remove_css_class("cm-on" if not on else "cm-off")
+            b.add_css_class("cm-on" if on else "cm-off")
+        self.b_repeat.set_icon_name("media-playlist-repeat-song-symbolic" if q.repeat == "one"
+                                    else "media-playlist-repeat-symbolic")
+        self.b_repeat.set_tooltip_text({"off": "Repeat: off (R)", "all": "Repeat: all (R)",
+                                        "one": "Repeat: this track (R)"}[q.repeat])
+        self.b_shuffle.set_tooltip_text("Shuffle: on (S)" if q.shuffle else "Shuffle: off (S)")
+
     def _show_now(self, item: dict):
         self.title.set_label(item.get("title") or "")
-        self.sub.set_label(" — ".join(x for x in (item.get("artist"), item.get("album")) if x))
+        self.sub.set_label(item.get("artist") or "")
+        self.album.set_label(item.get("album") or "")
+        self.where.set_label(f"Track {self.queue.index + 1} of {len(self.queue.items)}"
+                             if len(self.queue.items) > 1 else "")
         art = item.get("artwork_id")
         if art is None:
             self.cover.set_paintable(None)
@@ -543,12 +689,29 @@ class MusicPlayer:
         self._orpheus("GET", f"/api/v1/artwork/{int(art)}", None, done)
 
     def _show_queue(self):
+        """The queue in play order: number, title, artist, length; the playing one lit."""
         while (row := self.list.get_first_child()) is not None:
             self.list.remove(row)
+        n = len(self.queue.items)
+        self.q_head.set_label(f"QUEUE · {n} TRACK{'S' if n != 1 else ''}" if n else "UP NEXT")
+        if self.queue.current is not None:
+            self.where.set_label(f"Track {self.queue.index + 1} of {n}" if n > 1 else "")
         for i, e in enumerate(self.queue.items[:200]):
-            label = Gtk.Label(label=f"{e.get('title', '')}" + (f"  ·  {e['artist']}" if e.get("artist") else ""),
-                              xalign=0, ellipsize=3)
-            row = Gtk.ListBoxRow(child=label, activatable=True)
+            line = Gtk.Box(spacing=8)
+            num = Gtk.Label(label="♪" if i == self.queue.index else str(i + 1), xalign=1)
+            num.add_css_class("cm-num")
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+            text.append(Gtk.Label(label=e.get("title", ""), xalign=0, ellipsize=3))
+            if e.get("artist"):
+                who = Gtk.Label(label=e["artist"], xalign=0, ellipsize=3)
+                who.add_css_class("cm-meta")
+                text.append(who)
+            length = Gtk.Label(label=core.fmt_time((e.get("duration_ms") or 0) / 1000)
+                               if e.get("duration_ms") else "", xalign=1)
+            length.add_css_class("cm-time")
+            for w in (num, text, length):
+                line.append(w)
+            row = Gtk.ListBoxRow(child=line, activatable=True)
             if i == self.queue.index:
                 row.add_css_class("cm-now")
             self.list.append(row)

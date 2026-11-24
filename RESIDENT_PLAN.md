@@ -202,9 +202,26 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       `music:<action>[:<value>]` back through the ⚙ button's message handler (`core.page_command`
       checks it), and `hud:<px>` when it shows or goes: the bar moves up by that much and the shell's
       click-through strip grows by as much.
-   2. **The full player, more formal** (#72): stop, shuffle, repeat; a polished layout; keyboard
-      shortcuts.
-   3. **Browse and search the library by hand** (#73).
+   2. ✅ **The full player, more formal** (#72). A header (the cover beside title, artist, album and
+      "Track n of m"); a transport row of shuffle, previous, play (larger, lit), next, stop and repeat;
+      volume; the queue as numbered rows with artist and length, the playing one lit. Keys: Space,
+      ←/→ 10 s, Ctrl+←/→ track, ↑/↓ volume, S, R, Esc hides it. **Shuffle** reorders the queue (the
+      current item first, the rest at random), so "what's next?" and the list stay true; off restores
+      the loaded order on the same item; a new queue arrives shuffled while it's on. **Repeat** cycles
+      off → all → one; one replays a track that ended by itself, and next and previous still move. A
+      track that won't play is skipped even on repeat one, and a whole queue failing in a row stops
+      the player rather than going round for ever on repeat all. The state carries `shuffle` and
+      `repeat`.
+   3. ✅ **Browse and search the library by hand** (#73). The full player has two tabs, Now playing and
+      Library (`desktop/library.py`). Library: a search box; Albums or Artists, 60 at a time with
+      "More…"; an album opens to its cover, artist, year, Play, Shuffle and its tracks (a click plays from
+      that one); an artist to Play all and its albums. Search asks for artists, albums and tracks
+      separately (a plain search also returns TV episodes), and a track plays its album from that track.
+      Artists with no albums (a guest credit on one track) are left out (`core.browsable_artists`). The
+      queue entries are the same as the DJ's (`core.album_queue` mirrors `orpheus_media.expand`). A play
+      by hand goes through `MusicPlayer.play_entries` and switches to Now playing. Keys are ignored while
+      typing in the search box. Checked against predator's library through the player's own Orpheus
+      token: 46 albums, 14 artists, a search, an album page, a track from a search queueing its album.
 
 ## Not in this plan
 
