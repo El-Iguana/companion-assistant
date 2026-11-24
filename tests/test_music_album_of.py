@@ -110,3 +110,14 @@ OPTS = [{"name": "Remember Two Things — Dave Matthews Band (2014)"},
 ])
 def test_answers_code_can_place(text, want):
     assert media.answer_pick(text, OPTS) == want
+
+
+def test_a_second_answer_to_the_same_question_plays_the_new_pick(tmp_path, monkeypatch):
+    o = _world(monkeypatch, ANTS)
+    o.players[0]["state"] = {"status": "playing"}
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    ctx = _ctx(tmp_path, session_id="s1")
+    for answer, album in (("the nineties one", 250), ("the singles", 386)):
+        asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
+        said = asyncio.run(media.fast_play(ctx, answer, "Mira"))
+        assert said != "It's playing." and o.expanded[-1] == album

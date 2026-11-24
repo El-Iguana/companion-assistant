@@ -630,7 +630,10 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
 async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str | None:
     """Play one candidate where she is; her line, or None. Orpheus errors go to the caller."""
     dev = await _target(ctx, st)
-    if _just_played(ctx, query, dev):
+    # What is played, not just what was said: two answers to the same "which one?" share the
+    # words, and the second used to get "It's playing." with nothing changed (2026-11-24).
+    what = f"{query} #{pick.get('id')}:{pick.get('start_track') or ''}"
+    if _just_played(ctx, what, dev):
         return Done("It's playing.")
     queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                             playlist_id="" if pick["id"].isdigit() else pick["id"])
@@ -639,7 +642,7 @@ async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str
     # An album asked for by one of its songs starts at that song (#87).
     start = next((i for i, e in enumerate(queue) if e.get("id") == pick.get("start_track")), 0)
     await _send(dev["id"], {"type": "play", "queue": queue, "start_index": start})
-    _remember_play(ctx, query, dev["id"])
+    _remember_play(ctx, what, dev["id"])
     song = f" from {pick['start_title']}" if pick.get("start_title") and start else ""
     return Done(f"Playing {_spoken(pick['name'])}{song} on {dev.get('name')}.")
 
