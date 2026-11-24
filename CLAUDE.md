@@ -798,6 +798,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     (`artist_pick`), else Fortuna, else the fixed either-or) and every outcome carries a `final`
     line, a miss included, so the turn ends after the tool: ~20 s, against 60–66 s. `media_find`
     says never to search before playing.
+  - **"The album with <song>"** (#87; lane, and `media_play`'s `album_of`). The song's tied
+    tracks → their albums (`parent`); one plays from that song, several get the either-or. An
+    answer is placed in code first (`answer_pick`: ordinals, "number two", decades and years,
+    words in one option's name only), then by Fortuna, which also reads the years she doesn't
+    say; an answer neither can place gets one fixed re-ask ("Sorry, which one: the first, …?")
+    instead of the model, which once played the wrong thing. The repeat guard compares what is
+    played (query + pick), so a second answer to the same question still plays.
   - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
     marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of
