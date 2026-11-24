@@ -172,6 +172,28 @@ class MusicPlayer:
         if self.status != "idle":
             self._stop()
 
+    def snapshot(self) -> dict:
+        """The state the micro player under her bar shows (the same message Cantinero gets)."""
+        return core.state_message(self.status, self.queue, self.volume, self._position(), self._duration())
+
+    def control(self, action: str, value: float | None = None):
+        """A micro-player button (core.page_command): the window's rules, no ack."""
+        if action == "open":
+            self.show()
+        elif action == "volume":
+            self.volume.set(int(value))
+            self._apply_volume()
+            self._report(force=True)
+        elif self.queue.current is None:
+            return
+        elif action == "stop":
+            if self.status != "idle":
+                self._stop()
+        elif action == "seek":
+            self._seek_to(value)
+        else:
+            self._local(action)
+
     def toggle(self):
         if self.win.get_visible():
             self.win.set_visible(False)
