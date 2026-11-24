@@ -276,7 +276,9 @@ def test_something_else_after_her_question_goes_on_as_usual(tmp_path, monkeypatc
 def test_an_unsure_answer_goes_to_her(tmp_path, monkeypatch):
     o, ctx = _either(monkeypatch, tmp_path, ("1", 0.5))
     fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.9), "Which did the user choose": ("1", 0.5)})
-    assert asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira")) is None and not o.sent
+    again = asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira"))
+    assert again == "Sorry, which one: the first, or the second?" and not o.sent    # once more, fixed words
+    assert asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira")) is None and not o.sent   # then hers
 
 
 def test_no_question_when_the_options_sound_the_same():
