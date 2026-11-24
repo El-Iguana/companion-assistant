@@ -317,3 +317,51 @@ def test_an_artist_tied_with_their_own_work_is_the_artist():
     assert media.artist_pick(raw) == 0
     raw[1] = _track(5, "Purple Haze", "Someone Else", 0.7)
     assert media.artist_pick(raw) is None                     # someone else's track tied too
+
+
+def test_whispers_playback_is_play_back(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Playback in black.", "Mira"))
+    assert asked[0] == "play Back In Black" and isinstance(said, media.Done) and o.expanded == [141]
+
+
+# --- an artist asked for: a random song, never a question (2026-11-24) ---------------------------
+
+NICKS = [_track(201 + n, t, "Stevie Nicks (2007)", 1.0) for n, t in
+         enumerate(["Edge Of Seventeen", "I Can't Wait", "Sorcerer", "If Anyone Falls In Love"])]
+NICKS_ARTIST = {"item_id": 200, "kind": "artist", "title": "Stevie Nicks", "display": "Stevie Nicks", "score": 0.42}
+
+
+@pytest.mark.parametrize("query,who", [
+    ("play a song by Stevie Nicks", "Stevie Nicks"), ("play something by Stevie Mix", "Stevie Mix"),
+    ("play some songs by Fleetwood Mac", "Fleetwood Mac"), ("play any track by AC/DC", "AC/DC"),
+    ("play Back in Black by ACDC", ""), ("play Crash", ""), ("play something upbeat", "")])
+def test_an_artist_asked_for_in_so_many_words(query, who):
+    assert media.artist_asked(query) == who
+
+
+def test_a_misheard_artist_is_matched_by_spelling():
+    assert media._like("Stevie Mix", "Stevie Nicks") >= media.ARTIST_MATCH
+    assert media._like("Stevie Next", "Stevie Nicks") >= media.ARTIST_MATCH
+    assert media._like("Dave Matthews", "Dave Matthews Band") == 1.0
+    assert media._like("Crash", "Crash Test Dummies") < media.ARTIST_MATCH
+
+
+@pytest.mark.parametrize("text", ["Play a song by Stevie Nicks.", "Play something by Stevie Mix.",
+                                  "Play Stevie Mix."])
+def test_a_song_by_an_artist_plays_one_of_theirs_without_asking(tmp_path, monkeypatch, text):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], [{"item_id": 9, "kind": "track", "title": "Dreamgirl (Radio Mix)",
+                                               "display": "Dreamgirl (Radio Mix) — Dave Matthews Band", "score": 0.42},
+                                              NICKS_ARTIST], ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), text, "Mira"))
+    assert isinstance(said, media.Done) and "Stevie Nicks" in said and "Which" not in said
+    assert o.expanded == [200]
+
+
+def test_a_tie_of_one_artists_songs_is_any_of_them():
+    import random
+    assert media.one_artist_pick(NICKS, random.Random(1)) in range(4)
+    mixed = NICKS[:2] + [_track(9, "Crash", "Dave Matthews Band", 1.0)]
+    assert media.one_artist_pick(mixed) is None

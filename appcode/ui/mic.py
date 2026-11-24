@@ -83,6 +83,8 @@ class Brain:
             self.ops.toast(act["msg"], act.get("kind", "info"))
         elif kind == "paint":
             self._flags()
+        elif kind == "summoned":
+            self.ops.summoned()
         elif kind == "utterance":
             asyncio.ensure_future(self._utterance(act["utterance"]))
 
