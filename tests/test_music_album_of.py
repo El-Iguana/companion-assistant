@@ -92,6 +92,21 @@ def test_fortuna_reads_the_years_she_doesnt_say(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path, session_id="s1")
     asked = asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
     assert "1994" not in asked                                      # not said aloud
-    asyncio.run(media.fast_play(ctx, "the nineties one", "Mira"))
+    asyncio.run(media.fast_play(ctx, "the one from when I was in college", "Mira"))   # Fortuna's to place
     assert seen["2"] == "the second one: Under The Table And Dreaming by Dave Matthews Band (1994)"
     assert o.expanded == [250]
+
+
+OPTS = [{"name": "Remember Two Things — Dave Matthews Band (2014)"},
+        {"name": "Under The Table And Dreaming — Dave Matthews Band (1994)"},
+        {"name": "Where Are You Going: The Singles — Dave Matthews Band (2025)"}]
+
+
+@pytest.mark.parametrize("text,want", [
+    ("the first", 0), ("first one", 0), ("the second one please", 1), ("number three", 2), ("the last one", 2),
+    ("the nineties one", 1), ("the 1990s one", 1), ("the 2014 one", 0),
+    ("the singles", 2), ("Under the Table and Dreaming", 1), ("remember two things", 0),
+    ("the live one", None), ("Dave Matthews Band", None), ("whichever", None),
+])
+def test_answers_code_can_place(text, want):
+    assert media.answer_pick(text, OPTS) == want

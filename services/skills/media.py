@@ -740,6 +740,43 @@ def question(options: list[dict]) -> str:
     return "Which one: " + ", ".join(names[:-1]) + ", or " + names[-1] + "?"
 
 
+# Ordinals only: "one" ends half the answers ("the nineties one") and "two" is in names
+# ("Remember Two Things"), so a bare number counts only after "number".
+_ORDINAL_WORDS = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2,
+                  "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
+_NUMBERS = {"one": 0, "1": 0, "two": 1, "2": 1, "three": 2, "3": 2, "four": 3, "4": 3, "five": 4, "5": 4}
+_DECADES = {"sixties": 196, "seventies": 197, "eighties": 198, "nineties": 199, "noughties": 200,
+            "sixty": 196, "seventy": 197, "eighty": 198, "ninety": 199}
+_FILLER = {"the", "one", "a", "an", "album", "record", "please", "that", "i", "want", "play", "uh", "um",
+           "hmm", "by", "of", "on", "s", "it", "version", "with", "number"}
+
+
+def answer_pick(text: str, opts: list[dict]) -> int | None:
+    """An answer code can place without Fortuna: an ordinal ("the first", "the last one"), a decade
+    or year ("the nineties one", "the 2014 one"), or words that are in one option's name only."""
+    words = _norm(text).split()
+    if not words or not opts:
+        return None
+    if "last" in words:
+        return len(opts) - 1
+    ords = {_ORDINAL_WORDS[w] for w in words if w in _ORDINAL_WORDS}
+    ords |= {_NUMBERS[b] for a, b in zip(words, words[1:]) if a == "number" and b in _NUMBERS}
+    if len(ords) == 1 and (i := ords.pop()) < len(opts):
+        return i
+    years = [re.search(r"\((\d{4})\)$", o.get("name") or "") for o in opts]
+    for w in words:
+        dec = _DECADES.get(w) or (int(w[:3]) if re.fullmatch(r"(19|20)\d0s", w) else None)
+        hits = [i for i, y in enumerate(years) if y and (int(y.group(1)) // 10 == dec if dec else y.group(1) == w)]
+        if (dec or re.fullmatch(r"(19|20)\d\d", w)) and len(hits) == 1:
+            return hits[0]
+    key = [w for w in words if w not in _FILLER]
+    if key:
+        hits = [i for i, o in enumerate(opts) if all(w in _norm(o.get("name") or "").split() for w in key)]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
 async def _answer(ctx: SkillContext, st: dict, text: str) -> str | None:
     """The answer to her either-or, played; None when it isn't one (the turn goes on as usual)."""
     from services import fortuna
@@ -749,6 +786,12 @@ async def _answer(ctx: SkillContext, st: dict, text: str) -> str | None:
     if not pend or time.monotonic() - pend["at"] > ASK_FOR_S:
         return None
     opts = pend["options"]
+    i = answer_pick(text, opts)
+    if i is not None:
+        try:
+            return await _play_pick(ctx, st, opts[i], pend["query"])
+        except om.OrpheusError:
+            return None
     # The year stays in what Fortuna reads ("the nineties one"), though not in what she says.
     labels = {str(i + 1): f"the {_ORDINALS[i]} one: {o['name'].replace(' — ', ' by ')}" for i, o in enumerate(opts)}
     labels["none"] = "none of these: something else, or a new request"
