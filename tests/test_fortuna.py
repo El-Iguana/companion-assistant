@@ -362,3 +362,12 @@ def test_a_player_control_fortuna_is_sure_of_is_not_a_play(tmp_path, monkeypatch
     o = FakeOrpheus(monkeypatch, [PREDATOR], [_track(9, "It Again", "Someone", 1.0)])
     fake_fortuna(monkeypatch, {"want the assistant": ("control_music", 0.9)})
     assert asyncio.run(media.fast_play(_ctx(tmp_path), "play it again", "Mira")) is None and not o.sent
+
+
+@pytest.mark.parametrize("text,want", [("Mira, playpink.", "play pink"), ("Mira played Neil Young.", "play Neil Young"),
+                                       ("Mira, plays some jazz", "play some jazz"), ("Mira, playlist road trip", "playlist road trip")])
+def test_whisper_glued_or_past_tense_play_is_still_play(tmp_path, monkeypatch, text, want):
+    FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])
+    asked = fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.9)})
+    asyncio.run(media.fast_play(_ctx(tmp_path), text, "Mira"))
+    assert asked[0] == want                                   # what Fortuna and Orpheus are asked

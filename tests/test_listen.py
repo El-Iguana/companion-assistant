@@ -76,6 +76,8 @@ def test_a_session_sends_listening_heard_and_the_wake_gates_message(monkeypatch)
     seen_wake = []
 
     def transcribe(u, wake_word=""):
+        if u.partial:
+            return ""                                   # the early look: nothing yet
         seen_wake.append(wake_word)
         return next(said)
     monkeypatch.setattr(listen, "transcribe", transcribe)
@@ -103,7 +105,7 @@ def test_the_resident_streams_the_microphone_on_loopback_only(monkeypatch):
 
     from resident import service
     monkeypatch.setattr(listen, "Vad", LoudVad)
-    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": "Mira, next song")
+    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": "" if u.partial else "Mira, next song")
     c = TestClient(service.app, base_url="http://127.0.0.1:7867")
     with c.websocket_connect("ws://127.0.0.1:7867/pmedia/listen") as ws:   # a full URL: the Host header
         ws.send_text(json.dumps({"config": {"wake_word": "Mira"}}))
@@ -119,7 +121,7 @@ def test_the_resident_streams_the_microphone_on_loopback_only(monkeypatch):
 def test_a_continuous_conversation_opens_and_closes_with_awake_events(monkeypatch):
     monkeypatch.setattr(listen, "Vad", LoudVad)
     said = iter(["Mira, hello", "what's on tonight", "that will be all"])
-    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": next(said))
+    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": "" if u.partial else next(said))
     out = []
 
     async def send(m):
@@ -133,3 +135,58 @@ def test_a_continuous_conversation_opens_and_closes_with_awake_events(monkeypatc
     asyncio.run(go())
     assert [(m["on"], m["why"]) for m in out if m["type"] == "awake"] == [(True, "wake word"), (False, "sleep phrase")]
     assert [m["send"] for m in out if m["type"] == "heard"] == ["hello", "what's on tonight", ""]
+
+
+def _session(monkeypatch, early, final):
+    """A session whose early looks hear ``early`` and whose finished utterances ``final``."""
+    monkeypatch.setattr(listen, "Vad", LoudVad)
+    finals = iter(final)
+    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": early if u.partial else next(finals))
+    out = []
+
+    async def send(m):
+        out.append(m)
+    return listen.Session(send), out
+
+
+def _run(s, fs):
+    async def go():
+        await s.message({"config": {"wake_word": "Mira", "wake_mode": "phrase"}})
+        pcm = _pcm(fs)
+        for i in range(0, len(pcm), 4096):               # a real-time-ish stream, in blocks
+            await s.audio(pcm[i:i + 4096])
+            await asyncio.sleep(0)                       # let the early look run between blocks
+        await asyncio.gather(*s.tasks)
+    asyncio.run(go())
+
+
+def test_her_name_heard_early_ducks_and_a_pause_after_it_doesnt_end_the_request(monkeypatch):
+    # "Mira" (1.2 s) … a 1.5 s pause … "play Pink" (1 s): one utterance, not two.
+    s, out = _session(monkeypatch, "Mira", ["Mira, play Pink"])
+    _run(s, frames(("speech", 1.2), ("quiet", 1.5), ("speech", 1.0), ("quiet", 2.5)))
+    assert {"type": "action", "do": "wake_heard"} in out
+    heard = [m for m in out if m["type"] == "heard"]
+    assert len(heard) == 1 and heard[0]["send"] == "play Pink"
+    assert out.index({"type": "action", "do": "wake_heard"}) < out.index(heard[0])   # ducked first
+
+
+def test_without_her_name_a_pause_still_ends_the_utterance(monkeypatch):
+    s, out = _session(monkeypatch, "the meeting moved", ["the meeting moved", "to Thursday"])
+    _run(s, frames(("speech", 1.2), ("quiet", 1.5), ("speech", 1.0), ("quiet", 1.0)))
+    assert all(m.get("do") != "wake_heard" for m in out)
+    assert len([m for m in out if m["type"] == "heard"]) == 2                     # split as before
+
+
+def test_the_name_heard_early_counts_even_when_music_drowns_it_in_the_whole(monkeypatch):
+    s, out = _session(monkeypatch, "Mira", ["play Pink"])                         # final lost the name
+    _run(s, frames(("speech", 1.2), ("quiet", 1.0), ("speech", 1.0), ("quiet", 2.5)))
+    assert [m["send"] for m in out if m["type"] == "heard"] == ["play Pink"]
+
+
+def test_the_hold_never_outlives_its_utterance():
+    seg = listen.Segmenter(vad=LoudVad())
+    run(seg, frames(("speech", 1.0)))
+    assert seg.hold(seg.n, 2.0) and seg.end_silence == 2.0
+    us = run(seg, frames(("quiet", 2.2)))
+    assert len(us) == 1 and seg.end_silence == listen.END_SILENCE_S
+    assert seg.hold(us[0].n, 2.0) is False                                       # it ended

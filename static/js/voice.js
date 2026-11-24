@@ -85,6 +85,15 @@
   // not to, so the music stayed down until some unrelated repaint, or the player's own
   // 60 s expiry (user, 2026-11-24: "a lag when going to full volume").
   let ducked = false, unduckTimer = null;
+  // Her name heard (the listener's early look, or a summons): the music stays down until
+  // what was said is handled, so the rest of the request is heard over it (#106).
+  let wakeHoldUntil = 0;
+  function holdForWake(ms) {
+    wakeHoldUntil = ms ? Date.now() + ms : 0;
+    syncDuck();
+    if (ms) setTimeout(syncDuck, ms + 50);
+  }
+  const wakeHeld = () => Date.now() < wakeHoldUntil;
   function sendDuck(on) {
     ducked = on;
     fetch("/pmedia/music/duck", { method: "POST", credentials: "same-origin",
@@ -93,7 +102,7 @@
   }
   function syncDuck() {
     let want;
-    try { want = !!ttsSource || speechConsuming || awake || (streaming && speechFedLen > 0); }
+    try { want = !!ttsSource || speechConsuming || awake || wakeHeld() || (streaming && speechFedLen > 0); }
     catch { return; }                                                       // before init
     if (want) {
       if (unduckTimer) { clearTimeout(unduckTimer); unduckTimer = null; }
@@ -101,7 +110,7 @@
     } else if (ducked && !unduckTimer) {
       unduckTimer = setTimeout(() => {
         unduckTimer = null;
-        if (!ttsSource && !speechConsuming && !awake && !(streaming && speechFedLen > 0)) sendDuck(false);
+        if (!ttsSource && !speechConsuming && !awake && !wakeHeld() && !(streaming && speechFedLen > 0)) sendDuck(false);
       }, 500);
     }
   }
@@ -584,6 +593,14 @@
   function summoned() {
     window.dispatchEvent(new CustomEvent("avatar:wave"));
     emit("summoned");
+    holdForWake(SUMMON_MS);                        // the music waits for the request
+  }
+  // The listener heard her name while you were still talking: music down now, and it
+  // gives you up to 2 s of pause before the request counts as over.
+  const WAKE_HOLD_MS = 14000;                      // the rest of that utterance, at most
+  function wakeHeard() {
+    emit("wakeheard");
+    holdForWake(WAKE_HOLD_MS);
   }
 
   // The text to send, or "" to ignore this utterance.
@@ -771,6 +788,7 @@
         else if (d.type === "heard") onHeard(d);
         else if (d.type === "awake") setAwake(!!d.on, d.why || "listener");
         else if (d.type === "action" && d.do === "summoned") summoned();
+        else if (d.type === "action" && d.do === "wake_heard") wakeHeard();
       };
     });
   }
@@ -807,6 +825,7 @@
     const raw = String(d.text || "").trim();
     console.log("[mic] heard" + (d.strict ? " (strict)" : "") + " in " + d.ms + " ms: " +
                 JSON.stringify(raw) + (d.send ? " -> " + JSON.stringify(d.send) : ""));
+    if (wakeHeld()) holdForWake(0);               // handled now (a summons re-holds it next)
     if (!raw || !hfActive) return;
     if (awake) awakeUntil = Date.now() + wakeTimeoutMs();   // any speech keeps it open
     if (looksSelfHeard(raw)) { noteSelfHeard(); return; }   // never answer her own voice
