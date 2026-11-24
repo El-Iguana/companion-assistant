@@ -164,3 +164,31 @@ def test_a_fold_of_pure_small_talk_spends_no_model_time(monkeypatch):
     mem = AssistantMemory(notes=["Brian needs the API key by Friday"])
     changed = asyncio.run(assistant_memory.fold(NoKobold(), mem, s, CharacterCard(name="Mira"), Persona(name="Brian")))
     assert changed and mem.swept_sessions[s.id] == 4 and mem.notes == ["Brian needs the API key by Friday"]
+
+
+CROWDED = [{"item_id": 276, "kind": "album", "display": "Before These Crowded Streets — Dave Matthews Band (1998)",
+            "score": 1.0}]
+
+
+def test_an_exact_name_takes_the_lane_when_fortuna_is_borderline(tmp_path, monkeypatch):
+    # R5, 2026-11-24: Fortuna scored this 0.76 and the play took 25 s through the model.
+    o = FakeOrpheus(monkeypatch, [PREDATOR], CROWDED)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.76)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "play Before These Crowded Streets", "Mira"))
+    assert said.startswith("Playing Before These Crowded Streets") and o.sent[0][1]["type"] == "play"
+
+
+def test_borderline_without_an_exact_name_is_still_hers(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR[:1])                    # score 0.83, not exact
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.76)})
+    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play sigur ros", "Mira")) is None and not o.sent
+
+
+def test_a_sure_play_of_something_missing_is_answered_at_once(tmp_path, monkeypatch):
+    # R5: through the model, three media_play calls and 68 s to say the same.
+    o = FakeOrpheus(monkeypatch, [PREDATOR], [], ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.95)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Mira, play Ágætis byrjun", "Mira"))
+    assert said == "I can't find Ágætis byrjun in your music." and not o.sent
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.7)})   # unsure: hers
+    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play some Agaetis", "Mira")) is None

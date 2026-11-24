@@ -145,6 +145,24 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
    6. With amd-halo stopped she says she can't reach the bar. Starting it again recovers with no restart.
    7. A reboot of predator brings the resident and its player back, signed in.
 
+   **Run 2026-11-24, remote** (text sent through predator's resident into `/pdesk/chat`, the path voice
+   takes after speech-to-text; the music player's state read from `/resident/status`):
+   - **2:** passes with a substitute. *Ágætis byrjun* and Rush aren't in the Orpheus library (111
+     artists, 46 albums), so the check used *Before These Crowded Streets*, which played on predator.
+   - **4:** passes. Pause 0.02 s, next 0.14 s, turn it down 0.02 s.
+   - **6:** passes. With the server stopped, predator answered "I can't reach the bar right now".
+     After a restart, chat worked at once and the music line was back 19 s later (relay backoff).
+     Until then, a music command got "The music player isn't on."
+   - **Fixed in this run:** borderline plays with an exact match now take the fast lane (25 s →
+     0.37 s); a sure play of something not in the library is answered at once (68 s → 0.26 s); a
+     bare "play" resumes (19 s and a restarted album → 0.03 s).
+   - **Left for someone at predator:**
+     - 1, the wake word spoken aloud;
+     - 3, a play typed in the browser chat (a script outside the server process can't see the
+       player connections);
+     - 5, ducking heard under her voice;
+     - 7, a reboot.
+
 ## Not in this plan
 
 - Several bartenders speaking at once.

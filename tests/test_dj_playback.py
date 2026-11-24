@@ -138,6 +138,7 @@ def test_control_and_its_refusals(tmp_path, monkeypatch):
     ("go back", {"type": "previous"}), ("play the previous song", {"type": "previous"}),
     ("Turn it up", {"type": "volume", "step": 15}), ("a bit quieter", {"type": "volume", "step": -15}),
     ("set the volume to 40%", {"type": "volume", "level": 40}), ("volume 150", {"type": "volume", "level": 100}),
+    ("Play.", {"type": "resume"}), ("play the music", {"type": "resume"}), ("could you play music", {"type": "resume"}),
 ])
 def test_fast_commands(said, cmd):
     assert media.fast_command(said) == cmd

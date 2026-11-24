@@ -203,7 +203,8 @@ async def _search(st: dict, query: str, kinds: list[str] | None) -> tuple[list[d
               "name": c.get("display") or c.get("title"), "playable": c.get("playable", True)}
              for c in strong[:5]]
     return cands, {"ask": out.get("disambiguation_prompt") if len(strong) == len(found) else "",
-                   "ambiguous": bool(out.get("needs_disambiguation"))}
+                   "ambiguous": bool(out.get("needs_disambiguation")),
+                   "top": max((float(c.get("score") or 0) for c in strong), default=0.0)}
 
 
 async def _connect(ctx: SkillContext, args: dict) -> dict:
@@ -354,8 +355,10 @@ _POLITE_TAIL = re.compile(r"(?:[ ,]*\b(?:please|thanks|thank you|for me|now|righ
 _IT = r"(?: (?:the|this|that))?(?: (?:music|song|track|tune|playback|it|one))?"
 _FAST = [
     (re.compile(rf"^(?:pause|pause{_IT}|stop the (?:music|song|track|playback)|stop playing)$"), {"type": "pause"}),
+    # A bare "play" is a resume: after "pause" it went to the model (19 s) and restarted the
+    # album (R5, 2026-11-24). "Continue" stays hers; it is as often about the conversation.
     (re.compile(rf"^(?:resume|unpause|keep playing|resume{_IT}|unpause{_IT}|continue the (?:music|song|track|playback)|"
-                rf"start{_IT} again|play it again)$"), {"type": "resume"}),
+                rf"start{_IT} again|play it again|play|play (?:the )?music)$"), {"type": "resume"}),
     (re.compile(rf"^(?:skip|next|skip{_IT}|next{_IT}|play the next(?: (?:song|track|one))?)$"), {"type": "next"}),
     (re.compile(rf"^(?:previous|go back|previous{_IT}|go back a (?:song|track)|"
                 rf"(?:play )?the (?:previous|last) (?:song|track|one))$"), {"type": "previous"}),
@@ -390,6 +393,12 @@ _SAID = {"pause": "Paused.", "resume": "Playing.", "next": "Skipping.", "previou
 # finds one clear match, so it plays with no model turn (~1 s, not ~15 s). Anything less
 # sure goes to her as before, where she can ask.
 LANE_MIN = 0.8
+# Below LANE_MIN, down to LANE_LOW, a play still takes the lane when Orpheus finds the name
+# exactly: "play Before These Crowded Streets" scored 0.76 (the title doesn't sound like
+# music) with one exact album match, and took 25 s through the model (R5, 2026-11-24).
+LANE_LOW = 0.6
+EXACT_SCORE = 0.95
+_PLAY_WORDS = re.compile(r"^(?:play|put on|start)\b\s*(?:some|the|me|us)?\b\s*", re.I)
 _LANE_INTENTS = {
     "play_music": "start playing a song, album, artist or playlist",
     "control_music": "pause, resume, skip, go back or change the volume of music already playing",
@@ -414,12 +423,20 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     # Fortuna is asked about the request itself: "Mira, can you play some Dave Matthews
     # Band?" scored 0.77, under the bar, where "play some Dave Matthews Band" scored 0.87.
     got = await fortuna.choose(query, "What does the user want the assistant to do?", _LANE_INTENTS)
-    if got is None or got[0] != "play_music" or got[1] < LANE_MIN:
+    if got is None or got[0] != "play_music" or got[1] < LANE_LOW:
         return None
+    sure = got[1] >= LANE_MIN
     try:
         cands, how = await _search(st, query, None)
+        if not cands and sure:
+            # A plain play of something the library doesn't have: say so now. Through the
+            # model this took three media_play calls and 68 s to reach the same answer (R5).
+            what = _PLAY_WORDS.sub("", query).strip() or query
+            return f"I can't find {what} in your music."
         if not cands or how["ambiguous"] or not cands[0].get("playable", True):
-            return None                               # she asks, or says it isn't there
+            return None                               # she asks
+        if not sure and how["top"] < EXACT_SCORE:
+            return None                               # unsure, and no exact name: hers
         pick = cands[0]
         dev = await _target(ctx, st)
         if _just_played(ctx, query, dev):
