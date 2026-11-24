@@ -779,6 +779,15 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   - **The music fast lane:** `media.fast_play`. Fortuna says `play_music` at `LANE_MIN` (0.8) or
     more, the name and "can you" are stripped, and Orpheus returns one clear match: it plays with no
     model turn. Anything unsure goes to her as before.
+  - **Ties and vague plays stay off the model** (#79, #80). A tie Orpheus reports is settled by the
+    exact title (also the "Album - Song" tag pattern, `media.exact_pick`), else by Fortuna at ≥ 0.8
+    ("play Back in Black": 66 s → 0.5 s). A described play ("something upbeat", Fortuna "named or
+    described?", asked while Orpheus searches) plays an album Fortuna picks from
+    `services/skills/music_catalog.py`, shuffled (~2 s, against ~60 s). The catalog is
+    `<library>/music_catalog.json`: every album as "Album — Artist (year)", spoken word marked once
+    by Fortuna (the music library holds audiobooks), rebuilt in the background after 6 h; each pick
+    is over a random 24 (speed, and variety). Orpheus has no genres for this library. A name
+    scoring ≥ 0.9 in Orpheus always wins over "described".
   - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
     marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of
