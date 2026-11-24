@@ -193,6 +193,11 @@ class DesktopShell(Gtk.Application):
                           and setattr(self, "_music_pushed", ""))
         self.view.load_uri(self.url)
 
+        # Closing her (the taskbar's Close, Alt+F4) hides her to the tray, like the tray's Hide;
+        # Exit is what quits. GTK destroyed the window, the tray and the music window kept the
+        # app alive, and the launcher's Activate then presented a destroyed window: she never
+        # came back and nothing listened (predator, 2026-11-24).
+        self.win.connect("close-request", self._on_close_request)
         self.win.connect("notify::default-width", lambda *_: self._apply_input_region())
         self.win.connect("notify::default-height", lambda *_: self._apply_input_region())
         if not self.prefs["show_at_start"]:
@@ -491,6 +496,12 @@ class DesktopShell(Gtk.Application):
             print(f"[shell] could not stop the resident: {e}")
         self.quit()
         return False
+
+    def _on_close_request(self, *_):
+        if self._exiting:
+            return False                           # Exit closes her for real
+        self._hide()
+        return True                                # keep the window: hidden, still listening
 
     def _on_settings_closed(self, *_):
         self.settings_win = None
