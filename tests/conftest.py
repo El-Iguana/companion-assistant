@@ -50,6 +50,8 @@ def _backend_context(monkeypatch, request):
     # (test_music_catalog calls build() itself, against a fake).
     from services.skills import music_catalog
     monkeypatch.setattr(music_catalog, "refresh_soon", lambda root, st: None)
+    from services.skills import media as media_skill
+    monkeypatch.setattr(media_skill, "_pending", {})              # "which one?" never leaks (#81)
 
     # A model call a test didn't stub fails at once, as a dead backend would,
     # instead of trying the network. Tests stub the instance (main.kobold), which wins.

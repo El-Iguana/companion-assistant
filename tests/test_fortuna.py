@@ -243,4 +243,43 @@ def test_fortuna_settles_what_the_title_cannot_and_only_when_sure(tmp_path, monk
     o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
     fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9),
                                "Which of these": ("Crash — Someone Else", 0.55)})
-    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira")) is None and not o.sent   # hers
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira"))
+    assert said == "Which one: Crash by Dave Matthews Band, or Crash by Someone Else?" and not o.sent   # asks (#81)
+
+
+# --- either-or without her (#81) ---
+
+def _either(monkeypatch, tmp_path, answer):
+    two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which of these": None,
+                               "Which did the user choose": answer})
+    ctx = _ctx(tmp_path, session_id="s1")
+    asked = asyncio.run(media.fast_play(ctx, "play Crash", "Mira"))
+    assert asked.startswith("Which one:") and not isinstance(asked, media.Done)   # a question: said aloud
+    return o, ctx
+
+
+def test_the_answer_to_her_question_plays_without_her(tmp_path, monkeypatch):
+    o, ctx = _either(monkeypatch, tmp_path, ("2", 0.92))
+    said = asyncio.run(media.fast_play(ctx, "the second one", "Mira"))
+    assert isinstance(said, media.Done) and "Someone Else" in said and o.expanded == [2]
+
+
+def test_something_else_after_her_question_goes_on_as_usual(tmp_path, monkeypatch):
+    o, ctx = _either(monkeypatch, tmp_path, ("none", 0.95))
+    fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.95), "Which did the user choose": ("none", 0.95)})
+    assert asyncio.run(media.fast_play(ctx, "what time is it", "Mira")) is None and not o.sent
+    assert media._ask_key(ctx) not in media._pending                # asked once, then forgotten
+
+
+def test_an_unsure_answer_goes_to_her(tmp_path, monkeypatch):
+    o, ctx = _either(monkeypatch, tmp_path, ("1", 0.5))
+    fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.9), "Which did the user choose": ("1", 0.5)})
+    assert asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira")) is None and not o.sent
+
+
+def test_no_question_when_the_options_sound_the_same():
+    same = [{"id": "1", "name": "Crash — Dave Matthews Band (1996)"}, {"id": "2", "name": "Crash — Dave Matthews Band (2010)"}]
+    raw = [{"score": 0.8}, {"score": 0.8}]
+    assert media.either_or(same, raw) == []
