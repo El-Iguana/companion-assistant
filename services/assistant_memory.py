@@ -33,6 +33,7 @@ FACT_MAX_CHARS = 200
 NOTE_MAX_CHARS = 160
 BUDGET_CHARS = 2400       # same ceiling as the companion block, spent differently
 MAX_NEW_PER_FOLD = 4      # across BOTH categories
+FORGOTTEN_KNOWN = 10      # forgotten entries shown to the extractor as known (#22)
 
 # KNOWN, UNFIXED: work-in-progress still leaks into `facts`. Measured — "We still
 # need to finish the middleware" was filed as a durable fact despite the rule
@@ -380,8 +381,11 @@ async def extract(kobold, mem: AssistantMemory, transcript: str,
     """-> (new directives, new facts). ([], []) on any problem."""
     if not transcript.strip():
         return [], []
+    # What the user asked to forget (#22) is listed as known, so it isn't recorded again in
+    # any wording; no new prompt text, so the eval's numbers still describe this prompt.
     known_lines = ([f"- (instruction) {d.text}" for d in mem.directives]
-                   + [f"- (fact) {f.text}" for f in mem.facts])
+                   + [f"- (fact) {f.text}" for f in mem.facts]
+                   + [f"- (fact) {t}" for t in mem.forgotten[-FORGOTTEN_KNOWN:]])
     known = ("Known:\n" + "\n".join(known_lines) + "\n\n") if known_lines else ""
     prompt = EXTRACT_PROMPT.format(char=char, user=user, max_new=max_new,
                                    known=known, transcript=transcript)
@@ -403,8 +407,8 @@ async def extract(kobold, mem: AssistantMemory, transcript: str,
             facts.append(line.split(":", 1)[1].strip()[:FACT_MAX_CHARS])
         # An unprefixed line is dropped rather than guessed at: filing an
         # instruction as a fact is exactly the failure this split exists to stop.
-    directives = _dedupe([d for d in directives if d], [d.text for d in mem.directives])
-    facts = _dedupe([f for f in facts if f], [f.text for f in mem.facts])
+    directives = _dedupe([d for d in directives if d], [d.text for d in mem.directives] + mem.forgotten)
+    facts = _dedupe([f for f in facts if f], [f.text for f in mem.facts] + mem.forgotten)
     return directives[:max_new], facts[:max_new]
 
 
@@ -465,7 +469,8 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
 
     done, left, lo = start, max_new, start
     for end, transcript in chunks:
-        users = [m for m in session.messages[lo:end] if m.role == "user"]
+        # A memory command ("remember…", "forget…") already acted (#22): not read again.
+        users = [m for m in session.messages[lo:end] if m.role == "user" and not m.memory_command]
         turns = await worth_reading(users) if extract_items else users
         if users and not turns:
             # Fortuna is sure no user turn here holds anything: small talk. The notes stand

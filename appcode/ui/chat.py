@@ -451,11 +451,12 @@ class ChatView:
                     # the answer streams. The tool call itself never reaches the bubble.
                     live = by_id("ch-live")
                     status = str((ev["skill"] or {}).get("status") or "Working on it…")
+                    icon = str((ev["skill"] or {}).get("icon") or "🎵")
                     if live:
                         live.querySelector(".pt-bubble").innerHTML = (
                             (md(acc) if acc else "")
                             + '<div class="pt-skill"><span class="pt-typing"><i></i><i></i><i></i></span>'
-                            f' <span class="pt-dim">🎵 {esc(status)}</span></div>')
+                            f' <span class="pt-dim">{esc(icon)} {esc(status)}</span></div>')
                 elif "error" in ev:
                     error = str(ev["error"])
                 elif ev.get("done"):

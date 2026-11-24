@@ -271,6 +271,9 @@ class ChatMessage(BaseModel):
     swipes: List[str] = []               # alternate generations for this turn
     swipe_index: int = 0
     swipe_expressions: List[str] = []    # cached emotion per swipe (aligned with swipes)
+    # A user turn that was a memory command ("remember…", "forget…"; #22): it acted at once,
+    # so the fold's extractor doesn't read it again.
+    memory_command: bool = False
 
 
 class MemoryState(BaseModel):
@@ -339,6 +342,10 @@ class AssistantMemory(BaseModel):
     # changes notes by number instead of rewriting the list, and a note untouched for two
     # weeks leaves the prompt. A note without an entry counts as touched at updated_at.
     notes_touched: Dict[str, str] = {}
+    # What the user asked to forget (Memory Phase 7, #22), newest last: the extractor treats
+    # these as already known, so a fold of the same chat doesn't write them straight back.
+    # Kept in the shared store.
+    forgotten: List[str] = []
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
 

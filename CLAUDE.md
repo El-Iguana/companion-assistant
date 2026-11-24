@@ -775,7 +775,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   - Next: memory decisions, after their eval (Memory Phase 7 #15).
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
-  per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23 (#15, the
-  eval fixtures, first).
+  per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23. ✅ #15–#22
+  built (memory commands: the **Memory** skill on the Menu, `services/skills/memory.py`); #23, the
+  Fortuna gate, is optional.
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
 - Tuning knobs: `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.

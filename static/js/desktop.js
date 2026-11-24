@@ -180,7 +180,7 @@
             } else if (ev.expr) {
               V.expr(ev.expr);
             } else if (ev.skill) {
-              caption("🎵 " + (ev.skill.status || "Working on it…"), 0);   // a Menu tool is running
+              caption((ev.skill.icon || "🎵") + " " + (ev.skill.status || "Working on it…"), 0);   // a Menu tool is running
             } else if (ev.error) {
               caption(`${card.name} could not answer: ${ev.error}`, 8000);
             } else if (ev.done) {

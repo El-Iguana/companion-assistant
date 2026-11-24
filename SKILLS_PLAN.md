@@ -27,6 +27,10 @@ skill, built on Navidrome, until 2026-09-15 — see Skill 2.*
 >   stays last; a `skill` SSE event shows "🎵 Searching the library…" on the page and desktop;
 >   schema tokens come off the context window; a tool turn keeps its clarifying question.
 > - **`CharacterCard.skills`** and the Studio's **Menu** section.
+> - **Memory** (2026-11-24, Memory Phase 7 #22): `memory_remember` / `memory_forget` /
+>   `memory_list` on the bartender's store (`services/skills/memory.py`, `MEMORY.md` → *Memory
+>   commands*). Remember and forget answer with a fixed `final` line, so no second pass. Seeded on
+>   Mira. Estimated schema cost 320 tokens by `schema_tokens` (which says 483 for the DJ's 218 measured).
 > - **The DJ** (`services/skills/media.py`, client `orpheus_media.py`) against the live Orpheus on
 >   Homelab: `media_connect` (LAN discovery via `ORPHEUS_MEDIA_SCAN_CIDR`, or `ORPHEUS_MEDIA_URL`;
 >   pairing as a controller, approved on the server), then `media_find` + `media_status`.

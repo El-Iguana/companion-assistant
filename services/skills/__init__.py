@@ -49,6 +49,7 @@ class SkillContext:
     session_id: str = ""
     # The resident this request came from ("" from the web chat): music plays on its player.
     player_id: str = ""
+    persona_id: str = ""       # who the user is speaking as (memory tags facts with it)
 
 
 @dataclass
@@ -59,6 +60,7 @@ class Tool:
     handler: Callable[[SkillContext, dict], Awaitable[dict]]
     status: str = ""                           # what the page shows while it runs
     timeout: float = 0                         # seconds; 0 = TOOL_TIMEOUT_S
+    icon: str = ""                             # the page's mark beside the status; "" = 🎵
 
     def schema(self) -> dict:
         return {"type": "function", "function": {

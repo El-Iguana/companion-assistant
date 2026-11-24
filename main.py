@@ -35,6 +35,7 @@ from models.schema import (
 from services.kobold import KoboldClient, ExprEvent, ToolCallsEvent
 from services import skills as skills_rt
 import services.skills.media as media_skill  # registers the DJ skill
+import services.skills.memory as memory_skill  # registers memory commands (#22)
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -377,7 +378,7 @@ def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str = "") ->
         character_id=character_id, persona_id=persona_id,
         directives=[d for d in shared.directives] + [d for d in own.directives if d.scope != "all"],
         facts=facts, notes=own.notes, notes_touched=own.notes_touched,
-        swept_sessions=own.swept_sessions, updated_at=own.updated_at)
+        swept_sessions=own.swept_sessions, forgotten=shared.forgotten, updated_at=own.updated_at)
     view.__dict__["_hidden_facts"] = hidden            # kept on save, never shown
     return view
 
@@ -387,7 +388,7 @@ def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
     the bartender's own file. Facts tagged for another persona, which the view hid, are kept."""
     shared = AssistantMemory(
         directives=[d for d in mem.directives if d.scope == "all"],
-        facts=mem.facts + list(mem.__dict__.get("_hidden_facts", [])))
+        facts=mem.facts + list(mem.__dict__.get("_hidden_facts", [])), forgotten=mem.forgotten)
     own = AssistantMemory(
         character_id=mem.character_id,
         directives=[d for d in mem.directives if d.scope != "all"],
@@ -395,6 +396,19 @@ def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
         swept_sessions=mem.swept_sessions, updated_at=mem.updated_at)
     (cur.assistant / _SHARED).write_text(shared.model_dump_json(indent=2))
     (cur.assistant / f"{mem.character_id}.json").write_text(own.model_dump_json(indent=2))
+
+
+def _skill_library(sc: "skills_rt.SkillContext") -> Ctx:
+    """The library a skill call is bound to (its ``root`` is data/u/<uid>), for the memory
+    helpers, which need only its folders."""
+    r = sc.root
+    return Ctx(None, r / "characters", r / "personas", r / "sessions", r / "settings", r / "assistant")
+
+
+# Memory commands (#22) read and write the same store as the fold and the Memory modal.
+memory_skill.bind(
+    load=lambda sc: _load_assistant_memory(_skill_library(sc), sc.card_id, sc.persona_id),
+    save=lambda sc, mem: _save_assistant_memory(_skill_library(sc), mem))
 
 
 def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: ChatSession,
@@ -1637,6 +1651,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
     # The Menu: the tools this bartender offers right now, and what their schemas cost.
     skill_ctx = skills_rt.SkillContext(user_id=cur.user.id, root=cur.cards.parent,
                                        card_id=card.id, session_id=session.id,
+                                       persona_id=persona.id,
                                        # a resident's request: its own Orpheus player (R-6)
                                        player_id=player_id)
     tools = skills_rt.tools_for(card, skill_ctx)
@@ -1735,11 +1750,20 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                 results = []
                 for call in calls[:MAX_TOOLS_PER_ROUND]:
                     tool = next((t for t in tools if t.name == call["name"]), None)
-                    yield _sse({"skill": {"tool": call["name"],
-                                          "status": (tool.status if tool else "") or "Working on it…"}})
+                    event = {"tool": call["name"],
+                             "status": (tool.status if tool else "") or "Working on it…"}
+                    if tool and tool.icon:
+                        event["icon"] = tool.icon
+                    yield _sse({"skill": event})
                     t_tool = time.monotonic()
                     results.append((call, await skills_rt.run(call, tools, skill_ctx)))
                     timing.append(f"{call['name']} {time.monotonic() - t_tool:.2f}s")
+                if any(c["name"] in ("memory_remember", "memory_forget") and r.get("ok")
+                       for c, r in results):
+                    # It acted already: the fold's extractor must not read it again (#22).
+                    turn_user = next((m for m in reversed(session.messages) if m.role == "user"), None)
+                    if turn_user is not None:
+                        turn_user.memory_command = True
                 # A tool that finished the job can say so itself ("Playing Rush on Predator."):
                 # no second pass, which costs ~15 s on the local model and was where she
                 # once contradicted a play that had worked.
