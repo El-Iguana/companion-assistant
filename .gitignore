@@ -10,13 +10,14 @@ venv/
 
 # Live app state — mounted volume of per-item JSON (characters, sessions,
 # relationships, etc.). Runtime data, not source; back up separately.
-# Private user libraries. Ignored wholesale EXCEPT the avatar baseline model:
+# Private user libraries. Ignored wholesale EXCEPT the bundled avatar models:
 # git cannot re-include a file whose parent dir is excluded, so the path has to
 # be un-ignored one level at a time.
 data/*
 !data/vrm/
 data/vrm/*
 !data/vrm/baseline.vrm
+!data/vrm/pix.vrm
 
 # Baked ML model artifacts (downloaded at image build time, not versioned here)
 models/*.onnx

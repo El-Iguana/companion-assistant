@@ -32,8 +32,8 @@ roleplay, relationship system or narrator.
 - **Character Card V2/V3** import/export (PNG + JSON), a full card editor with lorebook
 - **Personas** — who you are (`{{user}}`), injected into the prompt
 - **Multi-user** — login with `admin`/`user` roles; each account has its own private library
-- **Mira**, an example assistant, in every new library (wake word "Mira", Kokoro `af_sarah`, the
-  bundled pixiv sample avatar `baseline.vrm`). Edit or delete her; she is not re-added.
+- **Mira**, an example assistant, in every new library: wake word "Mira", Kokoro `af_heart`, the DJ and
+  Memory on her Menu, and her own 3D avatar, **Pix** (`pix.vrm`). Edit or delete her; she is not re-added.
 
 ## Installing
 
@@ -93,11 +93,12 @@ it's the thing to back up. Code is baked into the image, so rebuild after editin
 
 ## Note
 
-Local and private by design. Intended for personal, self-hosted use. The bundled `baseline.vrm` is
-pixiv's redistributable sample model; models you import stay in your own `data/vrm/`.
+Local and private by design. Intended for personal, self-hosted use. The bundled avatars are Pix (Mira's)
+and pixiv's redistributable sample `baseline.vrm`; models you import stay in your own `data/vrm/`.
 
 ## License
 
-[MIT](LICENSE). The bundled `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample and
-keeps pixiv's own terms. The models the image downloads when it builds (Kokoro, faster-whisper)
+[MIT](LICENSE). The bundled avatars keep the terms in their own VRM metadata:
+`data/vrm/pix.vrm` (Pix, Mira's avatar, © 2026 El-Iguana) allows redistribution, modification and commercial
+use; `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample under pixiv's terms. The models the image downloads when it builds (Kokoro, faster-whisper)
 keep their own licenses as well.
