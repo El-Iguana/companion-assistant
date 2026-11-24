@@ -767,6 +767,9 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   (`desktop/shellsettings.py`: start at login, avatar shown at start, listening at start; on a resident
   listening is local, never saved to the account; hidden = see-through, still listening); ✅ Exit Cantinero (tray, Settings, app-menu right-click,
   `cantinero --exit`) stops the music, the shell and the resident; nothing restarts until the launcher or login.
+  **R7 (a formal music player, #71–#73):** ✅ a micro player under her bar while music plays (the shell
+  pushes the player's state to the page; buttons come back as `music:<action>` messages); ◻ the full
+  player with stop/shuffle/repeat and a polished layout; ◻ browse and search the library.
 - **Fortuna** (2026-11-23, `services/fortuna.py`): ai-stack's typed-decision backend
   (`http://fortuna:8009` on ai-net; `FORTUNA_URL`, `FORTUNA=off`). It answers "pick one of these" in
   0.15–0.25 s, against 7–12 s for a KoboldCPP generation.
