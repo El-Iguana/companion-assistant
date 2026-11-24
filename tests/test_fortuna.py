@@ -194,3 +194,53 @@ def test_a_sure_play_of_something_missing_is_answered_at_once(tmp_path, monkeypa
     assert not isinstance(said, media.Done)                     # a miss is said aloud
     fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.7)})   # unsure: hers
     assert asyncio.run(media.fast_play(_ctx(tmp_path), "play some Agaetis", "Mira")) is None
+
+
+# --- ties settled without her (#79) ---
+
+def _track(item_id, title, artist="ACDC", score=0.783):
+    return {"item_id": item_id, "kind": "track", "title": title, "display": f"{title} — {artist}",
+            "score": score, "playable": True}
+
+
+BACK_IN_BLACK = [_track(141, "Back in Black - Back In Black"), _track(150, "Back in Black - You Shook Me All Night Long"),
+                 _track(152, "Back in Black - Hells Bells"), _track(155, "Back in black - Let Me Put My Love Into You"),
+                 _track(246, "I'll Back You Up", "Dave Matthews Band", 0.423)]
+
+
+@pytest.mark.parametrize("query,want", [
+    ("play Back in Black", 0),                           # the "Album - Song" tag pattern
+    ("Back in Black", 0),
+    ("play hells bells", 2),
+    ("play Back in Black by ACDC", 0),                   # "by <artist>" must match too
+    ("play Back in Black by Queen", None),
+    ("play rock", None),
+])
+def test_the_exact_title_settles_a_tie(query, want):
+    assert media.exact_pick(query, BACK_IN_BLACK) == want
+
+
+def test_two_exact_titles_are_still_a_tie():
+    two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
+    assert media.exact_pick("play Crash", two) is None
+    assert media.exact_pick("play Crash by Dave Matthews Band", two) == 0
+
+
+def test_a_tie_plays_the_exact_title_without_her(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Mira, play Back in Black", "Mira"))
+    assert isinstance(said, media.Done) and o.expanded == [141]
+
+
+def test_fortuna_settles_what_the_title_cannot_and_only_when_sure(tmp_path, monkeypatch):
+    two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9),
+                               "Which of these": ("Crash — Someone Else", 0.93)})
+    asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira"))
+    assert o.expanded == [2]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9),
+                               "Which of these": ("Crash — Someone Else", 0.55)})
+    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira")) is None and not o.sent   # hers
