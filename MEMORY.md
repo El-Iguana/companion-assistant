@@ -21,8 +21,8 @@ true*, and above all must not drift, so there is exactly one store:
 |---|---|
 | Module | `services/assistant_memory.py` |
 | Store | `AssistantMemory` — directives + facts + task notes |
-| File | `data/u/<uid>/assistant/{cid}__{pid}.json` |
-| This chat | `session.memory.pinned` (always in context); `last_summarized_index` = how far the fold has read |
+| Files | `data/u/<uid>/assistant/_shared.json` (the user's facts, all-bartender directives) + `{cid}.json` (her directives, notes, fold marks), since Memory Phase 7 #16 |
+| This chat | `last_summarized_index` = how far the fold has read. Pinned facts moved into the shared facts (#16) |
 | Per-session summary | none — `session.memory.summary` is never written or injected; a companion-era one is cleared on the next fold |
 | Semantic recall | none |
 | Route | `GET/PUT /api/assistant-memory` |
@@ -32,8 +32,24 @@ roleplay framing reaching an assistant through a shared path. Here there is no s
 
 ## The store — `AssistantMemory`
 
-`services/assistant_memory.py`, stored per (character, persona) at
-`data/u/<uid>/assistant/{cid}__{pid}.json`. Three buckets and nothing else:
+**Memory belongs to the bartender (Memory Phase 7, #16, 2026-11-23).** Each library has two kinds of
+file:
+- `_shared.json`: facts about the user, which every bartender knows, plus directives marked for all
+  bartenders (`scope: "all"`);
+- `{cid}.json`: her own directives, task notes and fold marks.
+
+`main._load_assistant_memory(cur, cid, pid)` returns one merged view, and
+`_save_assistant_memory` splits it back, so the fold, the merge (`_store_fold`) and the modal work on
+a single `AssistantMemory`.
+- **Persona is a tag:** a fact may carry `persona_id` and is then shown only under that persona.
+  Untagged facts are the user's. Switching persona no longer hides a bartender's instructions.
+- **Migration:** the old `{cid}__{pid}.json` files are merged on her first load (deduped; fold marks
+  take the max). The chats' pinned facts move into the shared facts. The old files are kept.
+- **Deleting** a bartender removes `{cid}.json`; deleting a persona removes facts tagged with it.
+- `main.memory_for_turn` is the one place that decides what memory puts in a turn's prompt, and
+  `eval/memory_phase7` measures it.
+
+Three buckets and nothing else:
 
 | Bucket | What it is | Cap |
 |---|---|---|

@@ -291,19 +291,108 @@ def _forget_pairings(cur: Ctx, character_id: str = "", persona_id: str = "") -> 
         return 0
     pattern = f"{character_id}__*" if character_id else f"*__{persona_id}.*"
     gone = [f for f in cur.assistant.glob(pattern) if f.is_file() and "__" in f.name]
+    if character_id and (cur.assistant / f"{character_id}.json").is_file():
+        gone.append(cur.assistant / f"{character_id}.json")      # her own memory (#16)
     _forget_files(gone)
+    if persona_id:
+        # Facts tagged with a deleted persona go with it; untagged ones are the user's.
+        shared = _read_memory(cur.assistant / _SHARED)
+        if shared and any(f.persona_id == persona_id for f in shared.facts):
+            shared.facts = [f for f in shared.facts if f.persona_id != persona_id]
+            (cur.assistant / _SHARED).write_text(shared.model_dump_json(indent=2))
     return len(gone)
 
 
-def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str) -> AssistantMemory:
-    """Assistant memory for a pairing: data/u/<uid>/assistant/{cid}__{pid}.json."""
-    p = cur.assistant / f"{character_id}__{persona_id}.json"
-    if p.exists():
-        try:
-            return AssistantMemory.model_validate_json(p.read_text())
-        except Exception:
-            pass          # unreadable/older shape -> start fresh rather than 500 a chat turn
-    return AssistantMemory(character_id=character_id, persona_id=persona_id)
+# Memory belongs to the bartender (Memory Phase 7, #16). Two files per library:
+#   assistant/_shared.json   facts about the user (every bartender reads them) and the
+#                            directives marked for all bartenders
+#   assistant/{cid}.json     this bartender's own directives, task notes and fold marks
+# _load_assistant_memory returns the merged view every caller already used, and
+# _save_assistant_memory splits it back. Persona is no longer part of the key: a fact may be
+# tagged with a persona, and an untagged one is for everyone. The old per-pairing files,
+# {cid}__{pid}.json, are merged in on first load and kept on disk.
+_SHARED = "_shared.json"
+
+
+def _read_memory(p: Path) -> AssistantMemory | None:
+    if not p.exists():
+        return None
+    try:
+        return AssistantMemory.model_validate_json(p.read_text())
+    except Exception:
+        return None
+
+
+def _dedupe_items(items: list[MemoryFact]) -> list[MemoryFact]:
+    seen, out = set(), []
+    for it in items:
+        key = re.sub(r"\W+", " ", it.text.lower()).strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(it)
+    return out
+
+
+def _migrate_bartender(cur: Ctx, character_id: str) -> AssistantMemory:
+    """One bartender's per-pairing files, merged once into the new layout (#16).
+    Directives and notes stay with her; facts and session-pinned facts go to the shared
+    store. The old files are left where they are until the migration has been checked."""
+    own = AssistantMemory(character_id=character_id)
+    shared = _read_memory(cur.assistant / _SHARED) or AssistantMemory()
+    olds = [m for m in (_read_memory(f) for f in sorted(cur.assistant.glob(f"{character_id}__*.json"))) if m]
+    for old in olds:
+        own.directives += old.directives
+        own.notes += [n for n in old.notes if n not in own.notes]
+        for sid, mark in old.swept_sessions.items():
+            own.swept_sessions[sid] = max(mark, own.swept_sessions.get(sid, 0))
+        shared.facts += old.facts
+    # Pinned facts were per chat; they become the user's own facts, for every bartender.
+    for s in _list(cur.sessions, ChatSession):
+        if s.character_id == character_id and s.memory.pinned:
+            shared.facts += [MemoryFact(text=t, origin="user") for t in s.memory.pinned]
+            s.memory.pinned = []
+            _save(s, cur.sessions)
+    own.directives = _dedupe_items(own.directives)[-assistant_memory.MAX_DIRECTIVES:]
+    own.notes = own.notes[:assistant_memory.MAX_NOTES]
+    shared.facts = _dedupe_items(shared.facts)
+    (cur.assistant / _SHARED).write_text(shared.model_dump_json(indent=2))
+    (cur.assistant / f"{character_id}.json").write_text(own.model_dump_json(indent=2))
+    if olds:
+        print(f"[assistant-memory] merged {len(olds)} pairing file(s) of {character_id} into the "
+              "bartender's memory (old files kept)", flush=True)
+    return own
+
+
+def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str = "") -> AssistantMemory:
+    """This bartender's memory, as one view: the library's shared facts and all-bartender
+    directives, plus her own directives, notes and fold marks. ``persona_id`` filters out
+    facts tagged for another persona; it no longer picks a file."""
+    own = _read_memory(cur.assistant / f"{character_id}.json")
+    if own is None:
+        own = _migrate_bartender(cur, character_id)
+    shared = _read_memory(cur.assistant / _SHARED) or AssistantMemory()
+    facts = [f for f in shared.facts if not f.persona_id or not persona_id or f.persona_id == persona_id]
+    hidden = [f for f in shared.facts if f not in facts]
+    view = AssistantMemory(
+        character_id=character_id, persona_id=persona_id,
+        directives=[d for d in shared.directives] + [d for d in own.directives if d.scope != "all"],
+        facts=facts, notes=own.notes, swept_sessions=own.swept_sessions, updated_at=own.updated_at)
+    view.__dict__["_hidden_facts"] = hidden            # kept on save, never shown
+    return view
+
+
+def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
+    """Split a view back: facts and all-bartender directives to the shared store, the rest to
+    the bartender's own file. Facts tagged for another persona, which the view hid, are kept."""
+    shared = AssistantMemory(
+        directives=[d for d in mem.directives if d.scope == "all"],
+        facts=mem.facts + list(mem.__dict__.get("_hidden_facts", [])))
+    own = AssistantMemory(
+        character_id=mem.character_id,
+        directives=[d for d in mem.directives if d.scope != "all"],
+        notes=mem.notes, swept_sessions=mem.swept_sessions, updated_at=mem.updated_at)
+    (cur.assistant / _SHARED).write_text(shared.model_dump_json(indent=2))
+    (cur.assistant / f"{mem.character_id}.json").write_text(own.model_dump_json(indent=2))
 
 
 def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: ChatSession,
@@ -315,11 +404,6 @@ def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: Ch
     when (the eval moves it to test expiry)."""
     mem = _load_assistant_memory(cur, session.character_id, persona.id)
     return {"system": assistant_memory.block(mem, card.name, persona.name), "trailing": ""}
-
-
-def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
-    (cur.assistant / f"{mem.character_id}__{mem.persona_id}.json").write_text(
-        mem.model_dump_json(indent=2))
 
 
 def _store_fold(cur: Ctx, before: AssistantMemory, after: AssistantMemory) -> None:
@@ -924,7 +1008,14 @@ async def set_memory(session_id: str, body: dict, cur: Ctx = Depends(get_ctx)):
         raw = body.get("pinned") or []
         if not isinstance(raw, list):
             raise HTTPException(400, "pinned must be a list of strings")
-        s.memory.pinned = [str(x).strip() for x in raw if str(x).strip()]
+        # Pinned facts were per chat; since Memory Phase 7 (#16) they are the user's facts,
+        # known to every bartender. An older page that still sends them adds them there.
+        texts = [str(x).strip() for x in raw if str(x).strip()]
+        if texts:
+            mem = _load_assistant_memory(cur, s.character_id, s.persona_id)
+            mem.facts = _dedupe_items(mem.facts + [MemoryFact(text=t, origin="user") for t in texts])
+            _save_assistant_memory(cur, mem)
+        s.memory.pinned = []
     _save(s, cur.sessions)
     return s.memory.model_dump()
 
@@ -942,8 +1033,8 @@ async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
     the whole reason auto-extraction is allowed to write here at all."""
     cid = str(body.get("character_id") or "")
     pid = str(body.get("persona_id") or "")
-    if not cid or not pid:
-        raise HTTPException(400, "character_id and persona_id are required")
+    if not cid:
+        raise HTTPException(400, "character_id is required")
     mem = _load_assistant_memory(cur, cid, pid)
 
     for field, cap in (("directives", assistant_memory.MAX_DIRECTIVES),
@@ -964,12 +1055,15 @@ async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
             if not text:
                 continue
             prev = known.get(str(item.get("id") or ""))
+            scope = "all" if item.get("scope") == "all" and field == "directives" else ""
             if prev:
                 prev.text = text
+                if "scope" in item and field == "directives":
+                    prev.scope = scope           # "only her" / "every bartender" (#16)
                 kept.append(prev)
             else:
-                kept.append(MemoryFact(text=text, origin="user"))
-        setattr(mem, field, kept[-cap:])
+                kept.append(MemoryFact(text=text, origin="user", scope=scope))
+        setattr(mem, field, _dedupe_items(kept)[-cap:])   # the same line twice is kept once
 
     if "notes" in body:
         raw = body.get("notes") or []

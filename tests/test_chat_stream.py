@@ -230,5 +230,7 @@ def test_a_memory_edit_saved_while_a_reply_streams_is_kept(cur, session, model, 
 
     asyncio.run(go())
     saved = _reload(cur, session)
-    assert saved.memory.pinned == ["Afraid of deep water"]
+    # Since Memory Phase 7 (#16) a pinned fact is the user's, known to every bartender.
+    facts = main._load_assistant_memory(cur, session.character_id, session.persona_id).facts
+    assert [f.text for f in facts] == ["Afraid of deep water"] and saved.memory.pinned == []
     assert saved.messages[-1].content == "Hello."

@@ -1,11 +1,13 @@
-"""BFF: what a chat remembers — the chat header's "Memory…".
+"""BFF: what a bartender remembers, the chat header's "Memory…" (Memory Phase 7, #16).
 
-* **This chat** — pinned facts of the session (always in context).
-* **Long-term** — per (character, persona): standing instructions, facts and task notes
-  (``AssistantMemory``). Entries round-trip **by id**, so editing never relabels an
-  auto-written fact as hand-written (``main.put_assistant_memory`` relies on it).
-* Long-term is **only written back if it was loaded** — a failed read must not let an
-  empty form overwrite real remembered instructions.
+Memory belongs to the bartender, not the chat:
+* **Standing instructions:** hers, or marked for every bartender (``scope: "all"``).
+* **What every bartender knows about you:** the library's shared facts.
+* **Where things stand:** her task notes.
+
+Entries round-trip **by id**, so editing never relabels an auto-written fact as hand-written
+(``main.put_assistant_memory`` relies on it). Long-term is only written back if it was loaded:
+a failed read must not let an empty form overwrite real remembered instructions.
 
 Holds nothing between calls.
 """
@@ -42,20 +44,16 @@ class Memory:
         if err:
             return err
         cur, s, card, pid = scope
-        out = {"ok": True, "session": s.memory.model_dump(), "long": None,
-               "character": card.name if card else ""}
+        out = {"ok": True, "long": None, "character": card.name if card else ""}
         if card is not None:
             out["long"] = await main.get_assistant_memory(card.id, pid, cur=cur)
         return out
 
-    async def save(self, session_id: str, pinned: list, long: dict | None = None) -> dict:
-        """Write this chat's pinned facts, and long-term only when ``long`` is given (it is
-        only sent when the page loaded it).
+    async def save(self, session_id: str, long: dict | None = None) -> dict:
+        """Write her memory when ``long`` is given (it is only sent when the page loaded it).
 
         ``long`` must be annotated as optional: pytincture checks every argument against
-        its annotation before the call, and ``None`` is not a ``dict``. Declared as
-        ``long: dict = None``, every save of a chat without long-term memory was
-        answered 400 and nothing was written."""
+        its annotation before the call, and ``None`` is not a ``dict``."""
         import main
         from fastapi import HTTPException
 
@@ -64,7 +62,6 @@ class Memory:
             return err
         cur, s, card, pid = scope
         try:
-            await main.set_memory(s.id, {"pinned": list(pinned or [])}, cur=cur)
             if long is not None and card is not None:
                 body = {"character_id": card.id, "persona_id": pid,
                         "directives": long.get("directives") or [], "facts": long.get("facts") or [],

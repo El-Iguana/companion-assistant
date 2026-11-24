@@ -458,20 +458,24 @@ def phase5_steps(page) -> None:
     page.wait_for_selector("#ch-msgs .pt-msg", timeout=20_000)
     page.click('[data-menu="head"]')
     page.click(".wapyt-cmenu-item:has-text('Memory')")
-    page.wait_for_selector('[data-add="pinned"]', timeout=10_000)
-    page.click('[data-add="pinned"]')
-    page.fill('[data-row="pinned"] >> nth=-1 >> input', "Smoke pinned fact")
-    page.click('[data-tab="long"]')
+    # One view since Memory Phase 7 (#16): her instructions (each hers or for every bartender),
+    # the facts every bartender shares, her notes.
+    page.wait_for_selector('[data-add="directive"]', timeout=10_000)
+    page.click('[data-add="directive"]')
+    page.fill('[data-row="directive"] >> nth=-1 >> input', "Smoke instruction for all")
+    page.click('[data-row="directive"] >> nth=-1 >> [data-scope]')
     page.click('[data-add="fact"]')
-    page.fill('[data-row="fact"] >> nth=-1 >> input', "Smoke long-term fact")
+    page.fill('[data-row="fact"] >> nth=-1 >> input', "Smoke shared fact")
     page.screenshot(path=str(SHOTS / "memory.png"))
     page.click("[data-save]")
     page.wait_for_timeout(800)
     page.click('[data-menu="head"]')
     page.click(".wapyt-cmenu-item:has-text('Memory')")
-    page.wait_for_selector('[data-row="pinned"]', timeout=10_000)
+    page.wait_for_selector('[data-row="fact"]', timeout=10_000)
     vals = page.eval_on_selector_all('[data-row] input', "els => els.map(e => e.value)")
-    assert "Smoke pinned fact" in vals and "Smoke long-term fact" in vals, vals
+    assert "Smoke instruction for all" in vals and "Smoke shared fact" in vals, vals
+    scope = page.eval_on_selector('[data-row="directive"] >> nth=-1 >> [data-scope]', "e => e.dataset.scope")
+    assert scope == "all", scope
     page.keyboard.press("Escape")
     page.wait_for_timeout(400)
     page.click('[data-menu="head"]')
