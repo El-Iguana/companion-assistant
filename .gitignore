@@ -42,3 +42,4 @@ voices/*
 appcode/wapyt-*.whl
 
 # Eval results and raw model outputs stay on the machine that ran them
+eval/listen/scenes/
