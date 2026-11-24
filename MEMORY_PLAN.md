@@ -241,9 +241,11 @@ copy when one of them next needs changing.
      turn (keywords plus recency, with a minimum score), in the trailing note **after the
      history**, because a system block that changes every turn invalidates KoboldCPP's cached
      prefix. No model needed; embeddings only if keywords measure poorly.
-  8. **#22 — memory commands.** "Remember…", "forget…", "what do you remember about me?" act at
-     once through tool calling (verified over streaming in `SKILLS_PLAN.md`); the first item on the
-     Menu.
+  8. ✅ **#22 — memory commands** (2026-11-24). "Remember…", "forget…", "what do you remember
+     about me?" act at once through tool calling: the Memory skill (`services/skills/memory.py`),
+     on Mira's menu from the seed. Remember and forget answer with a fixed line (one model pass);
+     the command turn is never mined by the fold, and what was forgotten is shown to the extractor
+     as known so the next fold doesn't write it back.
   9. **#23 — Fortuna gate (optional).** A yes/no from Fortuna on whether an episode holds anything
      lasting, to skip extraction on small talk. Only if episode folds turn out to cost too much.
 

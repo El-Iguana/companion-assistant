@@ -236,6 +236,24 @@ Standing instructions, Things it knows about you, and Where things stand (one no
 is correct). Auto-written entries carry an `AUTO` badge and are individually editable and deletable
 — the correction surface for everything the extractor gets wrong, which is what `origin` is for.
 
+### Memory commands (Phase 7, #22)
+
+A bartender with **Memory** on her menu (`CharacterCard.skills`, `services/skills/memory.py`;
+Mira has it from the seed) acts on memory requests at once, by tool calling, on the same store:
+
+| tool | what | reply |
+|---|---|---|
+| `memory_remember(text, kind, everyone?)` | a fact (shared) or an instruction (hers, or every bartender's), `origin: user`; a fact gets its lifetime (#20); something already known becomes the user's | fixed: "Noted: …." |
+| `memory_forget(about)` | removes the instructions, facts and task notes that name it (every word, else the best half-match); more than three matches asks which | fixed: "Forgotten: …." |
+| `memory_list(about?)` | instructions, live facts (recalled by topic if one is named) and threads, up to 1,500 characters | she answers in her own words |
+
+The fixed lines mean remember and forget cost one model pass, like any reply. After `memory_list` the next pass gets no tools (`Tool.answer_next`): live, she called it three times before answering (51 s; 27 s with this). Measured live on Cydonia-24B, 2026-11-24: remember 17–20 s, forget 19 s, list 27 s, an empty list 17 s; a joke called no tool. Two guards keep the
+fold from undoing them: the user turn that ran remember or forget is marked
+`ChatMessage.memory_command` and the extractor never reads it, and what was forgotten goes on
+`AssistantMemory.forgotten` (shared store, last 30), which the extractor sees as known (last 10)
+and string-deduplicates against. Remembering something again lifts its forget. The page shows 📝
+beside the status while one runs (`Tool.icon`). Tests: `tests/test_memory_commands.py`.
+
 ## Known gaps
 
 Most of these are addressed by **Phase 7** (`MEMORY_PLAN.md`, issues #15–#23), which is planned,

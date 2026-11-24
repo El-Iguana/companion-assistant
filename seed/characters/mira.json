@@ -17,5 +17,8 @@
       "starters": []
     }
   },
-  "figure": "female"
+  "figure": "female",
+  "skills": [
+    "memory"
+  ]
 }
