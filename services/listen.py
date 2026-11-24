@@ -181,7 +181,9 @@ class Session:
     Out, through ``send``: ``{"type": "listening", "on"}`` when speech starts and stops,
     ``{"type": "heard", "text", "send", "strict", "ms"}`` per utterance (``send`` is the message,
     "" when the wake gate drops it; ``ms`` from the end of speech to now), and the gate's own
-    actions as ``{"type": "action", ...}`` (awake/asleep, the farewell)."""
+    actions as ``{"type": "action", ...}``, and ``{"type": "awake", "on", "why"}`` when a
+    continuous conversation opens or closes (the page waves, says the farewell, ducks the music
+    and saves the chat on it)."""
 
     def __init__(self, send) -> None:
         import asyncio
@@ -227,16 +229,25 @@ class Session:
         import time
         async with self.lock:                      # one Whisper at a time per microphone
             text = await asyncio.to_thread(transcribe, u, self.wake_word)
+            was = self.gate.awake
             msg, acts = self.gate.apply(text, time.time() * 1000)
+            if text and self.gate.awake:
+                self.gate.keep_open(time.time() * 1000)  # any speech keeps a conversation open
             ms = int((self.seg.t - u.end) * 1000)      # stream time: the end of speech to now
             await self.send({"type": "heard", "text": text, "send": msg, "strict": u.strict, "ms": ms})
             for a in acts:
                 await self.send(dict(a, type="action"))
+            if self.gate.awake != was:
+                await self.send({"type": "awake", "on": self.gate.awake,
+                                 "why": "wake word" if self.gate.awake else "sleep phrase"})
 
     async def tick(self) -> None:
         import time
+        was = self.gate.awake
         for a in self.gate.tick(time.time() * 1000):
             await self.send(dict(a, type="action"))
+        if was and not self.gate.awake:
+            await self.send({"type": "awake", "on": False, "why": "idle timeout"})
 
     async def close(self) -> None:
         for t in list(self.tasks):

@@ -114,3 +114,22 @@ def test_the_resident_streams_the_microphone_on_loopback_only(monkeypatch):
     with pytest.raises(Exception):
         with lan.websocket_connect("ws://192.168.1.50:7867/pmedia/listen") as ws:
             ws.receive_json()
+
+
+def test_a_continuous_conversation_opens_and_closes_with_awake_events(monkeypatch):
+    monkeypatch.setattr(listen, "Vad", LoudVad)
+    said = iter(["Mira, hello", "what's on tonight", "that will be all"])
+    monkeypatch.setattr(listen, "transcribe", lambda u, wake_word="": next(said))
+    out = []
+
+    async def send(m):
+        out.append(m)
+
+    async def go():
+        s = listen.Session(send)
+        await s.message({"config": {"wake_word": "Mira", "wake_mode": "continuous", "sleep_phrase": "that will be all"}})
+        await s.audio(_pcm(frames(*[("speech", 1), ("quiet", 1)] * 3)))
+        await asyncio.gather(*s.tasks)
+    asyncio.run(go())
+    assert [(m["on"], m["why"]) for m in out if m["type"] == "awake"] == [(True, "wake word"), (False, "sleep phrase")]
+    assert [m["send"] for m in out if m["type"] == "heard"] == ["hello", "what's on tonight", ""]
