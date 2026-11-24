@@ -223,13 +223,12 @@ class Segmenter:
                 self.speaking, self.silence_start = True, 0.0
                 self.strict = her_turn
                 out.append({"do": "listening", "on": True})
-                # Energy can't tell your voice from her echo, and only the transcript can —
-                # so while she is audible the abort waits for it (one STT round-trip, and
-                # only where echo is possible). When she is silent it cuts at once.
-                if audible and self.full_duplex:
+                # Energy can't tell your voice from her echo, or from a cough, and only the
+                # transcript can — so the abort always waits for it (one STT round-trip).
+                # Cutting at the gate let any noise cancel a reply she was still thinking
+                # about (predator, 2026-11-24: two "what time is it?" turns lost unsaved).
+                if busy or (audible and self.full_duplex):
                     self.pending_barge_in = True
-                elif busy:
-                    out.append({"do": "abort"})
         else:
             if her_turn:
                 self.strict = True
