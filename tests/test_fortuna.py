@@ -323,4 +323,4 @@ def test_whispers_playback_is_play_back(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
     asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
     said = asyncio.run(media.fast_play(_ctx(tmp_path), "Playback in black.", "Mira"))
-    assert asked[0] == "play back in black" and isinstance(said, media.Done) and o.expanded == [141]
+    assert asked[0] == "play Back In Black" and isinstance(said, media.Done) and o.expanded == [141]
