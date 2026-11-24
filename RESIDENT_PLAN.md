@@ -171,8 +171,21 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       `~/.local/share/applications/cantinero.desktop` (the app menu) with `X-KDE-Shortcuts=Meta+C`,
       links it into `~/.local/share/kglobalaccel/` (Plasma reads default shortcuts only there;
       kglobalaccel picked it up at once on predator, no re-login), and links `~/.local/bin/cantinero`.
-   2. **Settings** (#66). A window from the tray: start at login, show the avatar at start,
-      listening at start.
+   2. ✅ **Settings** (#66). `desktop/shellsettings.py`, a window from the tray's Settings…, each switch
+      applied at once:
+      - **Start at login** enables or disables both units (never starts or stops them; systemd is the
+        source of truth). Greyed out when the units aren't installed.
+      - **Show the avatar at start**, off: she starts in the tray.
+      - **Listening at start**: handed to the page before its scripts run (`window.__cantineroShell`).
+        On a resident, listening is now the machine's: the tray's Listening lasts the session and is
+        never saved to the account (it used to switch the web chat's listening too).
+
+      Kept in `~/.config/pantheon-desktop/settings.json`. Three fixes found on the way, all measured
+      on predator: **hidden** is now see-through and click-through, never unmapped; hands-free's
+      check rode animation frames only, so an unseen window stopped hearing the wake word (1 check
+      in 20 s; now the audio callback drives it when frames stall: 18 in 20 s); and the resident's
+      `/static` now says `Cache-Control: no-cache`, as the server's does, so an `--update` reaches the
+      shell instead of a cached `voice.js`.
    3. **Exit** (#67). The tray's Quit becomes Exit Cantinero: asks first if music is playing, then stops
       the music, the shell and the resident service. Nothing restarts until the launcher or the next login.
 

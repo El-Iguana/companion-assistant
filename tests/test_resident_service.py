@@ -187,3 +187,10 @@ def test_pair_orpheus_pairs_a_player_and_tells_cantinero(tmp_path, monkeypatch, 
     assert (cfg["orpheus_url"], cfg["orpheus_device_id"], cfg["orpheus_token"]) == ("http://homelab:8096", "dev-9", "OTOKEN")
     assert cfg["token"] == "TOK"                                         # the Cantinero pairing is kept
     assert told == [{"orpheus_player_id": "dev-9", "orpheus_player_name": "Predator"}]
+
+
+def test_static_files_are_revalidated(client):
+    # Without it the shell's WebView kept a stale voice.js after an --update.
+    r = client.get("/static/js/voice.js")
+    assert r.headers["cache-control"] == "no-cache"
+    assert client.get("/static/js/voice.js", headers={"If-None-Match": r.headers["etag"]}).status_code == 304

@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tray import Tray, MenuItem  # noqa: E402
 from kwin import KWinGeometry  # noqa: E402
 import music  # noqa: E402
+import shellsettings  # noqa: E402
 
 APP_ID = "ai.jotunheim.pantheon.desktop"
 # The tray icon: El Iguana behind the bar. The SNI host looks the icon name up here first.
@@ -73,6 +74,9 @@ class DesktopShell(Gtk.Application):
         self._mi_chars = None
         self._char_ids = {}
         self.tray = None
+        self.hidden = False            # see-through and click-through (see _hide)
+        self.prefs = shellsettings.load()   # this machine's Settings (R6.2)
+        self.settings_win = None
         self.icon_name = "cantinero"
         self.kwin = None
         self._geom = None
@@ -86,8 +90,7 @@ class DesktopShell(Gtk.Application):
         # so the shortcut always answers: with her already on screen, showing changes nothing.
         if self.win:
             was_hidden = self._show()
-            # A new surface takes a moment to map and be placed; wave once she's there.
-            GLib.timeout_add(700 if was_hidden else 0, self._wave)
+            GLib.timeout_add(300 if was_hidden else 0, self._wave)
             return
 
         self.win = Gtk.ApplicationWindow(application=self)
@@ -108,6 +111,16 @@ class DesktopShell(Gtk.Application):
             WebKit.CookiePersistentStorage.SQLITE)
 
         self.view = WebKit.WebView(network_session=nm)
+        # What she does at start comes from this machine's Settings, handed to the page
+        # before its own scripts run (desktop.js reads window.__cantineroShell).
+        ucm = self.view.get_user_content_manager()
+        ucm.add_script(WebKit.UserScript.new(
+            shellsettings.page_script(self.prefs),
+            WebKit.UserContentInjectedFrames.TOP_FRAME,
+            WebKit.UserScriptInjectionTime.START, None, None))
+        # The page's ⚙ button asks for Settings: window.webkit.messageHandlers.cantinero.
+        ucm.connect("script-message-received::cantinero", self._on_page_message)
+        ucm.register_script_message_handler("cantinero", None)
         s = self.view.get_settings()
         for prop, val in (
             ("enable-webgl", True),
@@ -171,6 +184,9 @@ class DesktopShell(Gtk.Application):
 
         self.win.connect("notify::default-width", lambda *_: self._apply_input_region())
         self.win.connect("notify::default-height", lambda *_: self._apply_input_region())
+        if not self.prefs["show_at_start"]:
+            self.hidden = True                     # in the tray, but mapped: still listening
+            self.win.set_opacity(0.0)
         self.win.present()
         GLib.timeout_add(300, self._apply_input_region_once)
 
@@ -316,7 +332,9 @@ class DesktopShell(Gtk.Application):
             import cairo
             w = self.win.get_width() or self.w
             h = self.win.get_height() or self.h
-            if self.click_through and not self.position_mode:
+            if self.hidden:
+                surface.set_input_region(cairo.Region())          # nothing: clicks pass through
+            elif self.click_through and not self.position_mode:
                 strip = cairo.RectangleInt(0, max(0, h - HUD_STRIP_PX), w, HUD_STRIP_PX)
                 surface.set_input_region(cairo.Region(strip))
             else:
@@ -356,6 +374,7 @@ class DesktopShell(Gtk.Application):
             MenuItem(9, "Put her in the corner", self._menu_corner),
             self._mi_through,
             MenuItem(3, is_sep=True),
+            MenuItem(12, "Settings…", self._menu_settings),
             MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
             MenuItem(5, "Quit", lambda _i: self.quit()),
         ]
@@ -364,18 +383,46 @@ class DesktopShell(Gtk.Application):
         if not self.tray.start():
             self.tray = None
 
+    # Hidden is see-through and click-through, never unmapped. An unmapped WebView is a
+    # hidden page, and WebKit throttles it: measured on predator 2026-11-24, the mic
+    # loop ran 1 block in 20 s hidden against 20 shown, so hiding her made her deaf to
+    # the wake word. Kept mapped, she keeps listening, and her place never changes.
     def _menu_toggle_visible(self, *_):
         if not self.win:
             return
-        if self.win.get_visible():
-            # Capture before hiding: once the surface is gone KWin has no window
-            # to report on, so a poll after this point returns nothing and the
-            # last known position would be however stale the 4s timer left it.
-            if self.kwin:
-                self.kwin.request()
-            self.win.set_visible(False)
-        else:
+        if self.hidden:
             self._show()
+        else:
+            self._hide()
+
+    def _on_page_message(self, _ucm, value):
+        try:
+            msg = value.to_string()
+        except Exception:                                  # noqa: BLE001
+            return
+        if msg == "settings":
+            self._menu_settings()
+
+    def _menu_settings(self, *_):
+        if self.settings_win is None:
+            self.settings_win = shellsettings.SettingsWindow(self, self.prefs, self._on_prefs)
+            self.settings_win.connect("close-request", self._on_settings_closed)
+        self.settings_win.present()
+
+    def _on_settings_closed(self, *_):
+        self.settings_win = None
+        return False                               # let it close
+
+    def _on_prefs(self, prefs: dict):
+        self.prefs = prefs
+        shellsettings.save(prefs)
+
+    def _hide(self):
+        if not self.win:
+            return
+        self.hidden = True
+        self.win.set_opacity(0.0)
+        self._apply_input_region()
 
     def _wave(self):
         """Her hello (vtuber.mjs listens for avatar:wave; a card with no 3D avatar ignores it,
@@ -390,15 +437,11 @@ class DesktopShell(Gtk.Application):
         """Show and raise her. Returns True if she was hidden."""
         if not self.win:
             return False
-        was_hidden = not self.win.get_visible()
-        self.win.set_visible(True)
+        was_hidden = self.hidden
+        self.hidden = False
+        self.win.set_opacity(1.0)
         self.win.present()
-        if was_hidden:
-            # Hiding destroys the Wayland surface and showing makes a NEW one,
-            # which the compositor places wherever it likes -- so both the input
-            # region and the position have to be reapplied, not just the region.
-            GLib.timeout_add(250, self._apply_input_region_once)
-            GLib.timeout_add(400, self._restore_geometry)
+        self._apply_input_region()
         return was_hidden
 
     # -- character switching -------------------------------------------------
