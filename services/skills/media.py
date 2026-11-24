@@ -539,7 +539,11 @@ _FAST = [
     # album (R5, 2026-11-24). "Continue" stays hers; it is as often about the conversation.
     (re.compile(rf"^(?:resume|unpause|keep playing|resume{_IT}|unpause{_IT}|continue the (?:music|song|track|playback)|"
                 rf"start{_IT} again|play it again|play|play (?:the )?music)$"), {"type": "resume"}),
-    (re.compile(rf"^(?:skip|next|skip{_IT}|next{_IT}|play the next(?: (?:song|track|one))?)$"), {"type": "next"}),
+    # "Next" said any plain way (user, 2026-11-24: fast-track "Next"): "play next", "go to the
+    # next song", "skip to the next one", "the next song", "next song please".
+    (re.compile(r"^(?:(?:skip|next|move on|skip ahead)(?: (?:the |this |that )?(?:music|song|track|tune|one|it))?|"
+                r"(?:(?:play|go to|skip to|on to|onto|move on to|jump to)(?: the)? |the )?next(?: (?:song|track|tune|one))?)$"),
+     {"type": "next"}),
     (re.compile(rf"^(?:previous|go back|previous{_IT}|go back a (?:song|track)|"
                 rf"(?:play )?the (?:previous|last) (?:song|track|one))$"), {"type": "previous"}),
     (re.compile(r"^(?:turn (?:it|the music|the volume|this) up|turn up the (?:music|volume)|louder|"
