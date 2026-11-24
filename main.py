@@ -36,6 +36,7 @@ from services.kobold import KoboldClient, ExprEvent, ToolCallsEvent
 from services import skills as skills_rt
 import services.skills.media as media_skill  # registers the DJ skill
 import services.skills.memory as memory_skill  # registers memory commands (#22)
+from services import quick
 from services import card_io, context, prompt_builder, memory, assistant_memory, expressions, tts, stt, auth, vrm
 
 # --------------------------------------------------------------------------
@@ -1713,7 +1714,18 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                 acc = await media_skill.fast_control(skill_ctx, fast)
                 answered = True
                 timing.append(f"fast {time.monotonic() - t_turn:.2f}s")
-            elif not req.regenerate and "dj" in (card.skills or []):
+            if fast is None and not req.regenerate:
+                # The time, the date, what's playing: answered here, said aloud (#101). A
+                # model turn took ~20 s for a line the clock already knows.
+                t = time.monotonic()
+                dj = "dj" in (card.skills or [])
+                quick_line = await quick.answer(
+                    req.input_text, card.name, prefer=player_id,
+                    players=(lambda: media_skill._residents(cur.user.id)) if dj else None)
+                timing.append(f"quick {time.monotonic() - t:.2f}s{'' if quick_line else ' (no)'}")
+                if quick_line:
+                    acc, answered = quick_line, True
+            if not answered and fast is None and not req.regenerate and "dj" in (card.skills or []):
                 # "Play …" with one clear match: Fortuna + Orpheus, no model turn (~1 s).
                 t = time.monotonic()
                 lane = await media_skill.fast_play(skill_ctx, req.input_text, card.name)
