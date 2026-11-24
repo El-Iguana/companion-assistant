@@ -118,3 +118,49 @@ def test_not_music_goes_to_her_as_before(cur, session, monkeypatch):
         resp = await main.chat(main.ChatRequest(session_id=session.id, input_text="weather tomorrow?"), cur=cur)
         return _events([c if isinstance(c, str) else c.decode() async for c in resp.body_iterator])
     assert {"token": "It'll be sunny."} in asyncio.run(go())
+
+
+def test_the_memory_gate_leaves_out_what_fortuna_is_sure_holds_nothing(monkeypatch):
+    from models.schema import ChatMessage
+    from services import assistant_memory
+
+    verdicts = {"morning": ("nothing", 0.95), "Good night Mira.": ("nothing", 0.96),
+                "Keep your answers short in the mornings.": ("nothing", 0.83),     # doubted: kept
+                "I'm vegetarian.": ("fact", 0.9)}
+
+    async def choose(state, instructions, criteria):
+        return verdicts.get(state)
+    monkeypatch.setattr(fortuna, "choose", choose)
+    turns = [ChatMessage(role="user", content=t) for t in verdicts]
+    kept = asyncio.run(assistant_memory.worth_reading(turns))
+    assert [m.content for m in kept] == ["Keep your answers short in the mornings.", "I'm vegetarian."]
+    fake_fortuna(monkeypatch, {})                                    # Fortuna down: every turn
+    assert len(asyncio.run(assistant_memory.worth_reading(turns))) == 4
+
+
+def test_junk_notes_are_dropped_and_real_ones_kept():
+    from services.assistant_memory import _junk_notes
+    junk = ["(empty)", "Updated list:", "</assink>", "The interaction shows Brian checking if Mira is awake",
+            "None.", "The current list is empty, and remains so"]
+    real = ["Brian needs the API key by Friday", "Migration to the new server is half done",
+            "Tom and Bill visit next month"]
+    assert _junk_notes(junk + real) == real
+
+
+def test_a_fold_of_pure_small_talk_spends_no_model_time(monkeypatch):
+    from models.schema import AssistantMemory, ChatMessage, ChatSession, Persona
+    from services import assistant_memory
+
+    async def choose(state, instructions, criteria):
+        return ("nothing", 0.97)
+    monkeypatch.setattr(fortuna, "choose", choose)
+
+    class NoKobold:
+        async def generate_answer(self, *a, **k):
+            raise AssertionError("the model was asked to fold small talk")
+    s = ChatSession(character_id="c", persona_id="p", messages=[
+        ChatMessage(role="user", content="morning"), ChatMessage(role="char", content="Good morning."),
+        ChatMessage(role="user", content="ok carry on"), ChatMessage(role="char", content="Very good.")])
+    mem = AssistantMemory(notes=["Brian needs the API key by Friday"])
+    changed = asyncio.run(assistant_memory.fold(NoKobold(), mem, s, CharacterCard(name="Mira"), Persona(name="Brian")))
+    assert changed and mem.swept_sessions[s.id] == 4 and mem.notes == ["Brian needs the API key by Friday"]

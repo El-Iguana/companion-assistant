@@ -111,6 +111,22 @@ def _clean(line: str, cap: int) -> str:
     return line[:cap]
 
 
+# Lines the notes pass writes that are no note: placeholders, list headers, markup, and prose
+# about the conversation itself. All four came back from Cydonia-24B on a transcript of pure
+# small talk ("(empty)", "Updated list:", "</assink>", "The interaction shows Brian
+# checking if Mira is awake"), and each would be injected into every later prompt.
+_JUNK_NOTE = re.compile(
+    r"^\(?\s*(?:empty|none|nothing|no notes?|n/?a)\s*\)?\.?$"          # placeholders
+    r"|:\s*$"                                                       # a header
+    r"|</?[a-z_]+>"                                                  # markup
+    r"|^(?:the|this) (?:interaction|conversation|exchange|chat|new activity|current list|list)\b"
+    r"|\b(?:updated|current) (?:list|notes)\b", re.I)
+
+
+def _junk_notes(notes: list[str]) -> list[str]:
+    return [n for n in notes if not _JUNK_NOTE.search(n)]
+
+
 def _norm(t: str) -> str:
     return " ".join(t.lower().replace(".", "").split())
 
@@ -229,6 +245,38 @@ async def extract(kobold, mem: AssistantMemory, transcript: str,
     return directives[:max_new], facts[:max_new]
 
 
+# Fortuna's "nothing to remember" at this confidence or more leaves a user turn out of the
+# extraction (eval/memory_decisions, 2026-11-23: 31 % of turns, none wrongly; the two real
+# instructions it doubted scored 0.63 and 0.83, so they still reach the extractor).
+GATE_MIN = 0.9
+_GATE_LABELS = {
+    "instruction": "a standing instruction for how the assistant should behave from now on",
+    "fact": "a lasting fact about the user or their life",
+    "event": "something time-bound about the user: a plan, appointment or visit",
+    "nothing": "nothing worth remembering: small talk, a one-off request, a question, a passing mood",
+}
+
+
+async def worth_reading(user_turns: list) -> list:
+    """The user turns the extractor should read: all of them, less those Fortuna is sure hold
+    nothing. KoboldCPP invented 21 standing instructions from 48 such turns × 3 ("Play some
+    jazz", "Good night Mira"); a turn it never sees, it cannot mine. Fortuna off or down:
+    every turn, as before."""
+    from services import fortuna
+
+    keep = []
+    for m in user_turns:
+        got = await fortuna.choose(m.content, "What, if anything, should the assistant remember "
+                                   "long-term from this message from the user?", _GATE_LABELS)
+        if got is not None and got[0] == "nothing" and got[1] >= GATE_MIN:
+            continue
+        keep.append(m)
+    if len(keep) < len(user_turns):
+        print(f"[assistant-memory] gate: {len(user_turns) - len(keep)} of {len(user_turns)} "
+              "user turn(s) hold nothing to remember", flush=True)
+    return keep
+
+
 async def fold(kobold, mem: AssistantMemory, session: ChatSession,
                card: CharacterCard, persona: Persona, upto: int | None = None,
                max_tokens: int = 400, extract_items: bool = True,
@@ -254,6 +302,14 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
 
     done, left, lo = start, max_new, start
     for end, transcript in chunks:
+        users = [m for m in session.messages[lo:end] if m.role == "user"]
+        turns = await worth_reading(users) if extract_items else users
+        if users and not turns:
+            # Fortuna is sure no user turn here holds anything: small talk. The notes stand
+            # as they are and no model time is spent (a fold here took ~50 s and returned
+            # junk notes). Fortuna down or unsure keeps every turn, so this never fires.
+            done = lo = end
+            continue
         prompt = NOTES_PROMPT.format(char=char, user=user, max_notes=MAX_NOTES,
                                      notes="\n".join(f"- {n}" for n in mem.notes) or "(empty)",
                                      transcript=transcript)
@@ -269,7 +325,7 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
         notes = [n for n in notes if n and not n.upper().startswith("NONE")]
         # Extraction runs after this, so the check is against what is already
         # stored; a directive learned in this same pass is caught on the next fold.
-        notes = _drop_status_notes(notes, char, user)
+        notes = _junk_notes(_drop_status_notes(notes, char, user))
         mem.notes = _drop_restated(
             notes, [d.text for d in mem.directives] + [f.text for f in mem.facts])[:MAX_NOTES]
         done = end
@@ -288,8 +344,7 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
             # is deterministic: it cannot mine what it cannot see. Same shape as the
             # companion pipeline indexing user turns only, for the same reason —
             # the assistant's replies restate the user wrapped in personality.
-            said = _transcript([m for m in session.messages[lo:end] if m.role == "user"],
-                               char, user)
+            said = _transcript(turns, char, user)
             new_d, new_f = ((await extract(kobold, mem, said, char, user, max_new=left))
                             if said.strip() else ([], []))
             for t in new_d:
