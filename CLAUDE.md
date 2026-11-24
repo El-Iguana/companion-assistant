@@ -788,6 +788,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     by Fortuna (the music library holds audiobooks), rebuilt in the background after 6 h; each pick
     is over a random 24 (speed, and variety). Orpheus has no genres for this library. A name
     scoring ≥ 0.9 in Orpheus always wins over "described".
+  - **Either-or without the model** (#81). A tie neither settles: a fixed question at once ("Which one:
+    A, B, C, or one of 2 more?", said aloud), kept per session for 90 s (`media._pending`); the next
+    line is matched to up to five options by Fortuna (≥ 0.7) and played. Anything else clears it and
+    the turn goes on as usual. A change of mind in front ("never mind, play …") is stripped like
+    "can you".
   - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
     marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of
