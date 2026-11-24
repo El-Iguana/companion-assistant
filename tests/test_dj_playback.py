@@ -72,20 +72,14 @@ def test_a_clear_match_plays_at_once(tmp_path, monkeypatch):
     assert o.sent[0][1]["start_index"] == 0
 
 
-def test_an_ambiguous_match_asks_and_the_choice_survives_the_turn(tmp_path, monkeypatch):
+def test_an_ambiguous_match_plays_one_and_an_id_still_plays(tmp_path, monkeypatch):
     o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR, ambiguous=True)
     ctx = _ctx(tmp_path)
-    out = asyncio.run(media._play(ctx, {"query": "sigur ros"}))
-    assert out["played"] is False and out["say"].startswith("( )") and not o.sent
-    assert [c["id"] for c in out["choices"]] == ["9042", "9050"] and "id" in out["next"]
-    again = asyncio.run(media._play(ctx, {"query": "Sigur Ros "}))     # the same call again: ask first
-    assert again["error"] == "ASK_FIRST" and len(again["choices"]) == 2 and not o.sent
-    note = skills.REGISTRY["dj"].note(ctx)
-    assert "Ágætis byrjun" in note and "[id 9050]" in note              # the next turn knows the choices
-    picked = asyncio.run(media._play(ctx, {"id": "9050"}))
-    assert picked["playing"] == "Ágætis byrjun — Sigur Rós"
-    assert _plays(o) == [("p1", 9050)]
-    assert "waiting" not in skills.REGISTRY["dj"].note(ctx)            # answered: forgotten
+    out = asyncio.run(media._play(ctx, {"query": "sigur ros"}))      # never a question (user, 2026-11-24)
+    assert out["played"] is True and "choices" not in out and len(_plays(o)) == 1
+    assert "waiting" not in skills.REGISTRY["dj"].note(ctx)
+    picked = asyncio.run(media._play(ctx, {"id": "9050"}))           # an id from media_find
+    assert picked["played"] and _plays(o)[-1] == ("p1", 9050)
 
 
 def test_a_playlist_plays_by_its_id(tmp_path, monkeypatch):

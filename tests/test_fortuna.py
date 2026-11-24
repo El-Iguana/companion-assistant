@@ -72,7 +72,7 @@ def test_fast_lane_plays_a_clear_match_without_the_model(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("intent,ambiguous", [(("play_music", 0.5), False), (("other", 0.97), False),
-                                              (("play_music", 0.9), True), (None, False)])
+                                              (None, False)])
 def test_fast_lane_hands_anything_unsure_to_her(tmp_path, monkeypatch, intent, ambiguous):
     o = FakeOrpheus(monkeypatch, [PREDATOR], SIGUR, ambiguous=ambiguous)
     fake_fortuna(monkeypatch, {"want the assistant": intent})
@@ -240,65 +240,35 @@ def test_fortuna_settles_what_the_title_cannot_and_only_when_sure(tmp_path, monk
                                "Which of these": ("Crash — Someone Else", 0.93)})
     asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira"))
     assert o.expanded == [2]
-    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9),
-                               "Which of these": ("Crash — Someone Else", 0.55)})
-    said = asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira"))
-    assert said == "Which one: Crash by Dave Matthews Band, or Crash by Someone Else?" and not o.sent   # asks (#81)
 
 
-# --- either-or without her (#81) ---
+# --- a tie nothing settles: one at random, never a question (user, 2026-11-24) ---
 
-def _either(monkeypatch, tmp_path, answer):
+@pytest.mark.parametrize("fortuna_says", [("Crash — Someone Else", 0.55), None])
+def test_an_unsettled_tie_plays_one_of_them_never_asks(tmp_path, monkeypatch, fortuna_says):
     two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
     o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which of these": None,
-                               "Which did the user choose": answer})
-    ctx = _ctx(tmp_path, session_id="s1")
-    asked = asyncio.run(media.fast_play(ctx, "play Crash", "Mira"))
-    assert asked.startswith("Which one:") and not isinstance(asked, media.Done)   # a question: said aloud
-    return o, ctx
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which of these": fortuna_says})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "play Crash", "Mira"))
+    assert isinstance(said, media.Done) and "Which" not in said and o.expanded in ([1], [2])
 
 
-def test_the_answer_to_her_question_plays_without_her(tmp_path, monkeypatch):
-    o, ctx = _either(monkeypatch, tmp_path, ("2", 0.92))
-    said = asyncio.run(media.fast_play(ctx, "the second one", "Mira"))
-    assert isinstance(said, media.Done) and "Someone Else" in said and o.expanded == [2]
-
-
-def test_something_else_after_her_question_goes_on_as_usual(tmp_path, monkeypatch):
-    o, ctx = _either(monkeypatch, tmp_path, ("none", 0.95))
-    fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.95), "Which did the user choose": ("none", 0.95)})
-    assert asyncio.run(media.fast_play(ctx, "what time is it", "Mira")) is None and not o.sent
-    assert media._ask_key(ctx) not in media._pending                # asked once, then forgotten
-
-
-def test_an_unsure_answer_goes_to_her(tmp_path, monkeypatch):
-    o, ctx = _either(monkeypatch, tmp_path, ("1", 0.5))
-    fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.9), "Which did the user choose": ("1", 0.5)})
-    again = asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira"))
-    assert again == "Sorry, which one: the first, or the second?" and not o.sent    # once more, fixed words
-    assert asyncio.run(media.fast_play(ctx, "hmm, the Dave one maybe", "Mira")) is None and not o.sent   # then hers
-
-
-def test_no_question_when_the_options_sound_the_same():
-    same = [{"id": "1", "name": "Crash — Dave Matthews Band (1996)"}, {"id": "2", "name": "Crash — Dave Matthews Band (2010)"}]
-    raw = [{"score": 0.8}, {"score": 0.8}]
-    assert media.either_or(same, raw) == []
-
-
-def test_more_than_three_options_say_three_and_match_all(tmp_path, monkeypatch):
+def test_any_of_many_ties_can_be_picked(monkeypatch):
     six = [_track(i, "Greatest Hits", a) for i, a in enumerate(["B.B. King", "Evanescence", "Jimi Hendrix",
                                                                 "The Rolling Stones", "Bon Jovi"], 1)]
-    o = FakeOrpheus(monkeypatch, [PREDATOR], six, ambiguous=True)
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which of these": None,
-                               "Which did the user choose": ("4", 0.9)})
-    ctx = _ctx(tmp_path, session_id="s1")
-    asked = asyncio.run(media.fast_play(ctx, "play Greatest Hits", "Mira"))
-    assert asked == ("Which one: Greatest Hits by B.B. King, Greatest Hits by Evanescence, "
-                     "Greatest Hits by Jimi Hendrix, or one of 2 more?")
-    said = asyncio.run(media.fast_play(ctx, "the Stones one", "Mira"))
-    assert "Rolling Stones" in said and o.expanded == [4]
+    cands = [{"id": str(c["item_id"]), "name": c["display"], "playable": True} for c in six]
+    seen = {media.any_pick(cands, six) for _ in range(200)}
+    assert seen == {0, 1, 2, 3, 4}
+    cands[2]["playable"] = False
+    assert 2 not in {media.any_pick(cands, six) for _ in range(100)}
+
+
+def test_the_tool_never_asks_either(tmp_path, monkeypatch):
+    two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
+    fake_fortuna(monkeypatch, {"Which of these": None})
+    res = asyncio.run(media._play(_ctx(tmp_path), {"query": "Crash"}))
+    assert res["played"] and "Which" not in res["final"] and o.expanded in ([1], [2])
 
 
 @pytest.mark.parametrize("text", ["never mind, play Santana", "Mira, actually play Santana",
@@ -365,3 +335,30 @@ def test_a_tie_of_one_artists_songs_is_any_of_them():
     assert media.one_artist_pick(NICKS, random.Random(1)) in range(4)
     mixed = NICKS[:2] + [_track(9, "Crash", "Dave Matthews Band", 1.0)]
     assert media.one_artist_pick(mixed) is None
+
+
+# --- a short title Fortuna misreads still plays when Orpheus has the exact name (2026-11-24) ---
+
+@pytest.mark.parametrize("intent", [("other", 0.52), ("play_music", 0.59), ("control_music", 0.6), None])
+def test_play_with_an_exact_name_takes_the_lane_whatever_fortuna_thought(tmp_path, monkeypatch, intent):
+    crash = [_track(7, "Crash", "Dave Matthews Band (1996)", 1.0), _track(8, "Crash Into Me", "Dave Matthews Band", 0.7)]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], crash)
+    fake_fortuna(monkeypatch, {"want the assistant": intent})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Play Crash.", "Mira"))
+    assert isinstance(said, media.Done) and o.expanded == [7]
+
+
+def test_an_unsure_play_of_a_tie_needs_the_exact_title(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.59)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Play Back in Black.", "Mira"))
+    assert isinstance(said, media.Done) and o.expanded == [141]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("other", 0.55)})
+    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play rock", "Mira")) is None and not o.sent
+
+
+def test_a_player_control_fortuna_is_sure_of_is_not_a_play(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], [_track(9, "It Again", "Someone", 1.0)])
+    fake_fortuna(monkeypatch, {"want the assistant": ("control_music", 0.9)})
+    assert asyncio.run(media.fast_play(_ctx(tmp_path), "play it again", "Mira")) is None and not o.sent

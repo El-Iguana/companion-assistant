@@ -119,13 +119,10 @@ def test_the_tool_settles_a_tie_by_title(tmp_path, monkeypatch):
     assert out["played"] and o.expanded == [141]
 
 
-def test_the_tool_asks_either_or_itself_and_the_answer_takes_the_fast_lane(tmp_path, monkeypatch):
+def test_the_tool_picks_one_of_a_tie_itself(tmp_path, monkeypatch):
     two = [_track(1, "Crash", "Dave Matthews Band"), _track(2, "Crash", "Someone Else")]
     o = FakeOrpheus(monkeypatch, [PREDATOR], two, ambiguous=True)
-    fake_fortuna(monkeypatch, {"name what to play": ("named", 0.97), "Which of these": None,
-                               "Which did the user choose": ("1", 0.9)})
-    ctx = _ctx(tmp_path, session_id="s1")
-    out = asyncio.run(media._play(ctx, {"query": "Crash"}))
-    assert out["asked"] and out["final"].startswith("Which one: Crash by Dave Matthews Band")
-    said = asyncio.run(media.fast_play(ctx, "the first one", "Mira"))
-    assert isinstance(said, media.Done) and o.expanded == [1]
+    fake_fortuna(monkeypatch, {"name what to play": ("named", 0.97), "Which of these": None})
+    out = asyncio.run(media._play(_ctx(tmp_path, session_id="s1"), {"query": "Crash"}))
+    assert out["played"] and "Which" not in out["final"] and o.expanded in ([1], [2])
+
