@@ -817,6 +817,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     Fortuna names it at ≥ 0.8; a date answer also needs "it/today/now/the date" in the question
     ("What day is Thanksgiving?" read as the date at 0.87). "What's playing" only for a DJ card.
     Measured on 36 lines: 35 right, 1 left to her ("Time check."), 0 wrong.
+  - **The calendar is worked out in code** (#103, `services/calendar_facts.py`). The model can't
+    count days: "Thanksgiving was yesterday" two days before it, Christmas 28 days off (31), New
+    Year's Day a Monday (a Friday). US holidays (fixed, nth-weekday, Easter by computus) answer
+    "when is / what day is / how many days until <holiday>" in the quick path, said aloud
+    (~0.1 s). Any other date talk (weekdays, months, "until", a holiday name, `_ASKS_CALENDAR`)
+    puts the next 21 days, each with its "+N", and the holidays of the next 120 days in the
+    trailing note: the model's date answers went from ~6/12 right to 12/12.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
   - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns

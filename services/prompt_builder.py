@@ -261,6 +261,14 @@ _ASKS_TIME = re.compile(
     r"\b(what time|what day|what date|what's the date|whats the date|today's date|"
     r"the time|the date)\b", re.I)
 
+# Any other talk of dates: weekdays, months, "until", a holiday. Brings the worked-out
+# calendar (services/calendar_facts.py), not the clock.
+_ASKS_CALENDAR = re.compile(
+    r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|week|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"until|till|days|holiday|holidays|christmas|thanksgiving|easter|halloween|new year'?s?|"
+    r"valentine'?s?|birthday|anniversary)\b", re.I)
+
 _FOCUS_QUOTE_CHARS = 200
 
 
@@ -393,6 +401,12 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     # after the history, so the system block, and KoboldCPP's cached prefix, stay put.
     if memory_tail:
         tail.append(sub(memory_tail))
+    if _ASKS_TIME.search(last_user) or _ASKS_CALENDAR.search(last_user):
+        # The model can't count days ("Thanksgiving was yesterday", two days before it;
+        # Christmas 28 days off, at 31): the next three weeks and the coming holidays,
+        # worked out (#103).
+        from services import calendar_facts
+        tail.append(calendar_facts.calendar_note())
     if _ASKS_TIME.search(last_user):
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "12"
