@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Cantinero's launcher on a resident machine (RESIDENT_PLAN.md R6.1): the app menu's
+# "Cantinero" and the global shortcut (Meta+C) both run this.
+#
+#   cantinero      start her (the resident service and the shell), or, if she is already
+#                  running, bring her to the front: shown even when hidden to the tray
+#
+# The two systemd user units are the ones resident/install.sh writes. Starting them here
+# doesn't enable them, so this works the same whether or not she starts at login.
+set -uo pipefail
+
+APP_ID="ai.jotunheim.pantheon.desktop"
+APP_PATH="/${APP_ID//./\/}"
+
+if systemctl --user is-active -q cantinero-shell.service; then
+  # GApplication answers org.freedesktop.Application on its bus name: Activate() runs the
+  # shell's do_activate, which shows and raises the window.
+  exec gdbus call --session --dest "$APP_ID" --object-path "$APP_PATH" \
+    --method org.freedesktop.Application.Activate '{}' >/dev/null
+fi
+
+# The shell Wants= the resident, so starting the shell would bring it too; naming both
+# keeps a failure of either in this command's exit status.
+systemctl --user start cantinero-resident.service cantinero-shell.service

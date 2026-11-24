@@ -81,8 +81,10 @@ class DesktopShell(Gtk.Application):
 
     # -- lifecycle ---------------------------------------------------------
     def do_activate(self):
+        # A second activation is the launcher (desktop/cantinero) asking for her: show her
+        # even when she was hidden to the tray, the same way the tray's Show does.
         if self.win:
-            self.win.present()
+            self._show()
             return
 
         self.win = Gtk.ApplicationWindow(application=self)
@@ -370,8 +372,15 @@ class DesktopShell(Gtk.Application):
                 self.kwin.request()
             self.win.set_visible(False)
         else:
-            self.win.set_visible(True)
-            self.win.present()
+            self._show()
+
+    def _show(self):
+        if not self.win:
+            return
+        was_hidden = not self.win.get_visible()
+        self.win.set_visible(True)
+        self.win.present()
+        if was_hidden:
             # Hiding destroys the Wayland surface and showing makes a NEW one,
             # which the compositor places wherever it likes -- so both the input
             # region and the position have to be reapplied, not just the region.

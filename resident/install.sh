@@ -14,6 +14,9 @@
 #   image  localhost/cantinero-resident       the same image as the server, run as PANTHEON_ROLE=resident
 #   ~/.config/systemd/user/cantinero-resident.service   the service: local STT/TTS, the line to the server
 #   ~/.config/systemd/user/cantinero-shell.service      the avatar window, the tray, the music player
+#   ~/.local/share/applications/cantinero.desktop       the launcher in the app menu (R6.1), linked into
+#   ~/.local/share/kglobalaccel/cantinero.desktop       kglobalaccel/ so Plasma gives it Meta+C
+#   ~/.local/bin/cantinero                              the launcher, for a terminal
 #
 # Needs: podman, git, python3 with GTK 4, WebKitGTK 6, GStreamer and libsoup 3 bindings
 # (Fedora/Bazzite/Mint desktops have them).
@@ -24,6 +27,9 @@ BRANCH="${CANTINERO_BRANCH:-master}"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/cantinero-resident"
 SRC="$DATA/src"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+SHORTCUTS="${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel"
+BIN="$HOME/.local/bin"
 IMAGE="localhost/cantinero-resident"
 PORT="${RESIDENT_PORT:-7867}"
 
@@ -104,6 +110,34 @@ EOF
   systemctl --user daemon-reload
 }
 
+launcher() {
+  # The app menu's entry and the global shortcut. Plasma reads X-KDE-Shortcuts only from
+  # desktop files in kglobalaccel/ (Konsole's Ctrl+Alt+T is done the same way), so the entry
+  # is linked there too. Rebind it in System Settings -> Keyboard -> Shortcuts.
+  mkdir -p "$APPS" "$SHORTCUTS" "$BIN"
+  cat > "$APPS/cantinero.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Cantinero
+GenericName=Voice assistant
+Comment=El Iguana's bartender — at your service.
+Exec=$SRC/desktop/cantinero
+Icon=$SRC/desktop/icons/cantinero.png
+Terminal=false
+Categories=Utility;
+Keywords=assistant;voice;music;bartender;
+StartupNotify=false
+X-KDE-Shortcuts=Meta+C
+EOF
+  ln -sfn "$APPS/cantinero.desktop" "$SHORTCUTS/cantinero.desktop"
+  ln -sfn "$SRC/desktop/cantinero" "$BIN/cantinero"
+  if command -v update-desktop-database >/dev/null; then update-desktop-database -q "$APPS" 2>/dev/null || true; fi
+}
+
+unlauncher() {
+  rm -f "$APPS/cantinero.desktop" "$SHORTCUTS/cantinero.desktop" "$BIN/cantinero"
+}
+
 start() {
   systemctl --user enable --now cantinero-resident.service
   systemctl --user enable cantinero-shell.service
@@ -127,13 +161,14 @@ case "${1:-}" in
   --uninstall)
     systemctl --user disable --now cantinero-shell.service cantinero-resident.service 2>/dev/null || true
     rm -f "$UNITS/cantinero-shell.service" "$UNITS/cantinero-resident.service"
+    unlauncher
     systemctl --user daemon-reload
     podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
     if [[ "${2:-}" == "--purge" ]]; then rm -rf "$DATA"; echo "removed, with its pairing"; else
       echo "removed (the pairing is kept in $DATA; --purge removes it; remove it in Settings → Residents too)"; fi
     ;;
   --update)
-    check; fetch; build; units
+    check; fetch; build; units; launcher
     systemctl --user restart cantinero-resident.service
     systemctl --user restart cantinero-shell.service 2>/dev/null || true
     say "Updated."
@@ -157,7 +192,7 @@ case "${1:-}" in
     else
       pair_music || echo "(the music can be paired later: $0 --pair-music)"
     fi
-    units; start
-    say "Installed. The avatar and the music player start with your session; the tray icon has both."
+    units; launcher; start
+    say "Installed. She starts with your session; Cantinero in the app menu (or Meta+C) starts her or brings her up."
     ;;
 esac
