@@ -79,7 +79,7 @@ def set_login(on: bool) -> str:
     return login_state()
 
 
-def SettingsWindow(app, prefs: dict, on_change):
+def SettingsWindow(app, prefs: dict, on_change, on_exit=None):
     """The window, opened from the tray. Each switch applies at once."""
     from gi.repository import Gdk, Gtk
 
@@ -151,9 +151,18 @@ def SettingsWindow(app, prefs: dict, on_change):
     note.add_css_class("dim-label")
     box.append(note)
 
-    close = Gtk.Button(label="Close", halign=Gtk.Align.END)
+    buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    if on_exit:
+        # Exit lives here too: the tray is easy to miss (the user didn't find Settings there).
+        leave = Gtk.Button(label="Exit Cantinero", halign=Gtk.Align.START, hexpand=True,
+                           tooltip_text="Stop her, the music and the resident until the next "
+                                        "login or Cantinero in the app menu")
+        leave.connect("clicked", lambda *_: on_exit())
+        buttons.append(leave)
+    close = Gtk.Button(label="Close", halign=Gtk.Align.END, hexpand=not on_exit)
     close.connect("clicked", lambda *_: win.close())
-    box.append(close)
+    buttons.append(close)
+    box.append(buttons)
 
     win.set_child(box)
     return win

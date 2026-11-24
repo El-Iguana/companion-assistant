@@ -2,8 +2,9 @@
 # Cantinero's launcher on a resident machine (RESIDENT_PLAN.md R6.1): the app menu's
 # "Cantinero" and the global shortcut (Meta+C) both run this.
 #
-#   cantinero      start her (the resident service and the shell), or, if she is already
-#                  running, bring her to the front: shown even when hidden to the tray
+#   cantinero         start her (the resident service and the shell), or, if she is already
+#                     running, bring her to the front and make her wave
+#   cantinero --exit  Exit Cantinero (R6.3): the music, the shell and the resident all stop
 #
 # The two systemd user units are the ones resident/install.sh writes. Starting them here
 # doesn't enable them, so this works the same whether or not she starts at login.
@@ -11,6 +12,15 @@ set -uo pipefail
 
 APP_ID="ai.jotunheim.pantheon.desktop"
 APP_PATH="/${APP_ID//./\/}"
+
+if [[ "${1:-}" == "--exit" ]]; then
+  if systemctl --user is-active -q cantinero-shell.service; then
+    # The shell's own exit, so music playing is asked about and the chat is saved.
+    exec gdbus call --session --dest "$APP_ID" --object-path "$APP_PATH" \
+      --method org.gtk.Actions.Activate exit '[]' '{}' >/dev/null
+  fi
+  exec systemctl --user stop cantinero-resident.service
+fi
 
 if systemctl --user is-active -q cantinero-shell.service; then
   # GApplication answers org.freedesktop.Application on its bus name: Activate() runs the

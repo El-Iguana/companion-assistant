@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 import gi
@@ -41,7 +42,7 @@ except Exception:                                        # noqa: BLE001
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("WebKit", "6.0")
-from gi.repository import Gtk, Gdk, GLib, WebKit  # noqa: E402
+from gi.repository import Gtk, Gdk, Gio, GLib, WebKit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tray import Tray, MenuItem  # noqa: E402
@@ -77,6 +78,11 @@ class DesktopShell(Gtk.Application):
         self.hidden = False            # see-through and click-through (see _hide)
         self.prefs = shellsettings.load()   # this machine's Settings (R6.2)
         self.settings_win = None
+        self._exiting = False
+        # `cantinero --exit` reaches this over D-Bus (org.gtk.Actions.Activate "exit").
+        exit_action = Gio.SimpleAction.new("exit", None)
+        exit_action.connect("activate", lambda *_: self._menu_exit())
+        self.add_action(exit_action)
         self.icon_name = "cantinero"
         self.kwin = None
         self._geom = None
@@ -376,7 +382,7 @@ class DesktopShell(Gtk.Application):
             MenuItem(3, is_sep=True),
             MenuItem(12, "Settings…", self._menu_settings),
             MenuItem(4, "Reload", lambda _i: self.view and self.view.reload()),
-            MenuItem(5, "Quit", lambda _i: self.quit()),
+            MenuItem(5, "Exit Cantinero", self._menu_exit),
         ]
         self.tray = Tray(APP_ID, "Cantinero", self.icon_name, items,
                          on_activate=self._menu_toggle_visible, icon_theme_path=ICON_DIR)
@@ -405,9 +411,57 @@ class DesktopShell(Gtk.Application):
 
     def _menu_settings(self, *_):
         if self.settings_win is None:
-            self.settings_win = shellsettings.SettingsWindow(self, self.prefs, self._on_prefs)
+            self.settings_win = shellsettings.SettingsWindow(self, self.prefs, self._on_prefs,
+                                                             on_exit=self._menu_exit)
             self.settings_win.connect("close-request", self._on_settings_closed)
         self.settings_win.present()
+
+    # -- exit (R6.3) ---------------------------------------------------------
+    # Everything stops: the music, the avatar, the tray, the player and the resident service
+    # (the mic, her voice, the line to the server). Nothing restarts it until the launcher or
+    # the next login: the shell exits 0, so its unit's Restart=on-failure leaves it down, and a
+    # stopped unit is never restarted by Restart=always.
+    def _menu_exit(self, *_):
+        if self._exiting:
+            return
+        if self.player and self.player.playing():
+            d = Gtk.AlertDialog(message="Exit Cantinero?",
+                                detail="The music is playing; it stops too.",
+                                buttons=["Cancel", "Exit"], cancel_button=0, default_button=1)
+            d.choose(self.settings_win, None, self._on_exit_answer)
+            return
+        self._exit()
+
+    def _on_exit_answer(self, dialog, res):
+        try:
+            if dialog.choose_finish(res) == 1:
+                self._exit()
+        except GLib.Error:
+            pass                                   # dismissed: same as Cancel
+
+    def _exit(self):
+        self._exiting = True
+        print("[shell] exit: stopping the music, the shell and the resident")
+        if self.player:
+            self.player.stop()                     # reports where it stopped, closes the session
+        if self.view:
+            self.view.load_uri("about:blank")      # pagehide: the chat is saved to memory
+        if self.settings_win:
+            self.settings_win.close()
+        if self.win:
+            self._hide()
+        # A moment for those requests to leave before the process does.
+        GLib.timeout_add(1200, self._exit_finish)
+
+    def _exit_finish(self):
+        try:
+            # --no-block: the container takes up to 5 s to stop; nothing here needs to wait.
+            subprocess.run(["systemctl", "--user", "--no-block", "stop", "cantinero-resident.service"],
+                           capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[shell] could not stop the resident: {e}")
+        self.quit()
+        return False
 
     def _on_settings_closed(self, *_):
         self.settings_win = None
