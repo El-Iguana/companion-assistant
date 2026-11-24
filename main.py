@@ -1772,7 +1772,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                 finals = [r.get("final") for _c, r in results]
                 if finals and all(isinstance(f, str) and f for f in finals):
                     text = " ".join(finals)
-                    if all(r.get("ok") and c["name"] in ("media_play", "media_control") for c, r in results):
+                    if all(r.get("ok") and not r.get("asked") and c["name"] in ("media_play", "media_control")
+                           for c, r in results):
                         yield _sse({"quiet": True})   # the music did what was asked: shown, not said
                     acc += text
                     yield _sse({"token": text})

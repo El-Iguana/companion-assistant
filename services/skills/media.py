@@ -350,13 +350,35 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
             if pending and _pending_query(ctx) == query.strip().lower():
                 # The same question again in the same turn: answer with the choices, not a search.
                 return dict(_choices(pending, ""), ok=False, error="ASK_FIRST")
-            cands, how = await _search(st, query, args.get("kinds"))
+            # One call does what the fast lane does, and its line ends the turn (#82): a model
+            # pass after a tool costs ~18 s, and she used to take three or four per play.
+            from services import fortuna
+            (cands, how), kind = await asyncio.gather(
+                _search(st, query, args.get("kinds")),
+                fortuna.choose(query, "Does the user name what to play, or describe the kind of music they want?",
+                               _PLAY_KINDS))
+            clear = cands and not how["ambiguous"] and how["top"] >= NAMED_SCORE
+            if kind and kind[0] == "described" and kind[1] >= DESCRIBED_MIN and not clear:
+                said = await _play_described(ctx, st, query)
+                if said:
+                    return {"ok": True, "played": True, "final": said}
             if not cands:
-                return error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {query!r}.")
-            if how["ambiguous"] and len(cands) > 1:
-                _save_pending(ctx, cands[:3], query)
-                return _choices(cands[:3], how["ask"])
+                return dict(error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {query!r}."),
+                            final=f"I can't find {_PLAY_WORDS.sub('', query).strip() or query} in your music.")
             pick = cands[0]
+            if how["ambiguous"] and len(cands) > 1:
+                i = await _settle(query, how["raw"])
+                if i is not None:
+                    pick = cands[i]
+                else:
+                    opts = either_or(cands, how["raw"])
+                    if not opts:
+                        _save_pending(ctx, cands[:3], query)
+                        return _choices(cands[:3], how["ask"])      # she words it
+                    _save_pending(ctx, opts, query)                  # an id still works if she's asked
+                    _pending[_ask_key(ctx)] = {"options": opts, "query": query, "at": time.monotonic()}
+                    return {"ok": True, "played": False, "nothing_is_wrong": True, "final": question(opts),
+                            "asked": True}
         dev = await _target(ctx, st, args.get("player", ""))
         if _just_played(ctx, query or choice_id, dev):
             # The same play to the same player again in the same breath: it's on; don't restart it.
@@ -737,7 +759,8 @@ CONTROL = Tool(
      "required": ["action"]}, _control, status="Working the player…")
 FIND = Tool(
     "media_find",
-    "Search the music library without playing: to answer what's there.",
+    "Search the music library without playing, only to answer what's there. Never before playing: "
+    "media_play searches itself.",
     {"type": "object", "properties": {
         "query": {"type": "string", "maxLength": 200, "description": "What to look for, as the user said it"},
         "kinds": {"type": "array", "maxItems": 4, "items": {"type": "string", "enum": KINDS}}},
