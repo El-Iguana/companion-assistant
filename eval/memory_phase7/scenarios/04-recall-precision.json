@@ -1,7 +1,7 @@
 {
   "name": "recall-precision",
   "issue": "#21",
-  "why": "With a full store, the facts that matter to this turn must be in the prompt and the unrelated ones out. Today block() injects in list order and drops what doesn't fit, so the NEWEST facts are the ones lost, silently. The store here (70 facts) is over the 2,400-character budget, so the newest fact is the one at risk.",
+  "why": "With a full store, the facts that matter to this turn must be in the prompt and the unrelated ones out. Today block() injects in list order and drops what doesn't fit, so the NEWEST facts are the ones lost, silently. The store here (70 facts) is over the 2,400-character budget, so the newest fact is the one at risk. A second check needs real recall: an old fact found because the question asks for it.",
   "steps": [
     {
       "seed": {
@@ -106,6 +106,28 @@
           {
             "label": "the wifi hint",
             "pattern": "wifi"
+          }
+        ]
+      }
+    },
+    {
+      "check": {
+        "bartender": "Mira",
+        "user_says": "When does my car insurance renew?",
+        "expect": [
+          {
+            "label": "an old fact, found for this question",
+            "pattern": "insurance renews in June"
+          }
+        ],
+        "forbid": [
+          {
+            "label": "an unrelated old fact (the film)",
+            "pattern": "Blade Runner"
+          },
+          {
+            "label": "an unrelated old fact (the dentist)",
+            "pattern": "Sousa"
           }
         ]
       }

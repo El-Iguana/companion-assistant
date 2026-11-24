@@ -538,8 +538,81 @@ async def fold(kobold, mem: AssistantMemory, session: ChatSession,
     return True
 
 
+# --- tiered recall (Memory Phase 7, #21) ---------------------------------------------------
+
+CORE_CHARS = 500             # the always-on facts, in the system block
+RECALL_MAX = 6               # facts recalled for a turn, after the history
+RECALL_MIN = 1.0             # at least one real word in common
+_STOP = set("""a an the and or but if of to in on at for with from by about as into over after before is are was
+were be been being do does did have has had i me my mine we our you your he she it its they them their this that
+these those what which who whom whose when where why how can could would should will shall may might must not no
+yes so than then there here just also very too please thanks thank tell know want need like get got make let some
+any all every each one two more most much many own same other such only now again still ever never really""".split())
+
+
+def _words(text: str, also_stop: set[str] = frozenset()) -> set[str]:
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        if len(w) < 3 or w in _STOP or w in also_stop:
+            continue
+        out.add(w[:-1] if w.endswith("s") and len(w) > 4 else w)       # renews ~ renew, walks ~ walk
+    return out
+
+
+def core_facts(mem: AssistantMemory, now: datetime | None = None, budget: int = CORE_CHARS) -> list[MemoryFact]:
+    """The facts always in the prompt: hand-written first, then the most used, then the newest,
+    within CORE_CHARS. A small library fits whole, so it behaves as before."""
+    live = [f for f in mem.facts if f.text.strip() and not expired(f, now)]
+    pos = {f.id: i for i, f in enumerate(live)}                        # later in the list = newer
+    ranked = sorted(live, key=lambda f: (f.origin == "user", f.uses, f.created_at, pos[f.id]), reverse=True)
+    out, room = [], budget
+    for f in ranked:
+        if len(f.text) + 3 > room:
+            continue
+        out.append(f)
+        room -= len(f.text) + 3
+    return sorted(out, key=lambda f: live.index(f))                     # in stored order
+
+
+def recall(mem: AssistantMemory, text: str, user: str = "", now: datetime | None = None,
+           exclude: list[MemoryFact] | None = None) -> list[MemoryFact]:
+    """The other facts that matter to this turn: words in common with what was just said (the
+    user's own name doesn't count), a small bonus for recent ones, a minimum score so small talk
+    recalls nothing. No model: keyword overlap first; embeddings only if this measures poorly."""
+    now = now or datetime.now()
+    said = _words(text, _words(user))
+    if not said:
+        return []
+    skip = {f.id for f in exclude or []}
+    scored = []
+    for f in mem.facts:
+        if f.id in skip or not f.text.strip() or expired(f, now):
+            continue
+        common = said & _words(f.text, _words(user))
+        if not common:
+            continue
+        score = float(len(common))
+        try:
+            if (now - datetime.fromisoformat(f.created_at).replace(tzinfo=None)).days < 7:
+                score += 0.25
+        except ValueError:
+            pass
+        if score >= RECALL_MIN:
+            scored.append((score, f))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [f for _, f in scored[:RECALL_MAX]]
+
+
+def recall_note(facts: list[MemoryFact], char: str, user: str) -> str:
+    if not facts:
+        return ""
+    return (f"Possibly relevant, from what {char} knows about {user}:\n"
+            + "\n".join(f"- {f.text.strip()}" for f in facts))
+
+
 def block(mem: AssistantMemory | None, char: str, user: str,
-          budget_chars: int = BUDGET_CHARS, now: datetime | None = None) -> str:
+          budget_chars: int = BUDGET_CHARS, now: datetime | None = None,
+          facts_only: list[MemoryFact] | None = None) -> str:
     """Render for the system prompt, or "" if there is nothing to say.
 
     Directives are laid out FIRST and are never truncated. They are instructions:
@@ -550,7 +623,8 @@ def block(mem: AssistantMemory | None, char: str, user: str,
     if mem is None:
         return ""
     directives = [d.text.strip() for d in mem.directives if d.text.strip()]
-    facts = [f.text.strip() for f in mem.facts if f.text.strip() and not expired(f, now)]
+    pool = mem.facts if facts_only is None else facts_only
+    facts = [f.text.strip() for f in pool if f.text.strip() and not expired(f, now)]
     notes = [n.strip() for n in live_notes(mem, now) if n.strip()]
     if not (directives or facts or notes):
         return ""

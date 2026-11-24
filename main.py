@@ -405,8 +405,22 @@ def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: Ch
     what eval/memory_phase7 measures. ``session``'s last user message is the turn; ``now`` is
     when (the eval moves it to test expiry)."""
     mem = _load_assistant_memory(cur, session.character_id, persona.id)
-    return {"system": assistant_memory.block(mem, card.name, persona.name, now=now),
-            "trailing": _lately(cur, card, persona, session, now or datetime.now())}
+    now = now or datetime.now()
+    # Tiered recall (#21): a small core of facts always, the rest only when this turn needs
+    # them, after the history, so the system block (KoboldCPP's cached prefix) holds still.
+    core = assistant_memory.core_facts(mem, now)
+    last_user = next((m.content for m in reversed(session.messages) if m.role == "user"), "")
+    recalled = assistant_memory.recall(mem, last_user, persona.name, now, exclude=core)
+    if recalled:
+        stamp = now.isoformat(timespec="seconds")
+        for f in recalled:
+            f.uses += 1
+            f.last_used = stamp
+        _save_assistant_memory(cur, mem)
+    tail = "\n\n".join(x for x in (_lately(cur, card, persona, session, now),
+                                    assistant_memory.recall_note(recalled, card.name, persona.name)) if x)
+    return {"system": assistant_memory.block(mem, card.name, persona.name, now=now, facts_only=core),
+            "trailing": tail}
 
 
 LATELY_TURNS = 4              # the end of her last other conversation (#18)

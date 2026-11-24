@@ -236,7 +236,7 @@ copy when one of them next needs changing.
      pressure: fold when `build_messages` is about to drop turns.
   6. ✅ **#20 — fact lifetimes** (2026-11-23). `kind` lasting or time-bound with `expires`; `created`,
      `last_used`, `uses`. Answers the open decay question below.
-  7. **#21 — tiered recall.** Always: directives plus a small core of user-written and most-used
+  7. ✅ **#21 — tiered recall** (2026-11-23; scenarios 12/15 → **15/15**). Always: directives plus a small core of user-written and most-used
      facts, in the system block. Per turn: other facts and notes scored against the latest user
      turn (keywords plus recency, with a minimum score), in the trailing note **after the
      history**, because a system block that changes every turn invalidates KoboldCPP's cached

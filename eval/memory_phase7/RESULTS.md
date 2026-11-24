@@ -63,3 +63,17 @@ TOTAL 12/15   cross-session-thread 3/3 · shared-basics 3/3 · expiry 3/3 · rec
 
 A new chat knows the end of her last one ("the Memmo Alfama"). It sits after the history, never in
 the system block. Only recall precision is left, which is #21.
+
+## After #20 (fact lifetimes) and #21 (tiered recall) (2026-11-23)
+
+```
+#20:  TOTAL 12/15   (unchanged: its scenario already passed through note staleness; unit tests cover it)
+#21:  TOTAL 15/15   cross-session-thread 3/3 · shared-basics 3/3 · expiry 3/3 · recall-precision 3/3 · lately 3/3
+```
+
+`recall-precision` gained a second check when #21 was built, because the first could pass on
+ordering luck: the newest fact lands in the always-on core. "When does my car insurance renew?" must
+bring up an *old* fact ("renews in June") through recall, without unrelated old ones (the film, the
+dentist). Both checks pass in all three runs.
+
+From 2/15 to 15/15 over #16, #17, #18, #20 and #21.
