@@ -162,6 +162,18 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
        player connections);
      - 5, ducking heard under her voice;
      - 7, a reboot.
+6. **R6 — a formal app** (user, 2026-11-24: "formalize the resident"; #65–#67). Everything is local to the
+   resident machine and works with the server down.
+   1. ✅ **Launcher** (#65). `desktop/cantinero`: if the shell isn't running, it starts both units
+      (without enabling them); if it is, it calls `org.freedesktop.Application.Activate` on the shell's
+      GApplication, whose `do_activate` shows her even when hidden to the tray. `install.sh` writes
+      `~/.local/share/applications/cantinero.desktop` (the app menu) with `X-KDE-Shortcuts=Meta+C`,
+      links it into `~/.local/share/kglobalaccel/` (Plasma reads default shortcuts only there;
+      kglobalaccel picked it up at once on predator, no re-login), and links `~/.local/bin/cantinero`.
+   2. **Settings** (#66). A window from the tray: start at login, show the avatar at start,
+      listening at start.
+   3. **Exit** (#67). The tray's Quit becomes Exit Cantinero: asks first if music is playing, then stops
+      the music, the shell and the resident service. Nothing restarts until the launcher or the next login.
 
 ## Not in this plan
 
