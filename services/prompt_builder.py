@@ -310,7 +310,7 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
                    expr_labels: List[str] | None = None,
                    context_tokens: int = 0, trimmed: list | None = None,
                    retake_of: List[str] | None = None,
-                   skills_note: str = "") -> List[Dict]:
+                   skills_note: str = "", memory_tail: str = "") -> List[Dict]:
     """The chat prompt. With `context_tokens`, the oldest history turns are dropped
     until the whole prompt plus the reply fits that window (services/context.py);
     the count dropped is appended to `trimmed` when one is passed."""
@@ -389,6 +389,10 @@ def build_messages(card: CharacterCard, persona: Persona, session: ChatSession,
     last_user = next((m.content for m in reversed(session.messages)
                       if m.role == "user" and m.content and m.content.strip()), "")
     tail: list[str] = []
+    # Memory that changes per turn ("lately with this bartender", per-turn recall) sits here,
+    # after the history, so the system block, and KoboldCPP's cached prefix, stay put.
+    if memory_tail:
+        tail.append(sub(memory_tail))
     if _ASKS_TIME.search(last_user):
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "12"

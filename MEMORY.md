@@ -96,6 +96,17 @@ chat's transcript let folding chat B drop a thread only chat A knew about.
   a model falling back to rewriting the list must not double it.
 - The status, junk and restated-instruction filters apply to every NEW and EDIT.
 
+**"Lately with this bartender" (Memory Phase 7, #18, 2026-11-23).** `main._lately` puts the end of
+her most recent *other* conversation into the turn's trailing note (`memory_for_turn` →
+`build_messages(memory_tail=…)`):
+- the last `LATELY_TURNS` (4) turns, each cut at 160 characters, labelled with who said them and
+  when ("earlier today", "yesterday", "3 days ago");
+- only from the last `LATELY_MAX_DAYS` (7);
+- never in the system block, so KoboldCPP's cached prefix survives.
+
+A new chat with her can then answer "what were we just talking about?", whether the last one was in
+the browser or the desktop window.
+
 **When a sweep runs** (since 2026-11-23; before, only a 5-minute timer in the browser did, and a
 closed tab, a reload or a restart before it fired left the recent turns out):
 

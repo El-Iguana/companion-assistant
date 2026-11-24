@@ -405,7 +405,50 @@ def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: Ch
     what eval/memory_phase7 measures. ``session``'s last user message is the turn; ``now`` is
     when (the eval moves it to test expiry)."""
     mem = _load_assistant_memory(cur, session.character_id, persona.id)
-    return {"system": assistant_memory.block(mem, card.name, persona.name, now=now), "trailing": ""}
+    return {"system": assistant_memory.block(mem, card.name, persona.name, now=now),
+            "trailing": _lately(cur, card, persona, session, now or datetime.now())}
+
+
+LATELY_TURNS = 4              # the end of her last other conversation (#18)
+LATELY_TURN_CHARS = 160
+LATELY_MAX_DAYS = 7
+
+
+def _lately(cur: Ctx, card: CharacterCard, persona: Persona, session: ChatSession, now: datetime) -> str:
+    """"Lately with this bartender" (Memory Phase 7, #18): the last few turns of her most recent
+    other conversation, browser chat or desktop voice, so a new chat isn't a blank start. Only
+    another session, only from the last week, and small: it goes after the history each turn."""
+    best = None
+    for s in _list(cur.sessions, ChatSession):
+        if s.character_id != card.id or s.id == session.id:
+            continue
+        if not any(m.role == "user" and m.content.strip() for m in s.messages):
+            continue
+        if best is None or s.updated_at > best.updated_at:
+            best = s
+    if best is None:
+        return ""
+    try:
+        when = datetime.fromisoformat(best.updated_at)
+    except ValueError:
+        return ""
+    if when.tzinfo is not None:
+        when = when.astimezone().replace(tzinfo=None)
+    days = (now - when).days
+    if days > LATELY_MAX_DAYS or days < -1:
+        return ""
+    turns = [m for m in best.messages if m.role in ("user", "char") and m.content.strip()][-LATELY_TURNS:]
+    if not any(m.role == "user" for m in turns):
+        return ""
+    ago = "earlier today" if days <= 0 and when.date() == now.date() else \
+        "yesterday" if days <= 1 else f"{days} days ago"
+    lines = []
+    for m in turns:
+        who = (persona.name or "User") if m.role == "user" else (card.name or "Assistant")
+        text = " ".join(m.content.split())
+        lines.append(f"{who}: {text[:LATELY_TURN_CHARS]}{'…' if len(text) > LATELY_TURN_CHARS else ''}")
+    return (f"Lately with {card.name or 'you'}: the end of your last conversation ({ago}), for "
+            "context only:\n" + "\n".join(lines))
 
 
 def _store_fold(cur: Ctx, before: AssistantMemory, after: AssistantMemory) -> None:
@@ -1553,7 +1596,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         _pending_swipes, _pending_exprs = [], []
         session.messages.append(ChatMessage(role="user", content=req.input_text))
 
-    lt_note = memory_for_turn(cur, card, persona, session)["system"]
+    turn_memory = memory_for_turn(cur, card, persona, session)
+    lt_note = turn_memory["system"]
     settings = _load_settings(cur)
 
     window = await _context_tokens(settings)
@@ -1572,6 +1616,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         expr_labels=expressions.card_emotions(card),
         context_tokens=window, trimmed=trimmed,
         skills_note=skills_rt.notes_for(card, skill_ctx),
+        memory_tail=turn_memory["trailing"],
         # Another take: quote what is being replaced, so the new one differs from it.
         retake_of=_pending_swipes if req.regenerate else None)
     if trimmed and trimmed[0]:

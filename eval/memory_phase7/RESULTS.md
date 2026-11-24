@@ -54,3 +54,12 @@ TOTAL 9/15   cross-session-thread 3/3 · shared-basics 3/3 · expiry 3/3 · reca
 The fold eval on the same code (`eval/assistant_memory`, 5 × 3): clean 9/15, misfiled 0/15,
 **forbidden 0/15**, missed 6/15. Forbidden is the best yet; missed is the same extraction misses as
 before.
+
+## After #18, "lately with this bartender" (2026-11-23)
+
+```
+TOTAL 12/15   cross-session-thread 3/3 · shared-basics 3/3 · expiry 3/3 · recall-precision 0/3 · lately 3/3
+```
+
+A new chat knows the end of her last one ("the Memmo Alfama"). It sits after the history, never in
+the system block. Only recall precision is left, which is #21.
