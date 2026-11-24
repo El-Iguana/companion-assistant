@@ -37,7 +37,18 @@
     return r.json();
   }
 
-  let characters = [], recent = [], settings = {};
+  // In the resident shell, listening is this machine's: it starts from the shell's Settings
+  // ("Listening at start", window.__cantineroShell) and the tray's switch lasts the session.
+  // Never saved to the account, where it would also switch the web chat's listening.
+  const shell = window.__cantineroShell || null;
+  const localListening = !!shell && typeof shell.listening === "boolean";
+  const notLocal = (patch) => {
+    const p = Object.assign({}, patch || {});
+    if (localListening) delete p.hands_free;
+    return p;
+  };
+
+  let characters = [], recent = [], settings = localListening ? { hands_free: shell.listening } : {};
   let card = null, sessionId = "", mood = {};
   let streaming = false, controller = null, live = "";
 
@@ -141,7 +152,7 @@
   async function refreshState() {
     const s = await api("/pdesk/state");
     characters = s.characters || []; recent = s.recent || [];
-    settings = Object.assign(settings, s.settings || {});
+    settings = Object.assign(settings, notLocal(s.settings));
     return s;
   }
 
@@ -215,7 +226,9 @@
   window.addEventListener("pvoice:state", paint);
   window.addEventListener("pvoice:persist", (e) => {
     Object.assign(settings, e.detail.patch || {});
-    api("/pdesk/settings", e.detail.patch || {}).catch((err) => console.warn("[desktop] save failed:", err));
+    const save = notLocal(e.detail.patch);
+    if (!Object.keys(save).length) return;
+    api("/pdesk/settings", save).catch((err) => console.warn("[desktop] save failed:", err));
   });
   // There is no toast surface here; the caption is the only place words can go.
   window.addEventListener("pvoice:toast", (e) => { console.log("[desktop]", e.detail.msg); caption(e.detail.msg, 7000); });
@@ -232,7 +245,8 @@
     return characters.map(c => ({ id: c.id, name: c.name, avatar: c.avatar,
                                   current: !!(card && card.id === c.id) }));
   };
-  // Listening is a saved setting, never switched on just because the window opened.
+  // Listening starts from a setting (the account, or this machine's in the shell), never
+  // switched on just because the window opened.
   window.__desktopListening = () => {
     const st = V.state();
     return { on: !!st.handsFree,
