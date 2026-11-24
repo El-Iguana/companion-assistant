@@ -256,11 +256,10 @@ beside the status while one runs (`Tool.icon`). Tests: `tests/test_memory_comman
 
 ## Known gaps
 
-Most of these are addressed by **Phase 7** (`MEMORY_PLAN.md`, issues #15–#23), which is planned,
-not built: memory that belongs to the bartender, folded per episode, recalled per turn.
+**Phase 7** (`MEMORY_PLAN.md`, issues #15–#23, done 2026-11-24) closed several earlier gaps:
+memory belongs to the bartender, folds per episode and is recalled per turn; time-bound facts
+leave the prompt after their date (#20). What remains:
 
-- Long-term `facts` never expire; they stay until the user removes them. Whether they should decay is
-  still open.
 - **The prompt is budgeted by dropping old turns only.** Everything here has to fit the context
   window (Settings → Context window, capped at the backend's real limit) alongside the card and
   persona blocks. Since 2026-10-30 `build_messages` drops the oldest verbatim turns to fit,

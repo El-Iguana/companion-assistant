@@ -772,11 +772,12 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     model turn. Anything unsure goes to her as before.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
-  - Next: memory decisions, after their eval (Memory Phase 7 #15).
+  - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns
+    Fortuna is at least 0.9 sure hold nothing to remember (#52, #53; Memory Phase 7 #23).
 - **Memory Phase 7** — memory belongs to the bartender, not the chat: shared basics about the
   user plus per-bartender instructions and notes, folds per episode (voice-friendly), tiered
-  per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23. ✅ #15–#22
-  built (memory commands: the **Memory** skill on the Menu, `services/skills/memory.py`); #23, the
-  Fortuna gate, is optional.
+  per-turn recall, memory commands. Plan in `MEMORY_PLAN.md` → Phase 7, issues #15–#23, ✅ all
+  built (2026-11-24). The last two: memory commands, the **Memory** skill on the Menu
+  (`services/skills/memory.py`, #22), and the Fortuna gate on extraction (#23, built early as #53).
 - ◻ Group chats · ◻ faster inference backend (still KoboldCPP `:5001`).
 - Tuning knobs: `GenerationConfig`, `AppSettings.summarize_after/keep_recent`.
