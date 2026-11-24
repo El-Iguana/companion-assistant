@@ -54,15 +54,15 @@ def test_one_album_plays_from_the_song(tmp_path, monkeypatch):
     assert o.expanded == [140] and o.sent[0][1]["start_index"] == 4
 
 
-def test_several_albums_ask_and_the_answer_plays_that_album_from_the_song(tmp_path, monkeypatch):
+def test_several_albums_play_one_of_them_from_the_song(tmp_path, monkeypatch):
     o = _world(monkeypatch, ANTS)
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which did the user choose": ("2", 0.93)})
-    ctx = _ctx(tmp_path, session_id="s1")
-    asked = asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
-    assert asked == ("Which one: Remember Two Things by Dave Matthews Band, Under The Table And Dreaming by "
-                     "Dave Matthews Band, or Where Are You Going: The Singles by Dave Matthews Band?")
-    said = asyncio.run(media.fast_play(ctx, "Under the Table and Dreaming", "Mira"))
-    assert "Under The Table And Dreaming" in said and o.expanded == [250] and o.sent[0][1]["start_index"] == 1
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "put on the album with Ants Marching", "Mira"))
+    assert isinstance(said, media.Done) and "Which" not in said          # never a question (user, 2026-11-24)
+    album = o.expanded[0]
+    assert album in (237, 250, 386) and "Ants Marching" in said
+    start = o.sent[0][1]["start_index"]
+    assert [238, 257, 388][[237, 250, 386].index(album)] == [album * 10, 257, 238, 388, 152, album * 10 + 1][start]
 
 
 def test_a_song_that_isnt_there_is_said(tmp_path, monkeypatch):
@@ -76,48 +76,3 @@ def test_the_tool_takes_album_of_and_ends_the_turn(tmp_path, monkeypatch):
     o = _world(monkeypatch, [_track(152, "Back in Black - Hells Bells", "ACDC", 0.78)])
     out = asyncio.run(media._play(_ctx(tmp_path), {"album_of": "Hells Bells"}))
     assert out["played"] and out["ok"] and "Best of AcDc" in out["final"] and o.expanded == [140]
-
-
-def test_fortuna_reads_the_years_she_doesnt_say(tmp_path, monkeypatch):
-    o = _world(monkeypatch, ANTS)
-    seen = {}
-    from services import fortuna
-
-    async def choose(state, instructions, criteria):
-        if "want the assistant" in instructions:
-            return ("play_music", 0.9)
-        seen.update(criteria)
-        return ("2", 0.9)
-    monkeypatch.setattr(fortuna, "choose", choose)
-    ctx = _ctx(tmp_path, session_id="s1")
-    asked = asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
-    assert "1994" not in asked                                      # not said aloud
-    asyncio.run(media.fast_play(ctx, "the one from when I was in college", "Mira"))   # Fortuna's to place
-    assert seen["2"] == "the second one: Under The Table And Dreaming by Dave Matthews Band (1994)"
-    assert o.expanded == [250]
-
-
-OPTS = [{"name": "Remember Two Things — Dave Matthews Band (2014)"},
-        {"name": "Under The Table And Dreaming — Dave Matthews Band (1994)"},
-        {"name": "Where Are You Going: The Singles — Dave Matthews Band (2025)"}]
-
-
-@pytest.mark.parametrize("text,want", [
-    ("the first", 0), ("first one", 0), ("the second one please", 1), ("number three", 2), ("the last one", 2),
-    ("the nineties one", 1), ("the 1990s one", 1), ("the 2014 one", 0),
-    ("the singles", 2), ("Under the Table and Dreaming", 1), ("remember two things", 0),
-    ("the live one", None), ("Dave Matthews Band", None), ("whichever", None),
-])
-def test_answers_code_can_place(text, want):
-    assert media.answer_pick(text, OPTS) == want
-
-
-def test_a_second_answer_to_the_same_question_plays_the_new_pick(tmp_path, monkeypatch):
-    o = _world(monkeypatch, ANTS)
-    o.players[0]["state"] = {"status": "playing"}
-    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
-    ctx = _ctx(tmp_path, session_id="s1")
-    for answer, album in (("the nineties one", 250), ("the singles", 386)):
-        asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
-        said = asyncio.run(media.fast_play(ctx, answer, "Mira"))
-        assert said != "It's playing." and o.expanded[-1] == album

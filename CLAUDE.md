@@ -788,23 +788,23 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     by Fortuna (the music library holds audiobooks), rebuilt in the background after 6 h; each pick
     is over a random 24 (speed, and variety). Orpheus has no genres for this library. A name
     scoring ≥ 0.9 in Orpheus always wins over "described".
-  - **Either-or without the model** (#81). A tie neither settles: a fixed question at once ("Which one:
-    A, B, C, or one of 2 more?", said aloud), kept per session for 90 s (`media._pending`); the next
-    line is matched to up to five options by Fortuna (≥ 0.7) and played. Anything else clears it and
-    the turn goes on as usual. A change of mind in front ("never mind, play …") is stripped like
-    "can you".
+  - **She never asks "which one?"** (user, 2026-11-24: "always pick one. never ask"). A tie the
+    exact title, the artist over their own work (`artist_pick`) and Fortuna (≥ 0.8) can't settle
+    plays one of the tied at random (`any_pick`); a tie of one artist's songs is any of them
+    (`one_artist_pick`). #81's either-or question and its answer matching were removed. A change
+    of mind in front ("never mind, play …") is stripped like "can you".
+  - **An artist asked for plays a random song of theirs** (#96). "a song / something / anything
+    by X" looks the artist up on its own and matches what Whisper heard by spelling
+    (`find_artist`, difflib ≥ 0.65: "Stevie Mix" → Stevie Nicks 0.73); a miss or a tie tries the
+    same. Their songs play shuffled, captioned by the one that starts.
   - **One model pass for what still reaches her** (#82). `media_play` does what the lane does (a
-    described request from the catalog, a tie by title or by the artist over their own work
-    (`artist_pick`), else Fortuna, else the fixed either-or) and every outcome carries a `final`
-    line, a miss included, so the turn ends after the tool: ~20 s, against 60–66 s. `media_find`
-    says never to search before playing.
+    described request from the catalog, an artist, a tie by title, the artist over their own work,
+    Fortuna, else one at random) and every outcome carries a `final` line, a miss included, so the
+    turn ends after the tool: ~20 s, against 60–66 s. Its description says it always plays
+    something and never to ask which. `media_find` says never to search before playing.
   - **"The album with <song>"** (#87; lane, and `media_play`'s `album_of`). The song's tied
-    tracks → their albums (`parent`); one plays from that song, several get the either-or. An
-    answer is placed in code first (`answer_pick`: ordinals, "number two", decades and years,
-    words in one option's name only), then by Fortuna, which also reads the years she doesn't
-    say; an answer neither can place gets one fixed re-ask ("Sorry, which one: the first, …?")
-    instead of the model, which once played the wrong thing. The repeat guard compares what is
-    played (query + pick), so a second answer to the same question still plays.
+    tracks → their albums (`parent`); it plays from that song, on one of the albums at random when
+    there are several. The repeat guard compares what is played (query + pick).
   - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
     marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
     chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of

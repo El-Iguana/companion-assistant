@@ -205,7 +205,7 @@ def test_pairing_needs_approval_and_keeps_the_token_out_of_results(tmp_path, mon
     assert stat.S_IMODE((tmp_path / "media" / "orpheus.json").stat().st_mode) == 0o600
 
 
-def test_find_returns_candidates_and_the_servers_question(tmp_path, monkeypatch):
+def test_find_returns_candidates_and_never_a_question(tmp_path, monkeypatch):
     om.save(tmp_path, {"url": "http://o", "device_id": "d", "token": "t"})
 
     async def resolve(base, token, query, kinds, limit=5):
@@ -216,7 +216,7 @@ def test_find_returns_candidates_and_the_servers_question(tmp_path, monkeypatch)
                 "needs_disambiguation": True, "disambiguation_prompt": "The album ( ), or Ágætis byrjun?"}
     monkeypatch.setattr(om, "resolve", resolve)
     out = asyncio.run(media._find(_ctx(tmp_path), {"query": "sigur ros"}))
-    assert out["ambiguous"] and out["ask"].startswith("The album")
+    assert out["ambiguous"] and "ask" not in out                    # she never asks which (2026-11-24)
     assert [c["id"] for c in out["candidates"]] == ["9042", "9050"]
 
 

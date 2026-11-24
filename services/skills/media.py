@@ -139,24 +139,6 @@ def _save_pending(ctx: SkillContext, cands: list[dict] | None, query: str = "") 
         pass
 
 
-def _pending_query(ctx: SkillContext) -> str:
-    try:
-        p = json.loads(_pending_path(ctx).read_text())
-    except (OSError, ValueError):
-        return ""
-    return p.get("query", "") if time.time() - float(p.get("at") or 0) < PENDING_TTL_S else ""
-
-
-def _choices(cands: list[dict], ask: str) -> dict:
-    """An ambiguous play, worded so the model can't mistake it (it once repeated the same
-    call three times, then told the user the player wasn't running)."""
-    return {"ok": True, "played": False, "nothing_is_wrong": True,
-            "say": ask or "Ask which one they meant.",
-            "choices": [{"id": c["id"], "name": c["name"]} for c in cands],
-            "next": "Ask the user which one, and stop. When they answer, call media_play with that "
-                    "choice's id. Don't call media_play with the same query again."}
-
-
 _RECENT_PLAY_S = 90
 
 
@@ -419,8 +401,6 @@ async def _find(ctx: SkillContext, args: dict) -> dict:
     if not cands:
         return error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {args['query']!r}.")
     res = {"ok": True, "candidates": cands, "ambiguous": how["ambiguous"]}
-    if how["ask"]:
-        res["ask"] = how["ask"]
     _save_pending(ctx, cands if how["ambiguous"] else None)
     return res
 
@@ -437,8 +417,7 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
         except om.OrpheusError as e:
             return _refusal(e)
         played = isinstance(said, Done)
-        return {"ok": played or said.startswith("Which one"), "played": played,
-                "asked": not played and said.startswith("Which one"), "final": said}
+        return {"ok": played, "played": played, "final": said}
     if not choice_id and not query:
         return error("BAD_ARGUMENTS", "Give the query the user said, or the id of a choice.")
     try:
@@ -447,10 +426,6 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
             pick = known.get(choice_id) or {"id": choice_id, "kind": "playlist" if not choice_id.isdigit()
                                             else "", "name": ""}
         else:
-            pending = _load_pending(ctx)
-            if pending and _pending_query(ctx) == query.strip().lower():
-                # The same question again in the same turn: answer with the choices, not a search.
-                return dict(_choices(pending, ""), ok=False, error="ASK_FIRST")
             # One call does what the fast lane does, and its line ends the turn (#82): a model
             # pass after a tool costs ~18 s, and she used to take three or four per play.
             from services import fortuna
@@ -485,17 +460,10 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                 i = await _settle(query, how["raw"])
                 if i is None:
                     i = one_artist_pick(how["raw"])          # several of one artist's: any of them
+                if i is None:
+                    i = any_pick(cands, how["raw"])          # nothing settles it: one at random
                 if i is not None:
                     pick = cands[i]
-                else:
-                    opts = either_or(cands, how["raw"])
-                    if not opts:
-                        _save_pending(ctx, cands[:3], query)
-                        return _choices(cands[:3], how["ask"])      # she words it
-                    _save_pending(ctx, opts, query)                  # an id still works if she's asked
-                    _pending[_ask_key(ctx)] = {"options": opts, "query": query, "at": time.monotonic()}
-                    return {"ok": True, "played": False, "nothing_is_wrong": True, "final": question(opts),
-                            "asked": True}
         dev = await _target(ctx, st, args.get("player", ""))
         if _just_played(ctx, query or choice_id, dev):
             # The same play to the same player again in the same breath: it's on; don't restart it.
@@ -671,16 +639,19 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         query = "play " + ("Back " + m.group(1)).strip().title()
     if not query:
         return None
-    if _ask_key(ctx) in _pending:                       # she just asked "which one?" (#81)
-        answered = await _answer(ctx, st, query)
-        if answered:
-            return answered
     # Fortuna is asked about the request itself: "Mira, can you play some Dave Matthews
     # Band?" scored 0.77, under the bar, where "play some Dave Matthews Band" scored 0.87.
     got = await fortuna.choose(query, "What does the user want the assistant to do?", _LANE_INTENTS)
-    if got is None or got[0] != "play_music" or got[1] < LANE_LOW:
+    music = got is not None and got[0] == "play_music" and got[1] >= LANE_LOW
+    # Short titles read as anything: "Play Crash" was "other" (0.52) and "Play Back in Black" a
+    # play at only 0.59 (2026-11-24), so both went to the model (~20 s). Said with "play" in
+    # front, it's a play when Orpheus has that exact name (below); Fortuna rules it out only
+    # when it's sure this is a player control or a question.
+    elsewhere = got is not None and got[0] in ("control_music", "music_question") and got[1] >= LANE_MIN
+    by_name = not music and not elsewhere and bool(_PLAY_WORDS.match(query))
+    if not music and not by_name:
         return None
-    sure = got[1] >= LANE_MIN
+    sure = music and got[1] >= LANE_MIN
     song = album_of(query)
     if song:
         try:
@@ -704,7 +675,7 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
             fortuna.choose(query, "Does the user name what to play, or describe the kind of music they want?",
                            _PLAY_KINDS))
         clear = cands and not how["ambiguous"] and how["top"] >= NAMED_SCORE
-        if kind and kind[0] == "described" and kind[1] >= DESCRIBED_MIN and not clear:
+        if kind and kind[0] == "described" and kind[1] >= DESCRIBED_MIN and not clear and not by_name:
             return await _play_described(ctx, st, query)
         if not cands or (how["ambiguous"] and artist_pick(how["raw"]) is None):
             # Nothing, or a tie: maybe an artist Whisper misspelt ("play Stevie Mix" scored 0.42
@@ -721,16 +692,22 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         if not cands:
             return None
         pick = cands[0]
-        if how["ambiguous"]:
+        if how["ambiguous"] and by_name:
+            # Only an exact name proves an unsure "play …" is music.
+            i = exact_pick(query, how["raw"])
+            if i is None:
+                i = artist_pick(how["raw"])
+            if i is None:
+                return None
+            pick = cands[i]
+        elif how["ambiguous"]:
             i = await _settle(query, how["raw"])        # a tie: the exact title, else Fortuna
             if i is None:
                 i = one_artist_pick(how["raw"])         # several of one artist's: any of them
             if i is None:
-                opts = either_or(cands, how["raw"])
-                if not opts:
-                    return None                       # she sorts it out
-                _pending[_ask_key(ctx)] = {"options": opts, "query": query, "at": time.monotonic()}
-                return question(opts)                 # said aloud: it's a question
+                i = any_pick(cands, how["raw"])         # nothing settles it: one at random, never a question
+            if i is None:
+                return None
             pick = cands[i]
         elif not sure and how["top"] < EXACT_SCORE:
             return None                               # unsure, and no exact name: hers
@@ -812,131 +789,31 @@ async def _albums_with(st: dict, song: str) -> list[dict]:
 
 
 async def _play_album_of(ctx: SkillContext, st: dict, song: str, query: str) -> str | None:
-    """Play the album with this song from it, ask which album, or say it isn't there."""
+    """Play the album with this song from it (one at random when it is on several), or say it
+    isn't there."""
     albums = await _albums_with(st, song)
     if not albums:
         return f"I can't find a song called {song} in your music."
-    if len(albums) == 1:
-        return await _play_pick(ctx, st, albums[0], query)
-    _pending[_ask_key(ctx)] = {"options": albums, "query": query, "at": time.monotonic()}
-    return question(albums)
+    return await _play_pick(ctx, st, random.choice(albums), query)   # several: any of them, never a question
 
 
-# --- either-or, without her (#81) -------------------------------------------------------------
-# A tie neither the title nor Fortuna can settle: a fixed question at once ("Which one: Crash by
-# Dave Matthews Band, or Crash by Someone Else?"), and the answer mapped to the options by
-# Fortuna (~0.2 s). Both used to be model passes (~18 s each). Anything else said next clears it.
+# --- a tie nothing settles: one at random, never a question --------------------------------
+# #81 asked "Which one: A, B, or C?" and read the answer; the user (2026-11-24): "always pick
+# one. never ask".
 
-ASK_FOR_S = 90.0
-CHOICE_MIN = 0.7
-ASK_MAX = 5                  # matched against the answer; the first SAY_MAX are said
-SAY_MAX = 3
-_ORDINALS = ("first", "second", "third", "fourth", "fifth")
-_pending: dict[str, dict] = {}
+ASK_MAX = 5                  # albums a song is on, considered for "the album with <song>"
 
 
-def _ask_key(ctx: SkillContext) -> str:
-    return ctx.session_id or ctx.user_id
-
-
-def either_or(cands: list[dict], raw: list[dict]) -> list[dict]:
-    """The tied, playable candidates worth a question: up to three, each said differently."""
-    if not raw:
-        return []
-    top = max(float(c.get("score") or 0) for c in raw)
-    out, said = [], set()
-    for c, r in zip(cands, raw):
-        if float(r.get("score") or 0) < top - TIE_GAP or not c.get("playable", True):
-            continue
-        name = _spoken(c["name"])
-        if name.lower() in said:
-            continue                                  # two the same aloud: a question can't tell them apart
-        said.add(name.lower())
-        out.append(c)
-        if len(out) == ASK_MAX:
-            break
-    return out if len(out) >= 2 else []
-
-
-def question(options: list[dict]) -> str:
-    """"Which one: A, B, or C?"; past three, "Which one: A, B, C, or one of 2 more?" (an answer
-    naming one of those still counts: _answer matches against them all)."""
-    names = [_spoken(o["name"]) for o in options]
-    if len(names) > SAY_MAX:
-        return "Which one: " + ", ".join(names[:SAY_MAX]) + f", or one of {len(names) - SAY_MAX} more?"
-    return "Which one: " + ", ".join(names[:-1]) + ", or " + names[-1] + "?"
-
-
-# Ordinals only: "one" ends half the answers ("the nineties one") and "two" is in names
-# ("Remember Two Things"), so a bare number counts only after "number".
-_ORDINAL_WORDS = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2,
-                  "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
-_NUMBERS = {"one": 0, "1": 0, "two": 1, "2": 1, "three": 2, "3": 2, "four": 3, "4": 3, "five": 4, "5": 4}
-_DECADES = {"sixties": 196, "seventies": 197, "eighties": 198, "nineties": 199, "noughties": 200,
-            "sixty": 196, "seventy": 197, "eighty": 198, "ninety": 199}
-_FILLER = {"the", "one", "a", "an", "album", "record", "please", "that", "i", "want", "play", "uh", "um",
-           "hmm", "by", "of", "on", "s", "it", "version", "with", "number"}
-
-
-def answer_pick(text: str, opts: list[dict]) -> int | None:
-    """An answer code can place without Fortuna: an ordinal ("the first", "the last one"), a decade
-    or year ("the nineties one", "the 2014 one"), or words that are in one option's name only."""
-    words = _norm(text).split()
-    if not words or not opts:
+def any_pick(cands: list[dict], raw: list[dict]) -> int | None:
+    """A tie nothing settles ("Crash" by two bands): one of the tied, at random. The user
+    (2026-11-24): "always pick one. never ask"."""
+    if not cands:
         return None
-    if "last" in words:
-        return len(opts) - 1
-    ords = {_ORDINAL_WORDS[w] for w in words if w in _ORDINAL_WORDS}
-    ords |= {_NUMBERS[b] for a, b in zip(words, words[1:]) if a == "number" and b in _NUMBERS}
-    if len(ords) == 1 and (i := ords.pop()) < len(opts):
-        return i
-    years = [re.search(r"\((\d{4})\)$", o.get("name") or "") for o in opts]
-    for w in words:
-        dec = _DECADES.get(w) or (int(w[:3]) if re.fullmatch(r"(19|20)\d0s", w) else None)
-        hits = [i for i, y in enumerate(years) if y and (int(y.group(1)) // 10 == dec if dec else y.group(1) == w)]
-        if (dec or re.fullmatch(r"(19|20)\d\d", w)) and len(hits) == 1:
-            return hits[0]
-    key = [w for w in words if w not in _FILLER]
-    if key:
-        hits = [i for i, o in enumerate(opts) if all(w in _norm(o.get("name") or "").split() for w in key)]
-        if len(hits) == 1:
-            return hits[0]
-    return None
-
-
-async def _answer(ctx: SkillContext, st: dict, text: str) -> str | None:
-    """The answer to her either-or, played; None when it isn't one (the turn goes on as usual)."""
-    from services import fortuna
-
-    key = _ask_key(ctx)
-    pend = _pending.pop(key, None)
-    if not pend or time.monotonic() - pend["at"] > ASK_FOR_S:
-        return None
-    opts = pend["options"]
-    i = answer_pick(text, opts)
-    if i is not None:
-        try:
-            return await _play_pick(ctx, st, opts[i], pend["query"])
-        except om.OrpheusError:
-            return None
-    # The year stays in what Fortuna reads ("the nineties one"), though not in what she says.
-    labels = {str(i + 1): f"the {_ORDINALS[i]} one: {o['name'].replace(' — ', ' by ')}" for i, o in enumerate(opts)}
-    labels["none"] = "none of these: something else, or a new request"
-    got = await fortuna.choose(text, f'She asked: "{question(opts)}" Which did the user choose?', labels)
-    if got is None or got[0] not in labels or got[0] == "none":
-        return None                                   # something else: the turn goes on as usual
-    if got[1] < CHOICE_MIN:
-        # An answer, but not one Fortuna can place ("the live one" read 0.40): ask once more in
-        # fixed words rather than hand it to her, who once played the wrong thing (42 s).
-        if pend.get("reasked"):
-            return None
-        _pending[key] = dict(pend, at=time.monotonic(), reasked=True)
-        ords = [f"the {_ORDINALS[i]}" for i in range(len(opts))]
-        return "Sorry, which one: " + ", ".join(ords[:-1]) + ", or " + ords[-1] + "?"
-    try:
-        return await _play_pick(ctx, st, opts[int(got[0]) - 1], pend["query"])
-    except om.OrpheusError:
-        return None
+    top = max((float(r.get("score") or 0) for r in raw), default=0.0)
+    tied = [i for i, (c, r) in enumerate(zip(cands, raw))
+            if float(r.get("score") or 0) >= top - TIE_GAP and c.get("playable", True)]
+    tied = tied or [i for i, c in enumerate(cands) if c.get("playable", True)]
+    return random.choice(tied) if tied else None
 
 
 async def fast_control(ctx: SkillContext, cmd: dict) -> str:
@@ -1006,11 +883,11 @@ CONNECT = Tool(
     {"type": "object", "properties": {}}, _connect, status="Connecting to the music server…")
 PLAY = Tool(
     "media_play",
-    "Play music: an artist, album, track or playlist, as the user said it (query), or one of the "
-    "choices you offered (id). Plays at once when the match is clear; otherwise returns choices to ask about.",
+    "Play music: an artist, album, track or playlist, as the user said it (query), or something "
+    "media_find returned (id). Always plays something: when several match, it picks one. Never ask which.",
     {"type": "object", "properties": {
         "query": {"type": "string", "maxLength": 200, "description": "What to play, as the user said it"},
-        "id": {"type": "string", "maxLength": 64, "description": "The id of a choice you offered"},
+        "id": {"type": "string", "maxLength": 64, "description": "The id of something media_find returned"},
         "album_of": {"type": "string", "maxLength": 200,
                      "description": "A song, when the user wants the album that has it"},
         "kinds": {"type": "array", "maxItems": 4, "items": {"type": "string", "enum": KINDS}},
@@ -1063,10 +940,6 @@ def _note(ctx: SkillContext) -> str:
                 what += f" ({now['title']}" + (f" by {now['artist']}" if now.get("artist") else "") + ")"
             return f"{d['name']}: " + (what if d["online"] else "not connected")
         note += " The players right now: " + "; ".join(one(d) for d in live) + "."
-    pending = _load_pending(ctx)
-    if pending:
-        note += (" You offered these and are waiting for the user's pick (call media_play with its id): "
-                 + "; ".join(f"{i}) {c['name']} [id {c['id']}]" for i, c in enumerate(pending, 1)))
     return note
 
 
