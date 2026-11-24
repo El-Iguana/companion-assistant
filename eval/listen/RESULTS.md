@@ -28,8 +28,8 @@ What goes wrong:
   sees 800 ms of quiet, so an utterance never ends: music_0 and music_2 sent nothing to
   Whisper at all. 11 of 12 wake commands during music were lost.
 - **Whisper hears "Mira" as "Mirror", "Miro", "MIRO"**: 9 of the 18 misses were transcribed
-  and then failed the exact wake-word match. No segmenter fixes that: the wake word has to
-  reach Whisper as a hint (faster-whisper `hotwords`).
+  and then failed the exact wake-word match. No segmenter fixes that: Whisper has to be told
+  the name (V2: a sentence of context; `hotwords` made it worse).
 - **Noise reaches Whisper:** 25 of 61 calls were on no speech (knocks, room tone), 13 in
   the scene where nobody spoke to her. None became a message (the gate held), but each costs
   ~0.3–0.5 s of CPU and a chance to invent words.
