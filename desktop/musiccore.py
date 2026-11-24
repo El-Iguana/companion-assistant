@@ -263,3 +263,39 @@ def page_command(msg: str) -> Optional[tuple]:
             return None
         return (action, min(value, 100.0) if action == "volume" else value)
     return (action, None)
+
+
+# --- the library browser (Music M3) ------------------------------------------------------------
+# What the full player's Library tab makes of Orpheus's answers. The same queue entries as the
+# server's DJ builds (services/skills/orpheus_media.expand), so a play by hand looks the same.
+
+def entry(item: dict, artist: str = "", album: str = "") -> dict:
+    return {"id": int(item["id"]), "title": item.get("title") or "", "artist": artist, "album": album,
+            "artwork_id": item.get("artwork_id"), "duration_ms": item.get("duration_ms")}
+
+
+def album_artist(album: dict) -> str:
+    """An album item's artist (GET /items/{id} carries album.album_artist)."""
+    return ((album.get("album") or {}).get("album_artist") or {}).get("title", "") or ""
+
+
+def album_queue(album: dict, children: list, artist: str = "") -> list:
+    """An album's playable tracks in disc and track order, as queue entries."""
+    artist = artist or album_artist(album)
+    kids = sorted((k for k in children or [] if k.get("kind") == "track" and k.get("playable")),
+                  key=lambda k: (k.get("disc_number") or 0, k.get("track_number") or 0, k.get("sort_title") or ""))
+    return [entry(k, artist, album.get("title", "")) for k in kids]
+
+
+def browsable_artists(items: list) -> list:
+    """Artists worth a row: a guest credit on one track is an artist item with no albums."""
+    return [i for i in items or [] if i.get("kind") == "artist" and (i.get("child_count") or 0) > 0]
+
+
+def album_line(album: dict) -> str:
+    """The second line of an album row: year and track count."""
+    bits = [str(album["year"])] if album.get("year") else []
+    n = album.get("child_count") or 0
+    if n:
+        bits.append(f"{n} track{'s' if n != 1 else ''}")
+    return " · ".join(bits)

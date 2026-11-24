@@ -29,6 +29,7 @@ gi.require_version("Soup", "3.0")
 from gi.repository import Gdk, GLib, Gst, GstAudio, Gtk, Soup  # noqa: E402
 
 import musiccore as core  # noqa: E402
+from library import LibraryBrowser  # noqa: E402
 
 RECONNECT_FIRST, RECONNECT_MAX = 1.0, 30.0
 PLAY_ACK_WAIT_S = 4.0
@@ -55,6 +56,9 @@ CSS = b"""
 .cm-on { color: #d4a24c; }
 .cm-status { color: #a8957c; font-size: 0.85em; }
 .cm-keys { color: #7d6d5b; font-size: 0.75em; }
+.cm-play-small { background: #d4a24c; color: #1b1714; font-weight: 700; border-radius: 16px; padding: 2px 16px; }
+.cm-play-small:hover { background: #e2b35d; }
+.cm-tabs { margin-bottom: 4px; }
 """
 
 
@@ -201,10 +205,29 @@ class MusicPlayer:
                               xalign=0, wrap=True)
         keys_help.add_css_class("cm-keys")
         box.append(keys_help)
-        self.win.set_child(box)
+        # Two tabs: what is playing, and the library to pick from (Music M3).
+        self.tabs = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self.tabs.add_titled(box, "now", "Now playing")
+        self.library = LibraryBrowser(self)
+        lib = self.library.widget
+        for side in ("top", "bottom", "start", "end"):
+            getattr(lib, f"set_margin_{side}")(14)
+        self.tabs.add_titled(lib, "library", "Library")
+        self.tabs.connect("notify::visible-child-name",
+                          lambda st, _p: st.get_visible_child_name() == "library" and self.library.shown())
+        switcher = Gtk.StackSwitcher(stack=self.tabs, halign=Gtk.Align.CENTER, margin_top=10)
+        switcher.add_css_class("cm-tabs")
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.append(switcher)
+        outer.append(self.tabs)
+        self.win.set_child(outer)
         self._show_modes()
 
     def _on_key(self, _ctl, keyval, _code, state):
+        # Typing in the library's search box: its keys are letters, not commands.
+        focus = self.win.get_focus()
+        if isinstance(focus, (Gtk.Text, Gtk.Editable)):
+            return False
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         k = Gdk.keyval_name(keyval) or ""
         if k == "space":
@@ -236,6 +259,19 @@ class MusicPlayer:
         """Exit Cantinero: stop, report where it stopped, close the Orpheus session."""
         if self.status != "idle":
             self._stop()
+
+    def play_entries(self, entries: list, start: int = 0):
+        """A play by hand, from the library: the same as Cantinero's play, with no ack."""
+        if not entries:
+            return
+        self.queue.load(entries, start)
+        self.failed_in_a_row = 0
+        self.pending_play = None
+        self._show_modes()
+        self._show_queue()
+        self._load_current()
+        self._report(force=True)
+        self.tabs.set_visible_child_name("now")
 
     def snapshot(self) -> dict:
         """The state the micro player under her bar shows (the same message Cantinero gets)."""
