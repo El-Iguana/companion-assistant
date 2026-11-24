@@ -143,7 +143,8 @@ closed tab, a reload or a restart before it fired left the recent turns out):
 | The hands-free conversation ends: sleep phrase, timeout, mic off | `voice.js` sends `pvoice:asleep`; page and desktop |
 | The page or the desktop window closes (`pagehide`) | keepalive `POST /pdesk/sweep`, which outlives the page |
 | Another bartender opened in the desktop window | `desktop.js` `openCharacter` |
-| 5 minutes after the last reply, whatever the client did | server, `_schedule_sweep`, re-armed by every turn |
+| 10 quiet minutes, whatever the client did: the **episode** ends, and her other chats with unread turns are saved too (Memory Phase 7, #19; was 5 minutes, one chat) | server, `_schedule_sweep` / `_sweep_later`, re-armed by every turn |
+| The prompt had to drop turns to fit the window (**context pressure**, #19): the job after the reply folds even below `summarize_after` | server, `chat()` → `_spawn_memory_job(pressure=True)` |
 | Startup: recent chats (2 days) with user turns not yet swept | server, `start_sweep_catchup`, staggered |
 
 Every sweep runs as a background job under the memory job's rules (one per chat at a time, a

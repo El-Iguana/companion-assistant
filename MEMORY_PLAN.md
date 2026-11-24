@@ -229,7 +229,7 @@ copy when one of them next needs changing.
      instead of a fresh list; notes untouched for about two weeks leave the prompt.
   4. ✅ **#18 — "lately with this bartender"** (2026-11-23; scenarios 9/15 → 12/15). The last few turns of her most recent conversation,
      whichever window it was in, so a new chat isn't a blank start.
-  5. **#19 — fold per episode.** *(The end-of-chat triggers and the server-side idle sweep
+  5. ✅ **#19 — fold per episode** (2026-11-23: a 10-minute quiet gap ends the episode for the bartender, across her chats; context pressure folds below the message count). *(The end-of-chat triggers and the server-side idle sweep
      shipped first, on 2026-11-23: see "Closed since".)* An episode ends on the sleep phrase or a farewell, a quiet gap
      (about 10 minutes), the desktop window closing or the page hidden, or a new chat with her.
      One high-water mark per bartender, across sessions. The message-count trigger becomes context

@@ -1202,7 +1202,7 @@ async def _sweep(cur: Ctx, session_id: str, kobold=kobold) -> dict:
 # closing the desktop window or a restart before it fired lost it: the chat's recent
 # turns stayed out of long-term memory until that chat was opened again. Now every
 # finished turn re-arms a timer here, and startup catches up on chats it missed.
-SWEEP_IDLE_S = 5 * 60.0          # quiet time after the last reply before a chat is swept
+SWEEP_IDLE_S = 10 * 60.0         # quiet time that ends an episode (Memory Phase 7 #19; was 5 min per chat)
 SWEEP_RETRY_S = 60.0             # a sweep that gave way to a reply runs again after this
 SWEEP_CATCHUP_DAYS = 2           # at startup, sweep chats active this recently
 SWEEP_CATCHUP_DELAY_S = 60.0     # ...starting after this (let the backends come up), then
@@ -1236,7 +1236,22 @@ async def _sweep_later(uid: str, session_id: str, delay: float) -> None:
     user = _user_by_id(uid)
     if not user:                                # deleted meanwhile: nothing to save, and
         return                                  # _ctx_for would recreate their folders
-    await _sweep_job(_ctx_for(user), session_id)
+    cur = _ctx_for(user)
+    await _sweep_job(cur, session_id)
+    # The episode is over (#19): save her other chats with turns not yet read too, voice
+    # bursts in the desktop window among them. One still in use keeps its own timer and
+    # is left for it.
+    s = _load(cur.sessions, session_id, ChatSession)
+    if s is None:
+        return
+    mem = _load_assistant_memory(cur, s.character_id, s.persona_id)
+    for other in _list(cur.sessions, ChatSession):
+        if (other.id == session_id or other.character_id != s.character_id
+                or other.id in _sweep_timers
+                or mem.swept_sessions.get(other.id, 0) >= len(other.messages)
+                or not any(m.role == "user" for m in other.messages[mem.swept_sessions.get(other.id, 0):])):
+            continue
+        await _sweep_job(cur, other.id)
 
 
 async def _sweep_job(cur: Ctx, session_id: str) -> dict:
@@ -1435,8 +1450,8 @@ def _save_turn(cur: Ctx, session: ChatSession) -> None:
     _save(session, cur.sessions)
 
 
-def _spawn_memory_job(cur: Ctx, session_id: str) -> asyncio.Task:
-    task = asyncio.create_task(_memory_job(cur, session_id))
+def _spawn_memory_job(cur: Ctx, session_id: str, pressure: bool = False) -> asyncio.Task:
+    task = asyncio.create_task(_memory_job(cur, session_id, pressure))
     _memory_tasks.add(task)
     task.add_done_callback(_memory_tasks.discard)
     return task
@@ -1507,13 +1522,13 @@ async def _abort_later(key: str, delays=(0.5, 2.0)) -> None:
         await kobold.abort(key)
 
 
-async def _memory_job(cur: Ctx, session_id: str) -> None:
+async def _memory_job(cur: Ctx, session_id: str, pressure: bool = False) -> None:
     lock = _memory_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
         k = _YieldingKobold(kobold, f"pantheon-mem-{uuid.uuid4().hex[:12]}")
         _memory_running[session_id] = k
         try:
-            await _maintain_memory(cur, session_id, k)
+            await _maintain_memory(cur, session_id, k, pressure)
             _memory_yields.pop(session_id, None)
         except _MemoryYielded:
             print(f"[memory] job for session {session_id[:8]} yielded to a reply", flush=True)
@@ -1547,7 +1562,7 @@ def _apply_memory(cur: Ctx, worked: ChatSession, basis: tuple) -> bool:
     return True
 
 
-async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
+async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold, pressure: bool = False) -> None:
     """The memory maintenance a turn used to run before `done` (thresholds user-tunable).
 
     The verbatim window still has to advance or the prompt grows without bound, but
@@ -1565,7 +1580,9 @@ async def _maintain_memory(cur: Ctx, session_id: str, kobold=kobold) -> None:
     window = await _context_tokens(st)
     keep = min(st.keep_recent, st.summarize_after - 1)
     fold_end = len(session.messages) - keep
-    if (memory.needs_summary(session, st.summarize_after)
+    # Context pressure (#19): the prompt just dropped turns to fit the window, so fold now,
+    # whatever the message count says, before more of the chat is lost to the trim.
+    if ((pressure or memory.needs_summary(session, st.summarize_after))
             and fold_end > session.memory.last_summarized_index):
         am = _load_assistant_memory(cur, session.character_id, persona.id)
         am0 = am.model_copy(deep=True)
@@ -1636,8 +1653,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         # Another take: quote what is being replaced, so the new one differs from it.
         retake_of=_pending_swipes if req.regenerate else None)
     if trimmed and trimmed[0]:
-        # Not an error: memory absorbs these turns on its next fold. Logged
-        # because a session that trims every turn wants a lower "Summarize after".
+        # Not an error: memory absorbs these turns in the fold this pressure triggers after
+        # the reply (#19).
         print(f"[context] dropped {trimmed[0]} oldest turn(s) of session {session.id[:8]} "
               f"to fit {window} tokens", flush=True)
     # Qwen3 "thinking" toggle: /no_think must sit on the LAST user turn (this model
@@ -1799,7 +1816,7 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
         # long-term fold — and the reply is complete without them; holding `done` for
         # them kept her "thinking" for 30 s+ after the text was on screen.
         _save_turn(cur, session)
-        _spawn_memory_job(cur, session.id)
+        _spawn_memory_job(cur, session.id, pressure=bool(trimmed and trimmed[0]))
         _schedule_sweep(cur.user.id, session.id)    # the idle net if no "end" ever arrives
         yield _sse({"done": True, "message_id": msg.id, "expression": msg.expression,
                     "mood": session.mood.mood, "valence": session.mood.valence})
