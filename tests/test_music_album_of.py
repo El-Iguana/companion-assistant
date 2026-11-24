@@ -76,3 +76,22 @@ def test_the_tool_takes_album_of_and_ends_the_turn(tmp_path, monkeypatch):
     o = _world(monkeypatch, [_track(152, "Back in Black - Hells Bells", "ACDC", 0.78)])
     out = asyncio.run(media._play(_ctx(tmp_path), {"album_of": "Hells Bells"}))
     assert out["played"] and out["ok"] and "Best of AcDc" in out["final"] and o.expanded == [140]
+
+
+def test_fortuna_reads_the_years_she_doesnt_say(tmp_path, monkeypatch):
+    o = _world(monkeypatch, ANTS)
+    seen = {}
+    from services import fortuna
+
+    async def choose(state, instructions, criteria):
+        if "want the assistant" in instructions:
+            return ("play_music", 0.9)
+        seen.update(criteria)
+        return ("2", 0.9)
+    monkeypatch.setattr(fortuna, "choose", choose)
+    ctx = _ctx(tmp_path, session_id="s1")
+    asked = asyncio.run(media.fast_play(ctx, "put on the album with Ants Marching", "Mira"))
+    assert "1994" not in asked                                      # not said aloud
+    asyncio.run(media.fast_play(ctx, "the nineties one", "Mira"))
+    assert seen["2"] == "the second one: Under The Table And Dreaming by Dave Matthews Band (1994)"
+    assert o.expanded == [250]

@@ -675,9 +675,11 @@ async def _albums_with(st: dict, song: str) -> list[dict]:
             continue
         seen.add(album["id"])
         artist = (r.get("display") or "").rpartition(" — ")[2]
+        year = re.search(r"\((\d{4})\)$", artist)
         artist = re.sub(r"\s*\(\d{4}\)$", "", artist)
+        name = f"{album.get('title', '')} — {artist}" if artist else album.get("title", "")
         out.append({"id": str(album["id"]), "kind": "album", "playable": True,
-                    "name": f"{album.get('title', '')} — {artist}" if artist else album.get("title", ""),
+                    "name": f"{name} ({year.group(1)})" if year else name,   # the song's year: the album's
                     "start_track": int(r["item_id"]), "start_title": r.get("title") or song})
     return out[:ASK_MAX]
 
@@ -742,15 +744,25 @@ async def _answer(ctx: SkillContext, st: dict, text: str) -> str | None:
     """The answer to her either-or, played; None when it isn't one (the turn goes on as usual)."""
     from services import fortuna
 
-    pend = _pending.pop(_ask_key(ctx), None)
+    key = _ask_key(ctx)
+    pend = _pending.pop(key, None)
     if not pend or time.monotonic() - pend["at"] > ASK_FOR_S:
         return None
     opts = pend["options"]
-    labels = {str(i + 1): f"the {_ORDINALS[i]} one: {_spoken(o['name'])}" for i, o in enumerate(opts)}
+    # The year stays in what Fortuna reads ("the nineties one"), though not in what she says.
+    labels = {str(i + 1): f"the {_ORDINALS[i]} one: {o['name'].replace(' — ', ' by ')}" for i, o in enumerate(opts)}
     labels["none"] = "none of these: something else, or a new request"
     got = await fortuna.choose(text, f'She asked: "{question(opts)}" Which did the user choose?', labels)
-    if got is None or got[0] not in labels or got[0] == "none" or got[1] < CHOICE_MIN:
-        return None
+    if got is None or got[0] not in labels or got[0] == "none":
+        return None                                   # something else: the turn goes on as usual
+    if got[1] < CHOICE_MIN:
+        # An answer, but not one Fortuna can place ("the live one" read 0.40): ask once more in
+        # fixed words rather than hand it to her, who once played the wrong thing (42 s).
+        if pend.get("reasked"):
+            return None
+        _pending[key] = dict(pend, at=time.monotonic(), reasked=True)
+        ords = [f"the {_ORDINALS[i]}" for i in range(len(opts))]
+        return "Sorry, which one: " + ", ".join(ords[:-1]) + ", or " + ords[-1] + "?"
     try:
         return await _play_pick(ctx, st, opts[int(got[0]) - 1], pend["query"])
     except om.OrpheusError:
