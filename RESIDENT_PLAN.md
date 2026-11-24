@@ -194,6 +194,18 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       clean exit and a stopped unit isn't restarted by `Restart=always`. Checked on predator: both units
       inactive 22 s later, the chat swept, and `cantinero` brought both back listening.
 
+7. **R7 — a formal music player** (user, 2026-11-24; #71–#73).
+   1. ✅ **Micro player** (#71). Under her bar, always shown while music plays or is paused: title ·
+      artist, previous / play-pause / next / stop, a seek bar with times, volume, and ⬈ to open the full
+      player. The shell owns the player, so it pushes `core.state_message` (what Cantinero gets) to
+      `window.__cantineroMusic` every 0.5 s when it changed, and again after a page load. The page sends
+      `music:<action>[:<value>]` back through the ⚙ button's message handler (`core.page_command`
+      checks it), and `hud:<px>` when it shows or goes: the bar moves up by that much and the shell's
+      click-through strip grows by as much.
+   2. **The full player, more formal** (#72): stop, shuffle, repeat; a polished layout; keyboard
+      shortcuts.
+   3. **Browse and search the library by hand** (#73).
+
 ## Not in this plan
 
 - Several bartenders speaking at once.
