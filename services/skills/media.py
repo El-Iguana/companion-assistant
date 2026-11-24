@@ -204,7 +204,74 @@ async def _search(st: dict, query: str, kinds: list[str] | None) -> tuple[list[d
              for c in strong[:5]]
     return cands, {"ask": out.get("disambiguation_prompt") if len(strong) == len(found) else "",
                    "ambiguous": bool(out.get("needs_disambiguation")),
-                   "top": max((float(c.get("score") or 0) for c in strong), default=0.0)}
+                   "top": max((float(c.get("score") or 0) for c in strong), default=0.0),
+                   "raw": strong[:5]}
+
+
+# --- settling a tie without her (#79) --------------------------------------------------------
+# "play Back in Black" tied four tracks at 0.78: that album's tracks are tagged
+# "Back in Black - <song>", so the album name matched every one, and the model took 66 s to
+# pick (2026-11-24). The exact title settles most ties in code; Fortuna takes the rest.
+
+TIE_GAP = 0.01               # scores this close count as a tie
+TIE_FORTUNA_MIN = 0.8        # Fortuna must be this sure to settle what the title couldn't
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", (text or "").lower()).split())
+
+
+def _asked(query: str) -> tuple[str, str]:
+    """"play Back in Black by ACDC" -> ("back in black", "acdc")."""
+    what = _PLAY_WORDS.sub("", query).strip()
+    title, sep, artist = what.rpartition(" by ")
+    return (_norm(title), _norm(artist)) if sep and title else (_norm(what), "")
+
+
+def exact_pick(query: str, raw: list[dict]) -> int | None:
+    """The one tied candidate whose title is what was asked for, or None. A title counts when it
+    is the request, or its last " - " part is (the "Album - Song" tag pattern); "by <artist>" in
+    the request must then be in the candidate's display."""
+    if not raw:
+        return None
+    title, artist = _asked(query)
+    if not title:
+        return None
+    top = max(float(c.get("score") or 0) for c in raw)
+    hits = []
+    for i, c in enumerate(raw):
+        if float(c.get("score") or 0) < top - TIE_GAP:
+            continue
+        t = c.get("title") or ""
+        if title not in (_norm(t), _norm(t.rsplit(" - ", 1)[-1])):
+            continue
+        if artist and artist not in _norm(c.get("display") or ""):
+            continue
+        hits.append(i)
+    return hits[0] if len(hits) == 1 else None
+
+
+async def _settle(query: str, raw: list[dict]) -> int | None:
+    """Which tied candidate was meant: the exact title, else Fortuna when it is sure, else None
+    (she asks)."""
+    i = exact_pick(query, raw)
+    if i is not None:
+        return i
+    from services import fortuna
+    top = max((float(c.get("score") or 0) for c in raw), default=0.0)
+    tied = [i for i, c in enumerate(raw) if float(c.get("score") or 0) >= top - TIE_GAP]
+    if len(tied) < 2:
+        return None
+    labels = {}
+    for i in tied:
+        labels.setdefault(raw[i].get("display") or raw[i].get("title") or str(i), i)
+    if len(labels) < 2:
+        return None
+    got = await fortuna.choose(query, "Which of these did the user ask to play?",
+                               {d: d for d in labels})
+    if got is None or got[1] < TIE_FORTUNA_MIN:
+        return None
+    return labels.get(got[0])
 
 
 async def _connect(ctx: SkillContext, args: dict) -> dict:
@@ -440,11 +507,18 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
             # model this took three media_play calls and 68 s to reach the same answer (R5).
             what = _PLAY_WORDS.sub("", query).strip() or query
             return f"I can't find {what} in your music."
-        if not cands or how["ambiguous"] or not cands[0].get("playable", True):
-            return None                               # she asks
-        if not sure and how["top"] < EXACT_SCORE:
-            return None                               # unsure, and no exact name: hers
+        if not cands:
+            return None
         pick = cands[0]
+        if how["ambiguous"]:
+            i = await _settle(query, how["raw"])        # a tie: the exact title, else Fortuna
+            if i is None:
+                return None                           # she asks
+            pick = cands[i]
+        elif not sure and how["top"] < EXACT_SCORE:
+            return None                               # unsure, and no exact name: hers
+        if not pick.get("playable", True):
+            return None
         dev = await _target(ctx, st)
         if _just_played(ctx, query, dev):
             return Done("It's playing.")
