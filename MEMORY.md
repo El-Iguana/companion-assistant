@@ -85,6 +85,17 @@ A **sweep** folds **everything** not yet folded, the recent turns included, so n
 chat is left out of long-term memory once it ends. `max_new` (`auto_facts_max_new`) is spent
 across **both** categories together.
 
+**Task notes are changed, not rewritten (Memory Phase 7, #17, 2026-11-23).** The notes pass shows
+the current threads numbered and asks for changes only: `DONE n`, `EDIT n: text`, `NEW: text`, or
+`NONE` (`apply_note_changes`). A thread the fold doesn't name stays. Rewriting the list from one
+chat's transcript let folding chat B drop a thread only chat A knew about.
+- `notes_touched` records when each note was last written or changed. A note untouched for
+  `NOTE_STALE_DAYS` (14) leaves the prompt (`live_notes`) but stays in the store and the modal.
+- Over `MAX_NOTES`, the stalest go.
+- A plain line where a change was asked for counts as NEW, unless it restates a note already there:
+  a model falling back to rewriting the list must not double it.
+- The status, junk and restated-instruction filters apply to every NEW and EDIT.
+
 **When a sweep runs** (since 2026-11-23; before, only a 5-minute timer in the browser did, and a
 closed tab, a reload or a restart before it fired left the recent turns out):
 

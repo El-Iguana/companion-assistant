@@ -376,7 +376,8 @@ def _load_assistant_memory(cur: Ctx, character_id: str, persona_id: str = "") ->
     view = AssistantMemory(
         character_id=character_id, persona_id=persona_id,
         directives=[d for d in shared.directives] + [d for d in own.directives if d.scope != "all"],
-        facts=facts, notes=own.notes, swept_sessions=own.swept_sessions, updated_at=own.updated_at)
+        facts=facts, notes=own.notes, notes_touched=own.notes_touched,
+        swept_sessions=own.swept_sessions, updated_at=own.updated_at)
     view.__dict__["_hidden_facts"] = hidden            # kept on save, never shown
     return view
 
@@ -390,7 +391,8 @@ def _save_assistant_memory(cur: Ctx, mem: AssistantMemory) -> None:
     own = AssistantMemory(
         character_id=mem.character_id,
         directives=[d for d in mem.directives if d.scope != "all"],
-        notes=mem.notes, swept_sessions=mem.swept_sessions, updated_at=mem.updated_at)
+        notes=mem.notes, notes_touched={n: t for n, t in mem.notes_touched.items() if n in mem.notes},
+        swept_sessions=mem.swept_sessions, updated_at=mem.updated_at)
     (cur.assistant / _SHARED).write_text(shared.model_dump_json(indent=2))
     (cur.assistant / f"{mem.character_id}.json").write_text(own.model_dump_json(indent=2))
 
@@ -403,7 +405,7 @@ def memory_for_turn(cur: Ctx, card: CharacterCard, persona: Persona, session: Ch
     what eval/memory_phase7 measures. ``session``'s last user message is the turn; ``now`` is
     when (the eval moves it to test expiry)."""
     mem = _load_assistant_memory(cur, session.character_id, persona.id)
-    return {"system": assistant_memory.block(mem, card.name, persona.name), "trailing": ""}
+    return {"system": assistant_memory.block(mem, card.name, persona.name, now=now), "trailing": ""}
 
 
 def _store_fold(cur: Ctx, before: AssistantMemory, after: AssistantMemory) -> None:
@@ -418,6 +420,7 @@ def _store_fold(cur: Ctx, before: AssistantMemory, after: AssistantMemory) -> No
     fresh = _load_assistant_memory(cur, after.character_id, after.persona_id)
     if fresh.notes == before.notes:
         fresh.notes = after.notes
+        fresh.notes_touched = after.notes_touched
     for field in ("directives", "facts"):
         had = {x.id for x in getattr(before, field)}
         has = {x.id for x in getattr(after, field)}
@@ -1071,6 +1074,9 @@ async def put_assistant_memory(body: dict, cur: Ctx = Depends(get_ctx)):
             raw = [l for l in raw.splitlines()]
         mem.notes = [str(n).strip()[:assistant_memory.NOTE_MAX_CHARS]
                      for n in raw if str(n).strip()][:assistant_memory.MAX_NOTES]
+        # A line kept as it was keeps its age; a new or reworded one is touched now (#17).
+        now_s = datetime.now().isoformat(timespec="seconds")
+        mem.notes_touched = {n: mem.notes_touched.get(n, now_s) for n in mem.notes}
     mem.updated_at = datetime.now().isoformat()
     _save_assistant_memory(cur, mem)
     return mem.model_dump()
