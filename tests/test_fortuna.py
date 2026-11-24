@@ -317,3 +317,10 @@ def test_an_artist_tied_with_their_own_work_is_the_artist():
     assert media.artist_pick(raw) == 0
     raw[1] = _track(5, "Purple Haze", "Someone Else", 0.7)
     assert media.artist_pick(raw) is None                     # someone else's track tied too
+
+
+def test_whispers_playback_is_play_back(tmp_path, monkeypatch):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], BACK_IN_BLACK, ambiguous=True)
+    asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    said = asyncio.run(media.fast_play(_ctx(tmp_path), "Playback in black.", "Mira"))
+    assert asked[0] == "play back in black" and isinstance(said, media.Done) and o.expanded == [141]

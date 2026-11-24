@@ -572,6 +572,9 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         return None
     head = re.compile(_HEAD.pattern.replace("{name}", re.escape(name) if name else "(?!)"), re.I)
     query = head.sub("", text).strip().rstrip("?.!")
+    # Whisper joins "Play Back in Black" into the word "playback" (predator, 2026-11-24), and
+    # nobody starts a request to her with "playback": it's "play back …".
+    query = re.sub(r"^playback\b", "play back", query, flags=re.I)
     if not query:
         return None
     if _ask_key(ctx) in _pending:                       # she just asked "which one?" (#81)
