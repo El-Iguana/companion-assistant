@@ -186,8 +186,13 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       in 20 s; now the audio callback drives it when frames stall: 18 in 20 s); and the resident's
       `/static` now says `Cache-Control: no-cache`, as the server's does, so an `--update` reaches the
       shell instead of a cached `voice.js`.
-   3. **Exit** (#67). The tray's Quit becomes Exit Cantinero: asks first if music is playing, then stops
-      the music, the shell and the resident service. Nothing restarts until the launcher or the next login.
+   3. ✅ **Exit** (#67). **Exit Cantinero** in the tray, in the Settings window (⚙ in her bar), on the app-menu
+      entry's right-click and as `cantinero --exit` (the shell's GApplication action `exit`). Asks first
+      if music is playing (`Gtk.AlertDialog`), then: the player stops and reports where; the page goes
+      to `about:blank`, so `pagehide` saves the chat to memory; `systemctl --user --no-block stop` the
+      resident; the shell quits with 0. Nothing restarts: the shell's `Restart=on-failure` ignores a
+      clean exit and a stopped unit isn't restarted by `Restart=always`. Checked on predator: both units
+      inactive 22 s later, the chat swept, and `cantinero` brought both back listening.
 
 ## Not in this plan
 
