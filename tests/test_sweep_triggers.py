@@ -134,3 +134,63 @@ def test_nothing_new_or_nobody_spoke_costs_no_backend_call(cur, session, folds, 
     assert asyncio.run(main.sweep_session(session.id, cur=cur))["swept"] is True
     assert asyncio.run(main.sweep_session(session.id, cur=cur))["swept"] is False  # again
     assert folds == [session.id] and probed == [1]
+
+
+# --- Memory Phase 7 #19: the episode, and context pressure ------------------------------------
+
+def test_the_end_of_an_episode_saves_her_other_chats_too(cur, session, folds):
+    """A quiet gap ends the episode for the bartender: her other chats with unread turns
+    (voice bursts in the desktop window) are saved with it; one still in use is left."""
+    voice = ChatSession(character_id=session.character_id, persona_id=session.persona_id,
+                        messages=[ChatMessage(role="user", content="play some jazz"),
+                                  ChatMessage(role="char", content="Playing.")])
+    busy = ChatSession(character_id=session.character_id, persona_id=session.persona_id,
+                       messages=[ChatMessage(role="user", content="still talking here")])
+    other_card = ChatSession(character_id="someone-else", persona_id=session.persona_id,
+                             messages=[ChatMessage(role="user", content="not hers")])
+    for s in (voice, busy, other_card):
+        main._save(s, cur.sessions)
+
+    async def go():
+        main._schedule_sweep(cur.user.id, busy.id, delay=60)      # in use: its own timer waits
+        main._schedule_sweep(cur.user.id, session.id, delay=0)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+        main._sweep_timers[busy.id].cancel()
+        await asyncio.gather(*list(main._sweep_tasks), return_exceptions=True)
+    asyncio.run(go())
+    assert folds == [session.id, voice.id]
+
+
+def test_context_pressure_folds_below_the_message_count(cur, session, monkeypatch):
+    calls = []
+
+    async def fold(kobold, mem, s, card, persona, upto=None, **k):
+        calls.append(upto)
+        return True
+    monkeypatch.setattr(main.assistant_memory, "fold", fold)
+    st = main._load_settings(cur)
+    st.summarize_after, st.keep_recent = 100, 2                     # far from the count trigger
+    main._save_settings(cur, st)
+    asyncio.run(main._maintain_memory(cur, session.id))
+    assert calls == []                                                # no pressure: no fold
+    asyncio.run(main._maintain_memory(cur, session.id, pressure=True))
+    assert calls == [len(session.messages) - 2]                       # pressure: fold all but the recent turns
+
+
+def test_a_turn_that_had_to_drop_turns_asks_for_a_fold(cur, session, model, monkeypatch):
+    seen = []
+    monkeypatch.setattr(main, "_spawn_memory_job", lambda cur, sid, pressure=False: seen.append(pressure))
+
+    async def small(st):
+        return 600                                   # a window too small for the whole chat
+    monkeypatch.setattr(main, "_context_tokens", small)
+    session.messages += [ChatMessage(role="user" if i % 2 else "char", content="word " * 60) for i in range(12)]
+    main._save(session, cur.sessions)
+
+    async def go():
+        await _turn(cur, session)
+        for t in list(main._sweep_timers.values()):
+            t.cancel()
+    asyncio.run(go())
+    assert seen == [True]
