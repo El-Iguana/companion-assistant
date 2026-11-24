@@ -294,6 +294,80 @@ async def _settle(query: str, raw: list[dict]) -> int | None:
     return labels.get(got[0])
 
 
+# --- an artist asked for: a random song of theirs, never a question --------------------------
+# "a song by Stevie Nicks" tied five of her tracks at 1.00 and she asked which; Whisper's
+# "Stevie Mix" scored 0.42 (under MIN_SCORE) and tied with a Dave Matthews "Radio Mix"
+# (2026-11-24). The user: "one should be selected at random without a further question".
+# So the artist is looked up on its own and matched to what was heard by spelling, and their
+# songs play shuffled.
+
+ARTIST_MATCH = 0.65          # "stevie mix" ~ "stevie nicks" 0.73, "stevie next" 0.70; "crash" ~ "crash test dummies" 0.43
+_BY_ARTIST = re.compile(
+    r"^(?:(?:a|an|any|one|some|another|a\s+few)\s+)?(?:random\s+)?"
+    r"(?:(?:songs?|tracks?|tunes?|music|numbers?|hits?)\s+|something\s+|anything\s+)(?:from|by)\s+(.+)$", re.I)
+
+
+def artist_asked(query: str) -> str:
+    """"play a song by Stevie Nicks" -> "Stevie Nicks"; "" when it doesn't ask for an artist's
+    music in so many words ("play Back in Black by ACDC" names a title)."""
+    m = _BY_ARTIST.match(_PLAY_WORDS.sub("", query).strip())
+    return m.group(1).strip().strip("\"'") if m else ""
+
+
+def _like(heard: str, name: str) -> float:
+    """How alike a heard artist and a library one are by spelling (1.0: one starts the other)."""
+    a, n = _norm(heard), _norm(name)
+    if len(a) < 3 or not n:
+        return 0.0
+    short, long_ = sorted((a, n), key=len)
+    if long_.startswith(short + " ") and len(short) >= 0.6 * len(long_):
+        return 1.0                                    # "Dave Matthews" for "Dave Matthews Band", not "Crash" for "Crash Test Dummies"
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a, n).ratio()
+
+
+async def find_artist(st: dict, heard: str) -> dict | None:
+    """The library artist meant by what was heard, or None. Orpheus finds Stevie Nicks for
+    "Stevie Mix" at 0.42; the spelling decides, not that score."""
+    out = await om.resolve(st["url"], st["token"], heard, ["artist"])
+    best = None
+    for c in out.get("candidates") or []:
+        if c.get("kind") != "artist" or not c.get("playable", True):
+            continue
+        r = _like(heard, c.get("title") or c.get("display") or "")
+        if r >= ARTIST_MATCH and (best is None or r > best[0]):
+            best = (r, c)
+    return best[1] if best else None
+
+
+def _artist_of(c: dict) -> str:
+    """"Edge Of Seventeen — Stevie Nicks (2007)" -> "stevie nicks"; an artist's own name."""
+    if c.get("kind") == "artist":
+        return _norm(c.get("title") or c.get("display") or "")
+    return _norm(re.sub(r"\s*\(\d{4}\)$", "", (c.get("display") or "").rpartition(" — ")[2]))
+
+
+def one_artist_pick(raw: list[dict], rng: random.Random | None = None) -> int | None:
+    """A tie of one artist's songs or albums ("a song by Stevie Nicks" tied five of hers):
+    any one of them, at random. None when the tie spans artists."""
+    if not raw:
+        return None
+    top = max(float(c.get("score") or 0) for c in raw)
+    tied = [i for i, c in enumerate(raw) if float(c.get("score") or 0) >= top - TIE_GAP
+            and c.get("playable", True)]
+    who = {_artist_of(raw[i]) for i in tied}
+    if len(tied) < 2 or len(who) != 1 or not next(iter(who)):
+        return None
+    return (rng or random).choice(tied)
+
+
+async def _play_artist(ctx: SkillContext, st: dict, artist: dict, query: str) -> str | None:
+    """Their songs, shuffled: a random one now, more of theirs after."""
+    pick = {"id": str(artist.get("item_id")), "kind": "artist",
+            "name": artist.get("title") or artist.get("display") or "", "playable": True}
+    return await _play_pick(ctx, st, pick, query)
+
+
 async def _connect(ctx: SkillContext, args: dict) -> dict:
     state = om.load(ctx.root)
     if om.paired(state):
@@ -380,6 +454,12 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
             # One call does what the fast lane does, and its line ends the turn (#82): a model
             # pass after a tool costs ~18 s, and she used to take three or four per play.
             from services import fortuna
+            who = artist_asked(query)                       # "a song by Stevie Nicks": any of hers
+            artist = await find_artist(st, who) if who else None
+            if artist:
+                said = await _play_artist(ctx, st, artist, query)
+                if said:
+                    return {"ok": True, "played": True, "final": said}
             (cands, how), kind = await asyncio.gather(
                 _search(st, query, args.get("kinds")),
                 fortuna.choose(query, "Does the user name what to play, or describe the kind of music they want?",
@@ -389,12 +469,22 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                 said = await _play_described(ctx, st, query)
                 if said:
                     return {"ok": True, "played": True, "final": said}
+            if not who and (not cands or (how["ambiguous"] and artist_pick(how["raw"]) is None)):
+                # Nothing, or a tie: maybe an artist Whisper misspelt ("Stevie Mix").
+                heard = _PLAY_WORDS.sub("", query).strip()
+                artist = await find_artist(st, heard) if heard else None
+                if artist:
+                    said = await _play_artist(ctx, st, artist, query)
+                    if said:
+                        return {"ok": True, "played": True, "final": said}
             if not cands:
                 return dict(error("MEDIA_NOT_FOUND", f"Nothing in the music library matches {query!r}."),
                             final=f"I can't find {_PLAY_WORDS.sub('', query).strip() or query} in your music.")
             pick = cands[0]
             if how["ambiguous"] and len(cands) > 1:
                 i = await _settle(query, how["raw"])
+                if i is None:
+                    i = one_artist_pick(how["raw"])          # several of one artist's: any of them
                 if i is not None:
                     pick = cands[i]
                 else:
@@ -415,8 +505,8 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                                 playlist_id="" if pick["id"].isdigit() else pick["id"])
         if not queue:
             return error("NOTHING_TO_PLAY", "Nothing in that can be played (its files may be missing).")
-        if args.get("shuffle"):
-            random.shuffle(queue)
+        if args.get("shuffle") or pick.get("kind") == "artist":
+            random.shuffle(queue)                       # an artist: any of their songs first
         await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
     except om.OrpheusError as e:
         return _refusal(e)
@@ -598,6 +688,14 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         except om.OrpheusError:
             return None
     music_catalog.refresh_soon(ctx.root, st)          # kept warm for the next vague play (#80)
+    who = artist_asked(query)
+    if who:                                           # "a song by Stevie Nicks": theirs, at random
+        try:
+            artist = await find_artist(st, who)
+            if artist:
+                return await _play_artist(ctx, st, artist, query)
+        except om.OrpheusError:
+            return None
     try:
         # Named ("play Crash") or described ("play something upbeat")? Asked while Orpheus
         # searches, so a play by name waits no longer for it.
@@ -608,6 +706,13 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         clear = cands and not how["ambiguous"] and how["top"] >= NAMED_SCORE
         if kind and kind[0] == "described" and kind[1] >= DESCRIBED_MIN and not clear:
             return await _play_described(ctx, st, query)
+        if not cands or (how["ambiguous"] and artist_pick(how["raw"]) is None):
+            # Nothing, or a tie: maybe an artist Whisper misspelt ("play Stevie Mix" scored 0.42
+            # and tied with a "Radio Mix"). Theirs, at random, before "I can't find" or a question.
+            heard = _PLAY_WORDS.sub("", query).strip()
+            artist = await find_artist(st, heard) if not who and heard else None
+            if artist:
+                return await _play_artist(ctx, st, artist, query)
         if not cands and sure:
             # A plain play of something the library doesn't have: say so now. Through the
             # model this took three media_play calls and 68 s to reach the same answer (R5).
@@ -618,6 +723,8 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         pick = cands[0]
         if how["ambiguous"]:
             i = await _settle(query, how["raw"])        # a tie: the exact title, else Fortuna
+            if i is None:
+                i = one_artist_pick(how["raw"])         # several of one artist's: any of them
             if i is None:
                 opts = either_or(cands, how["raw"])
                 if not opts:
@@ -646,6 +753,16 @@ async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str
                             playlist_id="" if pick["id"].isdigit() else pick["id"])
     if not queue:
         return None
+    if pick.get("kind") == "artist":
+        # An artist means any of their songs: shuffled, said by the one that starts (user,
+        # 2026-11-24: "one should be selected at random without a further question").
+        random.shuffle(queue)
+        await _send(dev["id"], {"type": "play", "queue": queue, "start_index": 0})
+        _remember_play(ctx, what, dev["id"])
+        first = queue[0].get("title") or ""
+        name = _spoken(pick["name"])
+        return Done(f"Playing {first} by {name}, then more of {name}, on {dev.get('name')}."
+                    if first else f"Playing {name}, shuffled, on {dev.get('name')}.")
     # An album asked for by one of its songs starts at that song (#87).
     start = next((i for i, e in enumerate(queue) if e.get("id") == pick.get("start_track")), 0)
     await _send(dev["id"], {"type": "play", "queue": queue, "start_index": start})
