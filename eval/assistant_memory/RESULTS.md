@@ -145,3 +145,33 @@ scored 0/3, 0/3, 1/3, 0/6 and 2/3 on essentially the same code. Its rate is the
 noisiest thing in this suite, and any conclusion drawn from three runs of it —
 including yesterday's — is worth very little. It needs more runs per verdict than
 the rest.
+
+
+---
+
+# Run 4: Fortuna gate and junk-note filter (2026-11-23, Cydonia-24B, 5 × 3)
+
+```
+before (FORTUNA=off)       clean 7/15  misfiled 0/15  forbidden 3/15  missed 5/15   1m56s
+gate only                  clean 7/15  misfiled 0/15  forbidden 2/15  missed 6/15   2m49s
+gate + junk notes + skip   clean 9/15  misfiled 0/15  forbidden 1/15  missed 5/15   2m02s
+```
+
+- **The gate alone moved nothing that matters.** It leaves user turns that Fortuna is sure hold
+  nothing out of the *extraction* (`eval/memory_decisions`: 0 invented, against KoboldCPP's 21).
+  Here, though, every forbidden item came from the *notes* pass, which the gate doesn't touch.
+  On a transcript of pure small talk the current model writes the literal `(empty)`,
+  `Updated list:`, `</assink>`, and prose about the conversation ("The interaction shows Brian
+  checking if Mira is awake"), and every one of those is stored as a task note.
+- **What worked:**
+  - those four shapes are dropped in code (`_JUNK_NOTE`);
+  - a chunk whose user turns Fortuna is sure are all small talk is skipped entirely, notes
+    unchanged, with no model call.
+
+  `nothing-durable` went from 0/3 to 2/3. Its one failure came from a run where Fortuna was
+  unsure of a turn, so the notes pass ran and wrote a status line.
+- **Missed is unchanged** and isn't the gate's doing. `same-sentence` still loses "Tom and Bill
+  are friends" and "Bill welds" (0/3 before and after), the same extraction misses as Run 3.
+
+The prompt-rule lesson holds a fourth time: the notes prompt says to write NONE for nothing
+outstanding. The model wrote "(empty)" and a header instead, and code had to catch it.
