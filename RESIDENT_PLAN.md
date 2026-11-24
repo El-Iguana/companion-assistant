@@ -202,8 +202,16 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
       `music:<action>[:<value>]` back through the ⚙ button's message handler (`core.page_command`
       checks it), and `hud:<px>` when it shows or goes: the bar moves up by that much and the shell's
       click-through strip grows by as much.
-   2. **The full player, more formal** (#72): stop, shuffle, repeat; a polished layout; keyboard
-      shortcuts.
+   2. ✅ **The full player, more formal** (#72). A header (the cover beside title, artist, album and
+      "Track n of m"); a transport row of shuffle, previous, play (larger, lit), next, stop and repeat;
+      volume; the queue as numbered rows with artist and length, the playing one lit. Keys: Space,
+      ←/→ 10 s, Ctrl+←/→ track, ↑/↓ volume, S, R, Esc hides it. **Shuffle** reorders the queue (the
+      current item first, the rest at random), so "what's next?" and the list stay true; off restores
+      the loaded order on the same item; a new queue arrives shuffled while it's on. **Repeat** cycles
+      off → all → one; one replays a track that ended by itself, and next and previous still move. A
+      track that won't play is skipped even on repeat one, and a whole queue failing in a row stops
+      the player rather than going round for ever on repeat all. The state carries `shuffle` and
+      `repeat`.
    3. **Browse and search the library by hand** (#73).
 
 ## Not in this plan
