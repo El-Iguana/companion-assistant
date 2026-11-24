@@ -82,9 +82,12 @@ class DesktopShell(Gtk.Application):
     # -- lifecycle ---------------------------------------------------------
     def do_activate(self):
         # A second activation is the launcher (desktop/cantinero) asking for her: show her
-        # even when she was hidden to the tray, the same way the tray's Show does.
+        # even when she was hidden to the tray, the same way the tray's Show does, and wave,
+        # so the shortcut always answers: with her already on screen, showing changes nothing.
         if self.win:
-            self._show()
+            was_hidden = self._show()
+            # A new surface takes a moment to map and be placed; wave once she's there.
+            GLib.timeout_add(700 if was_hidden else 0, self._wave)
             return
 
         self.win = Gtk.ApplicationWindow(application=self)
@@ -374,9 +377,19 @@ class DesktopShell(Gtk.Application):
         else:
             self._show()
 
-    def _show(self):
+    def _wave(self):
+        """Her hello (vtuber.mjs listens for avatar:wave; a card with no 3D avatar ignores it,
+        and the avatar's own 6 s cooldown absorbs a held-down shortcut)."""
+        if self.view:
+            self.view.evaluate_javascript(
+                'window.dispatchEvent(new CustomEvent("avatar:wave"))',
+                -1, None, None, None, None, None)
+        return False                                   # one shot
+
+    def _show(self) -> bool:
+        """Show and raise her. Returns True if she was hidden."""
         if not self.win:
-            return
+            return False
         was_hidden = not self.win.get_visible()
         self.win.set_visible(True)
         self.win.present()
@@ -386,6 +399,7 @@ class DesktopShell(Gtk.Application):
             # region and the position have to be reapplied, not just the region.
             GLib.timeout_add(250, self._apply_input_region_once)
             GLib.timeout_add(400, self._restore_geometry)
+        return was_hidden
 
     # -- character switching -------------------------------------------------
     # Ids are opaque strings, but dbusmenu addresses items by integer, so the
