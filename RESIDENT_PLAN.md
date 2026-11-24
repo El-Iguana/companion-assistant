@@ -166,7 +166,8 @@ The desktop page's whole surface is small: `/pdesk/{state,open,chat,sweep,settin
    resident machine and works with the server down.
    1. ✅ **Launcher** (#65). `desktop/cantinero`: if the shell isn't running, it starts both units
       (without enabling them); if it is, it calls `org.freedesktop.Application.Activate` on the shell's
-      GApplication, whose `do_activate` shows her even when hidden to the tray. `install.sh` writes
+      GApplication, whose `do_activate` shows her even when hidden to the tray and makes her wave
+      (`avatar:wave`), so the shortcut always answers even when she is already on screen. `install.sh` writes
       `~/.local/share/applications/cantinero.desktop` (the app menu) with `X-KDE-Shortcuts=Meta+C`,
       links it into `~/.local/share/kglobalaccel/` (Plasma reads default shortcuts only there;
       kglobalaccel picked it up at once on predator, no re-login), and links `~/.local/bin/cantinero`.
