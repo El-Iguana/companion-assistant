@@ -597,6 +597,12 @@
 
   // ---- hands-free (continuous VAD) --------------------------------------------------
   let hfStream = null, hfCtx = null, hfAnalyser = null, hfRAF = null, hfProc = null;
+  // When hfTick last ran. It rides animation frames, and a window nobody can see gets none
+  // (the desktop avatar hidden to the tray, a background tab): the audio callback below then
+  // drives it, so she still hears the wake word. Measured on predator 2026-11-24: hidden,
+  // the check ran once in 20 s.
+  let hfLastTick = 0;
+  const HF_TICK_STALL_MS = 250;
   let hfSpeaking = false, hfSilenceStart = 0, hfActive = false, hfLastError = "";
   let hfPcm = [], hfCapturing = false, hfPre = [], hfPeak = 0, hfPeakAt = 0, hfWakeTimer = null;
   // Set when an utterance opened while she was audible: the barge-in waits until the
@@ -647,8 +653,11 @@
     if (!streaming) sendText(msg);
   }
 
+  function hfFrame() { hfRAF = null; hfTick(); }
+
   function hfTick() {
     if (!hfActive) return;
+    hfLastTick = performance.now();
     const data = new Uint8Array(hfAnalyser.frequencyBinCount);
     hfAnalyser.getByteTimeDomainData(data);
     let sum = 0; for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
@@ -688,7 +697,7 @@
         hfStopUtterance();
       }
     }
-    hfRAF = requestAnimationFrame(hfTick);
+    if (!hfRAF) hfRAF = requestAnimationFrame(hfFrame);   // one pending frame, never a pile
   }
 
   async function engageHandsFree() {
@@ -729,6 +738,7 @@
         } catch (err) { console.error("[mic] brain:", err); }
         return;
       }
+      if (performance.now() - hfLastTick > HF_TICK_STALL_MS) hfTick();   // no frames: see hfLastTick
       if (hfCapturing) { hfPcm.push(block); return; }
       // Rolling pre-roll: the gate opens once speech is already loud, and the wake word
       // is the very first thing said — exactly the part that would be clipped.
