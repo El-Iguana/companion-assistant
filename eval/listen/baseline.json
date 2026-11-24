@@ -1,0 +1,766 @@
+{
+ "energy": {
+  "total": {
+   "wake": 28,
+   "hit": 10,
+   "garbled": 0,
+   "whisper": 61,
+   "whisper_no_speech": 25,
+   "missed": 18,
+   "false_sends": 0,
+   "delay_median_s": 1.02,
+   "delay_p90_s": 1.44
+  },
+  "scenes": [
+   {
+    "scene": "her_replies",
+    "wake": 6,
+    "hit": 2,
+    "garbled": 0,
+    "missed": [
+     "play some blues",
+     "what time is it",
+     "pause the music",
+     "turn it down a bit"
+    ],
+    "false_sends": [],
+    "whisper": 7,
+    "whisper_no_speech": 1,
+    "delays": [
+     1.4378794860197228,
+     0.9774640000723309
+    ],
+    "rows": [
+     {
+      "start": 3.07,
+      "end": 6.14,
+      "decided": 6.14,
+      "strict": true,
+      "whisper_s": 0.71,
+      "text": "Mira, remind me to call my mother at 5.",
+      "sent": "remind me to call my mother at 5.",
+      "speech": true
+     },
+     {
+      "start": 14.93,
+      "end": 17.4,
+      "decided": 17.4,
+      "strict": true,
+      "whisper_s": 0.16,
+      "text": "Mirror, I play some blues.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 23.97,
+      "end": 26.36,
+      "decided": 26.36,
+      "strict": true,
+      "whisper_s": 0.13,
+      "text": "Mirror, what time is it?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 33.02,
+      "end": 34.81,
+      "decided": 34.81,
+      "strict": true,
+      "whisper_s": 0.15,
+      "text": "Mira, next song.",
+      "sent": "next song.",
+      "speech": true
+     },
+     {
+      "start": 42.4,
+      "end": 44.53,
+      "decided": 44.53,
+      "strict": true,
+      "whisper_s": 0.15,
+      "text": "Mirror paused the music.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 52.47,
+      "end": 54.69,
+      "decided": 54.69,
+      "strict": true,
+      "whisper_s": 0.13,
+      "text": "Miro, turn it down a bit.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 87.19,
+      "end": 88.21,
+      "decided": 88.21,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     }
+    ]
+   },
+   {
+    "scene": "music_0",
+    "wake": 4,
+    "hit": 0,
+    "garbled": 0,
+    "missed": [
+     "remind me to call my mother at five",
+     "play some blues",
+     "what time is it",
+     "next song"
+    ],
+    "false_sends": [],
+    "whisper": 0,
+    "whisper_no_speech": 0,
+    "delays": [],
+    "rows": []
+   },
+   {
+    "scene": "music_1",
+    "wake": 4,
+    "hit": 1,
+    "garbled": 0,
+    "missed": [
+     "pause the music",
+     "turn it down a bit",
+     "what's the weather like tomorrow"
+    ],
+    "false_sends": [],
+    "whisper": 8,
+    "whisper_no_speech": 5,
+    "delays": [
+     2.164000926990994
+    ],
+    "rows": [
+     {
+      "start": 0.09,
+      "end": 1.54,
+      "decided": 1.54,
+      "strict": false,
+      "whisper_s": 0.48,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 2.13,
+      "end": 8.19,
+      "decided": 8.19,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "Mere up, pause the music.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 8.28,
+      "end": 10.58,
+      "decided": 10.58,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 11.26,
+      "end": 13.56,
+      "decided": 13.56,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 13.91,
+      "end": 16.64,
+      "decided": 16.64,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Mirror, turn it down a bit.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 17.23,
+      "end": 19.54,
+      "decided": 19.54,
+      "strict": false,
+      "whisper_s": 0.98,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 20.22,
+      "end": 22.52,
+      "decided": 22.52,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 23.12,
+      "end": 28.49,
+      "decided": 28.49,
+      "strict": false,
+      "whisper_s": 0.16,
+      "text": "Mira, add milk to the shopping list.",
+      "sent": "add milk to the shopping list.",
+      "speech": true
+     }
+    ]
+   },
+   {
+    "scene": "music_2",
+    "wake": 4,
+    "hit": 0,
+    "garbled": 0,
+    "missed": [
+     "play the album with Ants Marching",
+     "who sings this song",
+     "stop the music",
+     "how long until dinner is ready"
+    ],
+    "false_sends": [],
+    "whisper": 0,
+    "whisper_no_speech": 0,
+    "delays": [],
+    "rows": []
+   },
+   {
+    "scene": "no_wake_music",
+    "wake": 0,
+    "hit": 0,
+    "garbled": 0,
+    "missed": [],
+    "false_sends": [],
+    "whisper": 0,
+    "whisper_no_speech": 0,
+    "delays": [],
+    "rows": []
+   },
+   {
+    "scene": "no_wake_noise",
+    "wake": 0,
+    "hit": 0,
+    "garbled": 0,
+    "missed": [],
+    "false_sends": [],
+    "whisper": 20,
+    "whisper_no_speech": 13,
+    "delays": [],
+    "rows": [
+     {
+      "start": 5.12,
+      "end": 7.59,
+      "decided": 7.59,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "Did you feed the cat this morning?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 8.19,
+      "end": 10.41,
+      "decided": 10.41,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 18.34,
+      "end": 20.9,
+      "decided": 20.9,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "I think we should order pizza tonight.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 27.56,
+      "end": 28.66,
+      "decided": 28.66,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 30.03,
+      "end": 30.97,
+      "decided": 30.97,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 31.05,
+      "end": 33.61,
+      "decided": 33.61,
+      "strict": false,
+      "whisper_s": 0.14,
+      "text": "Can you pass me the remote?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 41.63,
+      "end": 42.66,
+      "decided": 42.66,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 43.77,
+      "end": 45.98,
+      "decided": 45.98,
+      "strict": false,
+      "whisper_s": 0.14,
+      "text": "We're almost out of coffee again.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 46.41,
+      "end": 47.43,
+      "decided": 47.43,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 49.31,
+      "end": 50.33,
+      "decided": 50.33,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 55.71,
+      "end": 56.73,
+      "decided": 56.73,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 57.07,
+      "end": 60.23,
+      "decided": 60.23,
+      "strict": false,
+      "whisper_s": 0.16,
+      "text": "That movie was a lot longer than I expected.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 60.57,
+      "end": 61.6,
+      "decided": 61.6,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 66.71,
+      "end": 67.65,
+      "decided": 67.65,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 68.59,
+      "end": 70.81,
+      "decided": 70.81,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Can you pass me the remote?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 72.52,
+      "end": 73.54,
+      "decided": 73.54,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 74.05,
+      "end": 75.08,
+      "decided": 75.08,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 77.38,
+      "end": 78.4,
+      "decided": 78.4,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 79.0,
+      "end": 80.28,
+      "decided": 80.28,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 83.09,
+      "end": 84.46,
+      "decided": 84.46,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     }
+    ]
+   },
+   {
+    "scene": "noisy_room",
+    "wake": 5,
+    "hit": 4,
+    "garbled": 0,
+    "missed": [
+     "how long until dinner is ready"
+    ],
+    "false_sends": [],
+    "whisper": 15,
+    "whisper_no_speech": 5,
+    "delays": [
+     1.0238482140367848,
+     1.0068429869012938,
+     1.0411574369156682,
+     0.9354351989869016
+    ],
+    "rows": [
+     {
+      "start": 3.07,
+      "end": 5.8,
+      "decided": 5.8,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Mira, what's the weather like tomorrow?",
+      "sent": "what's the weather like tomorrow?",
+      "speech": true
+     },
+     {
+      "start": 12.11,
+      "end": 15.61,
+      "decided": 15.61,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "The meeting moved to Thursday afternoon.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 17.83,
+      "end": 18.77,
+      "decided": 18.77,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 19.62,
+      "end": 22.61,
+      "decided": 22.61,
+      "strict": false,
+      "whisper_s": 0.14,
+      "text": "Mira, play the album with Ants Marching.",
+      "sent": "play the album with Ants Marching.",
+      "speech": true
+     },
+     {
+      "start": 29.18,
+      "end": 32.42,
+      "decided": 32.42,
+      "strict": false,
+      "whisper_s": 0.16,
+      "text": "That movie was a lot longer than I expected.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 36.6,
+      "end": 39.16,
+      "decided": 39.16,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "Mira, who sings this song.",
+      "sent": "who sings this song.",
+      "speech": true
+     },
+     {
+      "start": 39.33,
+      "end": 40.27,
+      "decided": 40.27,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 41.21,
+      "end": 42.14,
+      "decided": 42.14,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 44.62,
+      "end": 47.95,
+      "decided": 47.95,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "I think we should order pizza tonight.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 51.36,
+      "end": 53.58,
+      "decided": 53.58,
+      "strict": false,
+      "whisper_s": 0.12,
+      "text": "Mira, stop the music.",
+      "sent": "stop the music.",
+      "speech": true
+     },
+     {
+      "start": 54.17,
+      "end": 55.11,
+      "decided": 55.11,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 55.71,
+      "end": 56.65,
+      "decided": 56.65,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 57.84,
+      "end": 59.89,
+      "decided": 59.89,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Can you pass me the remote?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 62.62,
+      "end": 65.52,
+      "decided": 65.52,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "Mirror how long until dinner is ready.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 70.81,
+      "end": 73.37,
+      "decided": 73.37,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "We're almost out of coffee again.",
+      "sent": "",
+      "speech": true
+     }
+    ]
+   },
+   {
+    "scene": "quiet_room",
+    "wake": 5,
+    "hit": 3,
+    "garbled": 0,
+    "missed": [
+     "what time is it",
+     "add milk to the shopping list"
+    ],
+    "false_sends": [],
+    "whisper": 11,
+    "whisper_no_speech": 1,
+    "delays": [
+     0.9672459830632434,
+     0.9564380310298866,
+     1.1065622560000037
+    ],
+    "rows": [
+     {
+      "start": 3.07,
+      "end": 5.12,
+      "decided": 5.12,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "MIRO what time is it?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 10.66,
+      "end": 13.74,
+      "decided": 13.74,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "That movie was a lot longer than I expected.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 17.66,
+      "end": 19.45,
+      "decided": 19.45,
+      "strict": false,
+      "whisper_s": 0.12,
+      "text": "Mira, next song.",
+      "sent": "next song.",
+      "speech": true
+     },
+     {
+      "start": 23.03,
+      "end": 25.68,
+      "decided": 25.68,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "I think we should order pizza tonight.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 28.41,
+      "end": 30.8,
+      "decided": 30.8,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Mira pours the music.",
+      "sent": "pours the music.",
+      "speech": true
+     },
+     {
+      "start": 31.31,
+      "end": 32.42,
+      "decided": 32.42,
+      "strict": false,
+      "whisper_s": 0.0,
+      "text": "",
+      "sent": "",
+      "speech": false
+     },
+     {
+      "start": 36.68,
+      "end": 38.73,
+      "decided": 38.73,
+      "strict": false,
+      "whisper_s": 0.12,
+      "text": "Can you pass me the remote?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 41.29,
+      "end": 43.68,
+      "decided": 43.68,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Mira, turn it down a bit.",
+      "sent": "turn it down a bit.",
+      "speech": true
+     },
+     {
+      "start": 49.65,
+      "end": 51.7,
+      "decided": 51.7,
+      "strict": false,
+      "whisper_s": 0.12,
+      "text": "Can you pass me the remote?",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 56.05,
+      "end": 58.95,
+      "decided": 58.95,
+      "strict": false,
+      "whisper_s": 0.13,
+      "text": "Mirror add milk to the shopping list.",
+      "sent": "",
+      "speech": true
+     },
+     {
+      "start": 62.88,
+      "end": 65.61,
+      "decided": 65.61,
+      "strict": false,
+      "whisper_s": 0.15,
+      "text": "The meeting moved to Thursday afternoon.",
+      "sent": "",
+      "speech": true
+     }
+    ]
+   }
+  ]
+ }
+}
