@@ -79,8 +79,11 @@
   // The DJ: music on the Orpheus player is lowered while she speaks or is listening
   // after her wake word, and restored after (POST /pmedia/music/duck; the server sends
   // duck/unduck, and does nothing unless the DJ is paired and has played somewhere).
-  // Down at once; back up only after 1.5 s quiet, so the gaps between her sentences
-  // don't pump the music.
+  // Down at once; back up 0.5 s after she stops. While a reply she has started is still
+  // streaming she counts as speaking, so a wait for the model's next sentence doesn't pump
+  // the music. syncDuck runs again when her speech queue empties (consumeSpeech): it used
+  // not to, so the music stayed down until some unrelated repaint, or the player's own
+  // 60 s expiry (user, 2026-11-24: "a lag when going to full volume").
   let ducked = false, unduckTimer = null;
   function sendDuck(on) {
     ducked = on;
@@ -90,15 +93,16 @@
   }
   function syncDuck() {
     let want;
-    try { want = !!ttsSource || speechConsuming || awake; } catch { return; }   // before init
+    try { want = !!ttsSource || speechConsuming || awake || (streaming && speechFedLen > 0); }
+    catch { return; }                                                       // before init
     if (want) {
       if (unduckTimer) { clearTimeout(unduckTimer); unduckTimer = null; }
       if (!ducked) sendDuck(true);
     } else if (ducked && !unduckTimer) {
       unduckTimer = setTimeout(() => {
         unduckTimer = null;
-        if (!ttsSource && !speechConsuming && !awake) sendDuck(false);
-      }, 1500);
+        if (!ttsSource && !speechConsuming && !awake && !(streaming && speechFedLen > 0)) sendDuck(false);
+      }, 500);
     }
   }
 
@@ -294,6 +298,7 @@
     }
     speechConsuming = false;
     if (speechQueue.some(i => i.run === ttsRun)) consumeSpeech();
+    else syncDuck();                                  // she's done: the music comes back up
   }
 
   // Assistants speak everything: quotes in a reply mark a term or a citation, not dialogue.
@@ -940,7 +945,7 @@
       configureBrain();
       repaint();
     },
-    setStreaming(on) { streaming = !!on; },
+    setStreaming(on) { streaming = !!on; if (!on) syncDuck(); },
     // A PNG data URL of a .vrm, head and shoulders, for a card's profile picture.
     async captureVrmStill(url) {
       const m = await importAvatarModule();

@@ -409,6 +409,13 @@ _HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?(?:(?:ca
                    r"(?:please\b[ ,]*)?", re.I)
 
 
+class Done(str):
+    """What she says after a music action that worked ("Playing Rush on Predator."). The page
+    shows it and lets the music play rather than speaking over it (user, 2026-11-24: "She does
+    not need to announce the song... just play it normally and show the text"). A failure
+    stays a plain str, so it is still said aloud."""
+
+
 async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     """A plain "play …" done without the model: what she says, or None to hand it to her."""
     from services import fortuna
@@ -440,7 +447,7 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
         pick = cands[0]
         dev = await _target(ctx, st)
         if _just_played(ctx, query, dev):
-            return "It's playing."
+            return Done("It's playing.")
         queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                                 playlist_id="" if pick["id"].isdigit() else pick["id"])
         if not queue:
@@ -449,7 +456,7 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     except om.OrpheusError:
         return None                                   # let her explain it
     _remember_play(ctx, query, dev["id"])
-    return f"Playing {_spoken(pick['name'])} on {dev.get('name')}."
+    return Done(f"Playing {_spoken(pick['name'])} on {dev.get('name')}.")
 
 
 async def fast_control(ctx: SkillContext, cmd: dict) -> str:
@@ -475,7 +482,7 @@ async def fast_control(ctx: SkillContext, cmd: dict) -> str:
                 "NOTHING_PLAYING": "Nothing's playing.",
                 "WHICH_PLAYER": "More than one player is on, so tell me which.",
                 "SERVER_UNREACHABLE": "I can't reach the music server."}.get(e.code, "That didn't work.")
-    return f"Volume {body['level']}." if cmd["type"] == "volume" else _SAID.get(cmd["type"], "Done.")
+    return Done(f"Volume {body['level']}." if cmd["type"] == "volume" else _SAID.get(cmd["type"], "Done."))
 
 
 async def duck(user_id: str, root, on: bool) -> None:

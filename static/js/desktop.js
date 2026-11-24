@@ -163,7 +163,7 @@
     streaming = true; V.setStreaming(true); paint();
     V.beginReply();
     controller = new AbortController();
-    let acc = "", done = null;
+    let acc = "", done = null, quiet = false;
     caption("…", 0);
     try {
       const r = await fetch("/pdesk/chat", {
@@ -184,10 +184,12 @@
           for (const line of block.split("\n")) {
             if (!line.startsWith("data: ")) continue;
             const ev = JSON.parse(line.slice(6));
-            if (ev.token !== undefined) {
+            if (ev.quiet) {
+              quiet = true;                   // a music action that worked: shown, not said
+            } else if (ev.token !== undefined) {
               acc += ev.token;
-              V.feed(acc, false);
-              caption(visible(acc), 0);
+              if (!quiet) V.feed(acc, false);
+              caption((quiet ? "🎵 " : "") + visible(acc), 0);
             } else if (ev.expr) {
               V.expr(ev.expr);
             } else if (ev.skill) {
@@ -206,12 +208,12 @@
       streaming = false; V.setStreaming(false); controller = null;
     }
     if (done) {
-      V.feed(acc, true);
+      if (!quiet) V.feed(acc, true);
       V.flushExpr();
       mood = { mood: done.mood, valence: done.valence };
       V.mood(done.mood || "", done.valence || 0, "");
       portrait();
-      caption(visible(acc), 9000);
+      caption((quiet ? "🎵 " : "") + visible(acc), 9000);
     } else if (!acc) {
       caption("", 0);
     }

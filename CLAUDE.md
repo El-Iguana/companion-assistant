@@ -779,6 +779,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   - **The music fast lane:** `media.fast_play`. Fortuna says `play_music` at `LANE_MIN` (0.8) or
     more, the name and "can you" are stripped, and Orpheus returns one clear match: it plays with no
     model turn. Anything unsure goes to her as before.
+  - **A music action that worked is shown, not said** (user, 2026-11-24). `media.Done` (a `str`)
+    marks the line of a fast play, a fast control or a DJ tool whose results all came back ok; the
+    chat sends `{"quiet": true}` before it, and the desktop page captions it (🎵) instead of
+    speaking over the music. A miss ("I can't find …") stays a plain str and is said aloud. The web
+    chat ignores the event.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
   - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns

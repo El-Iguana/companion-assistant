@@ -1723,6 +1723,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                     acc, answered = lane, True
             if answered:
                 used_skill = True
+                if isinstance(acc, media_skill.Done):
+                    yield _sse({"quiet": True})       # it worked: shown, not said over the music
                 if "neutral" in known:
                     tagged.append("neutral")      # no classifier round-trip for "Paused."
                 yield _sse({"token": acc})
@@ -1770,6 +1772,8 @@ async def chat(req: ChatRequest, cur: Ctx = Depends(get_ctx), player_id: str = "
                 finals = [r.get("final") for _c, r in results]
                 if finals and all(isinstance(f, str) and f for f in finals):
                     text = " ".join(finals)
+                    if all(r.get("ok") and c["name"] in ("media_play", "media_control") for c, r in results):
+                        yield _sse({"quiet": True})   # the music did what was asked: shown, not said
                     acc += text
                     yield _sse({"token": text})
                     if "neutral" in known:
