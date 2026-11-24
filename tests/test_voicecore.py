@@ -126,12 +126,14 @@ def test_half_duplex_does_not_listen_while_she_is_audible():
     assert _feed(seg, [LOUD] * 5, audible=True) == []
 
 
-def test_speaking_over_her_cuts_her_off_when_she_is_silent_between_lines():
+def test_a_sound_while_she_thinks_waits_for_the_transcript():
+    # A cough while the reply streams used to cancel it at the gate, before the transcript
+    # could say it wasn't speech (predator, 2026-11-24). Now only words interrupt.
     seg = vc.Segmenter()
     acts = _feed(seg, [LOUD], busy=True, her_turn=True)
-    assert {"do": "abort", "at": 0} in acts
+    assert not any(a["do"] == "abort" for a in acts)
     utt = [a["utterance"] for a in _feed(seg, [QUIET] * 12, start=1) if a["do"] == "utterance"][0]
-    assert utt.strict                                          # overlapped her turn
+    assert utt.pending_barge_in and utt.strict                 # overlapped her turn
 
 
 def test_full_duplex_waits_for_the_transcript_before_interrupting():

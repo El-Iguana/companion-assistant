@@ -672,11 +672,12 @@
         hfStartUtterance();
         hfStrict = herTurn(now);
         hfSpeaking = true; hfSilenceStart = 0;
-        // Energy cannot tell your voice from her echo, and only the transcript can — so
-        // while she is audible the abort waits for it (one STT round-trip of latency, and
-        // only where echo is possible). When she is silent it still cuts instantly.
-        if (audible && settings.full_duplex) hfPendingBargeIn = true;
-        else if (ttsSource || streaming) abortAndWait();
+        // Energy cannot tell your voice from her echo, or from a cough or a keyboard, and
+        // only the transcript can — so the abort always waits for it (one STT round-trip).
+        // Cutting at the gate let any sound in the room cancel a reply she was still
+        // thinking about: on predator a webcam mic heard two small noises during the model's
+        // ~15 s, and both "Mira, what time is it?" turns were cancelled unsaved (2026-11-24).
+        if (streaming || ttsSource || (audible && settings.full_duplex)) hfPendingBargeIn = true;
       }
     } else {
       if (herTurn(now)) hfStrict = true;
