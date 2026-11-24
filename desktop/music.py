@@ -164,6 +164,14 @@ class MusicPlayer:
     def show(self):
         self.win.present()
 
+    def playing(self) -> bool:
+        return self.status == "playing"
+
+    def stop(self):
+        """Exit Cantinero: stop, report where it stopped, close the Orpheus session."""
+        if self.status != "idle":
+            self._stop()
+
     def toggle(self):
         if self.win.get_visible():
             self.win.set_visible(False)

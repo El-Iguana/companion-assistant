@@ -128,6 +128,11 @@ Categories=Utility;
 Keywords=assistant;voice;music;bartender;
 StartupNotify=false
 X-KDE-Shortcuts=Meta+C
+Actions=exit;
+
+[Desktop Action exit]
+Name=Exit Cantinero
+Exec=$SRC/desktop/cantinero --exit
 EOF
   ln -sfn "$APPS/cantinero.desktop" "$SHORTCUTS/cantinero.desktop"
   ln -sfn "$SRC/desktop/cantinero" "$BIN/cantinero"
