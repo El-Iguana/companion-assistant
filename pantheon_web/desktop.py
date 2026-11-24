@@ -180,6 +180,23 @@ PAGE = """<!doctype html>
       <a href="/pantheon/" class="dt-btn" title="Open the full window" target="_blank">&#10530;</a>
     </div>
   </div>
+  <!-- The micro player (Music M1): only in the resident shell, while music plays or is paused. -->
+  <div id="dt-music" hidden>
+    <div class="dm-now"><span id="dm-title"></span><span id="dm-sub"></span></div>
+    <div class="dm-seek">
+      <span id="dm-pos" class="dm-t">0:00</span>
+      <input id="dm-seekbar" type="range" min="0" max="1" step="1" value="0" aria-label="Position">
+      <span id="dm-dur" class="dm-t">0:00</span>
+    </div>
+    <div class="dm-row">
+      <button class="dt-btn" data-m="previous" title="Previous" aria-label="Previous">&#9198;</button>
+      <button class="dt-btn" id="dm-play" data-m="toggle" title="Play / pause" aria-label="Play or pause">&#9208;</button>
+      <button class="dt-btn" data-m="next" title="Next" aria-label="Next">&#9197;</button>
+      <button class="dt-btn" data-m="stop" title="Stop" aria-label="Stop">&#9209;</button>
+      <span class="dm-vol">&#128265;<input id="dm-volume" type="range" min="0" max="100" step="1" value="70" aria-label="Volume"></span>
+      <button class="dt-btn" data-m="open" title="Open the music player" aria-label="Open the music player">&#11016;</button>
+    </div>
+  </div>
   <script src="/static/js/voice.js"></script>
   <script src="/static/js/desktop.js"></script>
 </body>

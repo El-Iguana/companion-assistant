@@ -243,6 +243,52 @@
     $("#dt-settings").addEventListener("click", () => toShell.postMessage("settings"));
   }
 
+  // ---- the micro player (Music M1) ------------------------------------------------
+  // The shell owns the player: it pushes the state here (__cantineroMusic, twice a second
+  // while it changes) and takes the buttons back as "music:<action>[:<value>]".
+  if (shell && toShell) {
+    const dm = $("#dt-music"), seek = $("#dm-seekbar"), vol = $("#dm-volume");
+    const fmt = (ms) => {
+      const s = Math.max(0, Math.round((ms || 0) / 1000));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    };
+    let dmOn = false, seeking = false, volBusy = false;
+    // The bar moves up by the player's height, and the shell's click strip grows by as much.
+    const fit = () => {
+      const extra = dmOn ? dm.offsetHeight + 8 : 0;
+      document.body.style.setProperty("--dm-h", extra + "px");
+      toShell.postMessage("hud:" + extra);
+    };
+    window.__cantineroMusic = (st) => {
+      const on = !!st && !!st.now && ["playing", "paused", "loading"].includes(st.status);
+      if (on !== dmOn) {
+        dmOn = on; dm.hidden = !on;
+        document.body.classList.toggle("dm-on", on);
+        fit();
+      }
+      if (!on) return;
+      $("#dm-title").textContent = st.now.title || "";
+      $("#dm-sub").textContent = [st.now.artist, st.now.album].filter(Boolean).join(" · ");
+      $("#dm-play").textContent = st.status === "playing" ? "\u23F8" : "\u25B6";
+      if (!seeking) {
+        seek.max = Math.max(1, Math.round((st.duration_ms || 0) / 1000));
+        seek.value = Math.round((st.position_ms || 0) / 1000);
+        $("#dm-pos").textContent = fmt(st.position_ms);
+      }
+      $("#dm-dur").textContent = fmt(st.duration_ms);
+      if (!volBusy) vol.value = st.volume;
+    };
+    dm.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-m]");
+      if (b) toShell.postMessage("music:" + b.dataset.m);
+    });
+    seek.addEventListener("input", () => { seeking = true; $("#dm-pos").textContent = fmt(seek.value * 1000); });
+    seek.addEventListener("change", () => { toShell.postMessage("music:seek:" + seek.value); seeking = false; });
+    vol.addEventListener("input", () => { volBusy = true; toShell.postMessage("music:volume:" + vol.value); });
+    vol.addEventListener("change", () => { volBusy = false; });
+    window.addEventListener("resize", () => { if (dmOn) fit(); });
+  }
+
   // ---- hooks for the native shell's tray menu -----------------------------------
   // The page holds the session, so the shell asks it rather than the API. Re-read in
   // the background so a character added in the main window turns up without a restart.
