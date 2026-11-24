@@ -51,7 +51,7 @@ def test_phrase_mode_needs_the_word_every_time():
     g = _gate()
     assert g.apply("Mira, lights on", 0) == ("lights on", [])
     assert g.apply("lights off", 1000) == ("", [])
-    assert g.apply("Mira", 2000) == ("", [])                 # her name alone is a summons
+    assert g.apply("Mira", 2000) == ("", [{"do": "summoned"}])   # her name alone is a summons
 
 
 def test_continuous_mode_opens_and_closes_a_conversation():
@@ -163,3 +163,18 @@ def test_wav_is_what_the_server_decodes():
     from services import stt
     x = stt._wav_samples(data)
     assert x is not None and len(x) == 2                       # 5 samples at 48 kHz -> 16 kHz
+
+
+
+def test_her_name_then_a_pause_then_the_request():
+    """"Mira." ... "play Stevie Nicks": two utterances, one request (predator, 2026-11-24)."""
+    g = vc.WakeGate()
+    g.configure({"wake_word": "Mira"})
+    assert g.apply("Mira.", 1000) == ("", [{"do": "summoned"}])
+    assert g.apply("Play Stevie Nicks.", 2500) == ("Play Stevie Nicks.", [])
+    assert g.apply("and the weather", 3000) == ("", [])                 # once, not an open mic
+    g.apply("Mira.", 10000)
+    assert g.apply("play some blues", 10000 + 8001) == ("", [])         # too late
+    g.apply("Mira.", 20000)
+    assert g.apply("Mira, next song", 21000)[0] == "next song"        # said again in full: fine
+    assert g.apply("hello there", 22000) == ("", [])

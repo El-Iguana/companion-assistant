@@ -576,6 +576,16 @@
     return t.replace(/^[\s,.:!?-]+/, "").trim();
   }
 
+  // Her name alone is a summons: the next thing said within 8 s is the message, so
+  // "Mira." ... "play Stevie Nicks" works (voicecore.SUMMON_MS has the why). She waves and
+  // the page shows "Yes?"; she doesn't say it, or she'd be deaf while you start talking.
+  const SUMMON_MS = 8000;
+  let summonedUntil = 0;
+  function summoned() {
+    window.dispatchEvent(new CustomEvent("avatar:wave"));
+    emit("summoned");
+  }
+
   // The text to send, or "" to ignore this utterance.
   function applyWakeWord(text) {
     const w = activeWakeWord();
@@ -592,7 +602,13 @@
     if (startsWith(text, w)) {
       const rest = stripPrefix(text, w);
       if (continuous) setAwake(true, "wake word");
-      return rest;                              // her name alone is a summons, not a message
+      summonedUntil = rest ? 0 : Date.now() + SUMMON_MS;
+      if (!rest) summoned();
+      return rest;
+    }
+    if (summonedUntil && Date.now() <= summonedUntil) {
+      summonedUntil = 0;
+      return text.trim();                       // the request after "Mira." and a pause
     }
     if (continuous && awake) {
       if (Date.now() > awakeUntil) { setAwake(false, "idle timeout"); return ""; }
@@ -754,6 +770,7 @@
         if (d.type === "listening") { hfCapturing = !!d.on; repaint(); }
         else if (d.type === "heard") onHeard(d);
         else if (d.type === "awake") setAwake(!!d.on, d.why || "listener");
+        else if (d.type === "action" && d.do === "summoned") summoned();
       };
     });
   }
@@ -1117,6 +1134,7 @@
         streaming() { return streaming; },
         send(text) { sendText(String(text)); },
         say(text) { speakLine(String(text)); },
+        summoned() { summoned(); },
         toast(msg, kind) { toast(String(msg), String(kind || "info")); },
         persist(patchJson) { persist(JSON.parse(String(patchJson))); },
         spoken() { return JSON.stringify(spokenRecent); },

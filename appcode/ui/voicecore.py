@@ -58,6 +58,13 @@ def strip_prefix(text: str, phrase: str) -> str:
 # ---------------------------------------------------------------------------
 # Wake word + conversation state
 # ---------------------------------------------------------------------------
+# Her name said on its own, then a pause, then the request: the listener ends an utterance
+# after 0.5 s of quiet, so "Mira." and "play Stevie Nicks" arrive apart, and the second has no
+# wake word. Measured live on predator, 2026-11-24: 4 of 6 requests were lost that way. After
+# her name alone, the next utterance within this long is the message.
+SUMMON_MS = 8000
+
+
 class WakeGate:
     """Which transcripts are messages. With no wake word, every one is (open mic). With
     one, only a transcript that starts with it, minus the word. In "continuous" mode the
@@ -76,6 +83,7 @@ class WakeGate:
         self.farewell = "Goodbye."
         self.mode = "phrase"
         self.sleep_after_s: float | None = 180
+        self.summoned_until = 0.0
 
     def configure(self, cfg: dict) -> None:
         """The card's own phrases win over the global ones (the caller merges them)."""
@@ -132,7 +140,15 @@ class WakeGate:
         if starts_with(text, w):
             rest = strip_prefix(text, w)
             acts = self.set_awake(True, "wake word", now) if continuous else []
-            return rest, acts                             # her name alone is a summons, not a message
+            self.summoned_until = 0.0
+            if not rest:
+                # Her name alone is a summons: the next thing said is the message.
+                self.summoned_until = now + SUMMON_MS
+                acts = acts + [{"do": "summoned"}]
+            return rest, acts
+        if self.summoned_until and now <= self.summoned_until:
+            self.summoned_until = 0.0
+            return text.strip(), []                       # the request after "Mira." and a pause
         if continuous and self.awake:
             if now > self.awake_until:
                 return "", self.set_awake(False, "idle timeout", now)
