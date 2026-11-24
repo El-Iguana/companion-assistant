@@ -318,9 +318,51 @@ async def tts(request: Request):
     return Response(content=wav, media_type="audio/wav")
 
 
+@app.websocket("/pmedia/listen")
+async def listen_ws(ws: WebSocket):
+    """The open microphone, decided here (#6): 16 kHz PCM in, utterances and messages out
+    (services/listen.py). Loopback and same-origin only, like the rest of this service."""
+    from services import listen
+
+    host = (ws.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
+    origin = ws.headers.get("origin") or ""
+    if host not in ("127.0.0.1", "localhost", "::1") or (
+            origin and origin.split("://", 1)[-1].rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "[::1]")):
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    session = listen.Session(ws.send_json)
+
+    async def ticker():
+        while True:
+            await asyncio.sleep(2)
+            await session.tick()
+    tick = asyncio.ensure_future(ticker())
+    try:
+        while True:
+            m = await ws.receive()
+            if m.get("type") == "websocket.disconnect":
+                break
+            if m.get("bytes"):
+                await session.audio(m["bytes"])
+            elif m.get("text"):
+                try:
+                    msg = json.loads(m["text"])
+                except ValueError:
+                    continue
+                if isinstance(msg, dict):
+                    await session.message(msg)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        tick.cancel()
+        await session.close()
+
+
 @app.post("/pmedia/stt")
-async def stt(request: Request, file: UploadFile = File(...), strict: str = Form("")):
-    """An utterance -> {text}, transcribed here."""
+async def stt(request: Request, file: UploadFile = File(...), strict: str = Form(""),
+              wake_word: str = Form("")):
+    """An utterance -> {text}, transcribed here. ``wake_word`` is named to Whisper (stt.py)."""
     from services import stt as stt_mod
 
     _guard(request, post=True)
@@ -328,7 +370,8 @@ async def stt(request: Request, file: UploadFile = File(...), strict: str = Form
     if not audio:
         raise HTTPException(status_code=400, detail="empty audio")
     try:
-        text = await asyncio.to_thread(stt_mod.transcribe, audio, None, strict in ("1", "true"))
+        text = await asyncio.to_thread(stt_mod.transcribe, audio, None, strict in ("1", "true"),
+                                       wake_word[:40])
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"stt failed: {e}") from None
     return {"text": text}

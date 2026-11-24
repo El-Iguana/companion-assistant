@@ -75,15 +75,23 @@ def energy(x, events):
     return out
 
 
-PIPELINES = {"energy": energy}
+def energy_hint(x, events):
+    """Today's segmenter, with the wake word as Whisper's hint: what the hint alone is worth."""
+    return [dict(u, wake_word="Mira") for u in energy(x, events)]
 
 
-def silero(x, events):          # filled in by V2 (#90): services/listen.py
+def silero(x, events):
+    """#90: services/listen.py (Silero VAD, frame by frame), with the hint."""
     from services import listen
     return listen.eval_pipeline(x, events, her_flags(events))
 
 
-PIPELINES["silero"] = silero
+def silero_nohint(x, events):
+    """Silero without the hint: what the segmenter alone is worth."""
+    return [dict(u, wake_word="") for u in silero(x, events)]
+
+
+PIPELINES = {"energy": energy, "energy_hint": energy_hint, "silero": silero, "silero_nohint": silero_nohint}
 
 
 # --- scoring ---------------------------------------------------------------------------------------
@@ -104,7 +112,7 @@ def score(name, pipeline):
         audio = u.pop("audio")
         wav = voicecore.wav_bytes([audio], RATE, lambda b: b.tolist())
         t0 = time.monotonic()
-        text = stt.transcribe(wav, strict=u["strict"])
+        text = stt.transcribe(wav, strict=u["strict"], wake_word=u.pop("wake_word", "") or "")
         u["whisper_s"] = time.monotonic() - t0
         msg, _ = gate.apply(text, u["end"] * 1000)
         u.update(text=text, sent=msg)

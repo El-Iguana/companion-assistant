@@ -703,12 +703,12 @@ async def tts_voices(_: User = Depends(current_user)):
 
 @app.post("/api/stt")
 async def stt_transcribe(file: UploadFile = File(...), _: User = Depends(current_user),
-                         strict: bool = False):
+                         strict: bool = False, wake_word: str = ""):
     audio = await file.read()
     if not audio:
         raise HTTPException(400, "empty audio")
     try:
-        text = await asyncio.to_thread(stt.transcribe, audio, None, strict)
+        text = await asyncio.to_thread(stt.transcribe, audio, None, strict, (wake_word or "")[:40])
     except Exception as e:
         raise HTTPException(500, f"stt failed: {e}")
     return {"text": text}
