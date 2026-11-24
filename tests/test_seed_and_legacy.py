@@ -32,8 +32,9 @@ def test_a_new_user_starts_with_mira():
                                      _admin()))
     mira = next(c for c in _cards(u["id"]) if c.id == "mira")
     assert mira.name == "Mira" and mira.wake_word == "Mira"
-    assert mira.vrm == "baseline.vrm" and mira.avatar_mode == "vrm"   # redistributable model
-    assert mira.vrm_still is None and mira.portrait_source == ""
+    assert mira.vrm == "pix.vrm" and mira.avatar_mode == "vrm"        # Pix, bundled
+    assert mira.portrait_source == "vrm" and mira.vrm_still and mira.vrm_still_of == "pix.vrm"
+    assert mira.tts_voice == "af_heart" and "dj" in mira.skills and "memory" in mira.skills
     assert mira.created_at == mira.updated_at                          # stamped at seed time
 
 
@@ -46,12 +47,30 @@ def test_mira_is_not_brought_back_after_she_is_deleted():
     assert not any(c.id == "mira" for c in _cards(u["id"]))
 
 
-def test_seed_card_bundles_no_other_model_and_no_still():
+def test_seed_card_uses_a_bundled_model_anyone_may_use_and_its_own_still():
+    from services import vrm
     raw = json.loads((main.SEED / "characters" / "mira.json").read_text())
-    assert raw["vrm"] == "baseline.vrm"
-    assert not {"vrm_still", "vrm_still_of", "chat_mode", "power_dynamic", "social_acceptance",
-                "created_at", "updated_at"} & set(raw)
-    assert (main.BASE / "data" / "vrm" / "baseline.vrm").is_file()
+    assert raw["vrm"] == raw["vrm_still_of"] == "pix.vrm"
+    assert not {"chat_mode", "power_dynamic", "social_acceptance", "created_at", "updated_at"} & set(raw)
+    for model in main.BUNDLED_VRMS:                      # what ships in a public, MIT repository
+        a = vrm.audit_file(model)
+        assert a["usable"] and a["license"]["redistribution"] and a["license"]["commercial"] == "corporation", model
+        assert a["license"]["modification"] == "allowModificationRedistribution"
+    import base64
+    assert base64.b64decode(raw["vrm_still"])[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_an_existing_library_gets_pix_once(tmp_path, monkeypatch):
+    d = tmp_path / "vrm"
+    d.mkdir()
+    (d / ".baseline-seeded").touch()                    # a library from before Pix was bundled
+    monkeypatch.setattr(main, "DATA", tmp_path)
+    main._vrm_dir()
+    assert (d / "pix.vrm").is_file() and (d / ".seeded-pix.vrm").exists()
+    assert not (d / "baseline.vrm").exists()            # the baseline was seeded (then deleted) before
+    (d / "pix.vrm").unlink()
+    main._vrm_dir()
+    assert not (d / "pix.vrm").exists()                 # deleting it sticks
 
 
 def test_seeding_keeps_a_card_already_there(tmp_path):

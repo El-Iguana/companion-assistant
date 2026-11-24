@@ -84,7 +84,7 @@ RUN mkdir -p /app/data/auth /app/data/u /app/data/vrm
 # The redistributable default avatar. A new, empty named volume is filled from
 # the image the first time it is mounted, so compose installs start with it; a
 # bind-mounted data/ (run-podman.sh) hides this copy and has its own.
-COPY data/vrm/baseline.vrm /app/data/vrm/baseline.vrm
+COPY data/vrm/baseline.vrm data/vrm/pix.vrm /app/data/vrm/
 
 # KoboldCPP URL — override with -e KOBOLD_URL=http://... at runtime.
 ENV KOBOLD_URL=http://koboldcpp:5001

@@ -2,6 +2,7 @@
 data/
 # …except the redistributable default avatar, which seeds a new data volume.
 !data/vrm/baseline.vrm
+!data/vrm/pix.vrm
 
 # Dev artifacts
 __pycache__/

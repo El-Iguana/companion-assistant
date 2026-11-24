@@ -801,22 +801,26 @@ async def export_card(card_id: str, version: int = 2, cur: Ctx = Depends(get_ctx
 # --------------------------------------------------------------------------
 # 3D avatar (VRM)
 # --------------------------------------------------------------------------
-BASELINE_VRM = BASE / "data" / "vrm" / "baseline.vrm"   # pixiv sample, redistributable; Mira's
+BASELINE_VRM = BASE / "data" / "vrm" / "baseline.vrm"   # pixiv's sample, redistributable
+PIX_VRM = BASE / "data" / "vrm" / "pix.vrm"             # Mira's, by El-Iguana; commercial use allowed
+BUNDLED_VRMS = (BASELINE_VRM, PIX_VRM)
 
 
 def _vrm_dir() -> Path:
-    """data/vrm/, holding at least the bundled baseline model the seeded Mira uses.
+    """data/vrm/, holding the bundled models (the seeded Mira uses pix.vrm).
 
-    The image and the repo both ship it in data/vrm/, but a library elsewhere (a dev or
-    test PANTHEON_DATA_DIR, a bind mount made before it existed) starts without it, and
-    Mira's avatar then 404s. Copied in once; deleting it later is the user's choice."""
+    The image and the repo both ship them in data/vrm/, but a library elsewhere (a dev or
+    test PANTHEON_DATA_DIR, a bind mount made before one existed) starts without them, and
+    Mira's avatar then 404s. Each is copied in once, with its own marker, so a model added
+    to the bundle later still reaches existing libraries; deleting one is the user's choice."""
     d = DATA / "vrm"
     d.mkdir(parents=True, exist_ok=True)
-    marker = d / ".baseline-seeded"
-    if not marker.exists():
-        if not (d / BASELINE_VRM.name).exists() and BASELINE_VRM.is_file():
-            shutil.copyfile(BASELINE_VRM, d / BASELINE_VRM.name)
-        marker.touch()
+    for src in BUNDLED_VRMS:
+        marker = d / (".baseline-seeded" if src is BASELINE_VRM else f".seeded-{src.name}")
+        if not marker.exists():
+            if not (d / src.name).exists() and src.is_file():
+                shutil.copyfile(src, d / src.name)
+            marker.touch()
     return d
 
 

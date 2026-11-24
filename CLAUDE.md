@@ -66,12 +66,17 @@ banner `docs/cantinero.jpg` (900², not in the image). `static/` is public, whic
 the sign-in page shows the logo before anyone is signed in. pytincture owns the page's `<head>`, so the
 favicon is added by `appcode/pantheon.py` `_set_favicon()`, and by `login_page._HEAD` on the sign-in page.
 
-**Mira** is the example bartender: `seed/characters/mira.json` (fixed id `mira`, Kokoro
-`af_sarah`, wake word "Mira", avatar `baseline.vrm`, the redistributable pixiv sample in
-`data/vrm/`). `main._seed_library()` copies her into a library only when it is created (first-run
-ADMIN, `create_user`), never again, so deleting her sticks. `_vrm_dir()` copies the bundled
-baseline into any library's `data/vrm/` that lacks it (once, `.baseline-seeded` marker). Her
-original model (Vita) is "Redistribution_Prohibited" and must never be bundled.
+**Mira** is the example bartender: `seed/characters/mira.json`, the user's own Mira as of 2026-11-24
+(fixed id `mira`, Kokoro `af_heart`, wake word "Mira", voice & tone set, the DJ and Memory on her Menu,
+avatar **`pix.vrm`** with its rendered still as her profile picture). **Pix** was made by the user (El-Iguana) in
+VRoid Studio; the bundled `data/vrm/pix.vrm` is their `pix_1.vrm` with only the VRM license metadata changed
+(author El-Iguana, commercial use allowed, redistribution and modification allowed). `baseline.vrm` (pixiv's
+redistributable sample) stays bundled for other cards and the avatar test page. `main._seed_library()` copies
+Mira into a library only when it is created (first-run ADMIN, `create_user`), never again, so deleting her
+sticks. `_vrm_dir()` copies each bundled model (`BUNDLED_VRMS`) into any library's `data/vrm/` once, each with
+its own marker (`.baseline-seeded`, `.seeded-pix.vrm`), so existing libraries got Pix too. A bundled model must
+allow redistribution and commercial use (`test_seed_and_legacy`). Her original model (Vita) is
+"Redistribution_Prohibited" and must never be bundled.
 
 The page is **pytincture + wapyt** (Python in the browser, `appcode/`), laid out after Emberfolk;
 voice and the 3D avatar are two JavaScript islands (`static/js/voice.js`, `static/js/vtuber.mjs`).
@@ -185,7 +190,7 @@ Traps, all measured:
   audits from the header only (`vrm.audit_file` reads the glb header + JSON chunk, never the
   textures), renames into place, and leaves nothing behind on refusal. The Studio checks the size
   before sending. Tests: `tests/test_vrm_upload.py`.
-- **A new named volume is filled from the image**, which is how `data/vrm/baseline.vrm` reaches
+- **A new named volume is filled from the image**, which is how `data/vrm/baseline.vrm` and `pix.vrm` reach
   compose installs (`COPY` in the Containerfile, re-included in `.containerignore`). A bind-mounted
   `data/` hides it.
 - The old compose healthcheck curled `/api/status`, which is behind login (401) and so was always
@@ -255,7 +260,7 @@ scripts/web-dev.sh      # run the app host-side against a scratch library (:7877
 scripts/vrm/            # Blender + VRM Add-on: custom expressions, texture repaint (built Butler2/3) — README.md
 data/auth/  secret · users/<uid>.json                    # accounts + signing secret (global)
 data/u/<uid>/  characters/ personas/ sessions/ settings/ assistant/  # per-user isolated library
-data/vrm/               # avatar models, shared by all users; baseline.vrm is tracked (Mira's)
+data/vrm/               # avatar models, shared by all users; baseline.vrm and pix.vrm (Mira's) are tracked
 seed/characters/        # example cards put into every NEW library (mira.json); baked into the image
 models/kokoro/          # baked: kokoro-v1.0.onnx + voices-v1.0.bin (TTS)
 models/piper/           # MOUNTED ro from ../jarvis — one .onnx + .onnx.json per Piper voice
