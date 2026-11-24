@@ -143,6 +143,22 @@ workspace.windowList().forEach(function (w) {{
 }});
 """, "read")
 
+    def anchor(self, margin: int = 0) -> bool:
+        """Put our window in the bottom-right corner of the usable screen area (above the
+        panel), at its current size. KWin works out the corner, so it follows a change of
+        resolution or panel; the client never needs to know the screen."""
+        m = int(margin)
+        return self._run(f"""
+workspace.windowList().forEach(function (win) {{
+  if (String(win.resourceClass).toLowerCase().indexOf("{self.match}") !== -1) {{
+    var a = workspace.clientArea(KWin.MaximizeArea, win);
+    var g = win.frameGeometry;
+    win.frameGeometry = {{ x: a.x + a.width - g.width - {m}, y: a.y + a.height - g.height - {m},
+                           width: g.width, height: g.height }};
+  }}
+}});
+""", "anchor")
+
     def apply(self, x: int, y: int, w: int, h: int) -> bool:
         """Put our window back where it was."""
         return self._run(f"""

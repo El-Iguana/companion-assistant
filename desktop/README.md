@@ -41,6 +41,15 @@ systemctl --user enable --now pantheon-desktop.service   # start now and at ever
 Stop it with `systemctl --user stop pantheon-desktop`, and use `disable` to stop it starting at
 login. It only frames the app, so Cantinero itself (`./run-podman.sh`) has to be running.
 
+## Where she sits: the bottom-right corner
+
+By default she sits in the **bottom-right corner** of the screen, just above the panel. KWin works
+out the corner each time she appears (`kwin.py` `anchor()`, `workspace.clientArea(MaximizeArea)`),
+so a change of resolution or panel doesn't strand her. Dragging her (below) puts her where you drop
+her instead, and the tray's **"Put her in the corner"** sends her back. The choice is saved as
+`"anchor"` in `~/.config/pantheon-desktop/geometry.json`: `"bottom-right"`, or `""` once dragged.
+A file from before this has no `anchor` and gets the corner.
+
 ## Positioning it — just drag her
 
 Pick **"Move her (drag to position)"** from the tray menu. A grab bar appears at
