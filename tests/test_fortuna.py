@@ -283,3 +283,26 @@ def test_no_question_when_the_options_sound_the_same():
     same = [{"id": "1", "name": "Crash — Dave Matthews Band (1996)"}, {"id": "2", "name": "Crash — Dave Matthews Band (2010)"}]
     raw = [{"score": 0.8}, {"score": 0.8}]
     assert media.either_or(same, raw) == []
+
+
+def test_more_than_three_options_say_three_and_match_all(tmp_path, monkeypatch):
+    six = [_track(i, "Greatest Hits", a) for i, a in enumerate(["B.B. King", "Evanescence", "Jimi Hendrix",
+                                                                "The Rolling Stones", "Bon Jovi"], 1)]
+    o = FakeOrpheus(monkeypatch, [PREDATOR], six, ambiguous=True)
+    fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9), "Which of these": None,
+                               "Which did the user choose": ("4", 0.9)})
+    ctx = _ctx(tmp_path, session_id="s1")
+    asked = asyncio.run(media.fast_play(ctx, "play Greatest Hits", "Mira"))
+    assert asked == ("Which one: Greatest Hits by B.B. King, Greatest Hits by Evanescence, "
+                     "Greatest Hits by Jimi Hendrix, or one of 2 more?")
+    said = asyncio.run(media.fast_play(ctx, "the Stones one", "Mira"))
+    assert "Rolling Stones" in said and o.expanded == [4]
+
+
+@pytest.mark.parametrize("text", ["never mind, play Santana", "Mira, actually play Santana",
+                                  "no, play Santana", "Mira, never mind, can you play Santana?"])
+def test_a_change_of_mind_in_front_is_not_what_to_play(tmp_path, monkeypatch, text):
+    o = FakeOrpheus(monkeypatch, [PREDATOR], [{"item_id": 7, "kind": "artist", "display": "Santana", "score": 1.0}])
+    asked = fake_fortuna(monkeypatch, {"want the assistant": ("play_music", 0.9)})
+    asyncio.run(media.fast_play(_ctx(tmp_path), text, "Mira"))
+    assert asked[0] == "play Santana" and o.expanded == [7]

@@ -474,8 +474,11 @@ _LANE_INTENTS = {
     "music_question": "ask what is playing, or what music there is",
     "other": "anything else: conversation, questions, tasks",
 }
-_HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?(?:(?:can|could|would|will) you\b[ ,]*)?"
-                   r"(?:please\b[ ,]*)?", re.I)
+# A change of mind in front ("never mind, play Santana") isn't part of what to play: it used to
+# send that request through the model (22 s, 2026-11-24).
+_HEAD = re.compile(r"^\s*(?:(?:hey|ok|okay)\b[ ,]*)?(?:{name}\b[ ,!.]*)?"
+                   r"(?:(?:never ?mind|actually|instead|no|nah|oh|wait)\b[ ,!.]*)*"
+                   r"(?:(?:can|could|would|will) you\b[ ,]*)?(?:please\b[ ,]*)?", re.I)
 
 
 class Done(str):
@@ -590,8 +593,9 @@ async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str
 
 ASK_FOR_S = 90.0
 CHOICE_MIN = 0.7
-ASK_MAX = 3
-_ORDINALS = ("first", "second", "third")
+ASK_MAX = 5                  # matched against the answer; the first SAY_MAX are said
+SAY_MAX = 3
+_ORDINALS = ("first", "second", "third", "fourth", "fifth")
 _pending: dict[str, dict] = {}
 
 
@@ -619,7 +623,11 @@ def either_or(cands: list[dict], raw: list[dict]) -> list[dict]:
 
 
 def question(options: list[dict]) -> str:
+    """"Which one: A, B, or C?"; past three, "Which one: A, B, C, or one of 2 more?" (an answer
+    naming one of those still counts: _answer matches against them all)."""
     names = [_spoken(o["name"]) for o in options]
+    if len(names) > SAY_MAX:
+        return "Which one: " + ", ".join(names[:SAY_MAX]) + f", or one of {len(names) - SAY_MAX} more?"
     return "Which one: " + ", ".join(names[:-1]) + ", or " + names[-1] + "?"
 
 
