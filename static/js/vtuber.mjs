@@ -752,6 +752,16 @@ const POSES = {
     osc: { side: "R", part: "LowerArm", delta: [0.25, 0, 0], hz: 1.7 },
     brief: 2.6,
   },
+  // Dancing (#115): elbows in at the sides, forearms forward, loose fists, the forearms
+  // pumping up and down in turn. `osc` may be a list, each with its own `offset`; hz
+  // "beat" means the dance's own phase drives it, so the arms keep time with the body.
+  // Never picked at random (not in any POSE_SETS): only the dance asks for it.
+  dance: {
+    L: { UpperArm: [0.18, -0.9, 0.2], LowerArm: [-0.05, 0.2, 0.95], curl: [0.6, 0.4] },
+    R: { UpperArm: [0.18, -0.9, 0.2], LowerArm: [-0.05, 0.2, 0.95], curl: [0.6, 0.4] },
+    osc: [{ side: "L", part: "LowerArm", delta: [0, 0.4, -0.1], hz: "beat", offset: 0 },
+          { side: "R", part: "LowerArm", delta: [0, 0.4, -0.1], hz: "beat", offset: Math.PI }],
+  },
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
 
@@ -877,7 +887,7 @@ function targetArms(name, phase = 0) {
   const a = idle && idle.arms, out = {};
   if (!a) return out;
   const { L, U, F } = a.frame, def = POSES[name];
-  const osc = def && def.osc, swing = Math.sin(phase);
+  const oscs = def && def.osc ? [].concat(def.osc) : [];
   for (const side of ["L", "R"]) {
     const sideDef = def && def[side];
     const out_ = side === "L" ? 1 : -1;               // "out" is +left for the left arm
@@ -886,8 +896,11 @@ function targetArms(name, phase = 0) {
       const key = side + part;
       if (!a.bones[key]) continue;
       let v = sideDef && sideDef[part];
-      if (v && osc && osc.side === side && osc.part === part)
-        v = v.map((x, i) => (i < 3 ? x + osc.delta[i] * swing : x));
+      for (const o of oscs) {
+        if (!v || o.side !== side || o.part !== part) continue;
+        const swing = Math.sin(phase + (o.offset || 0)) * (o.hz === "beat" ? dance.armGain : 1);
+        v = v.map((x, i) => (i < 3 ? x + o.delta[i] * swing : x));
+      }
       let q;
       if (!v || !a.child[key]) {
         q = a.rest[key].clone();
@@ -965,7 +978,8 @@ function armPoseForBeat(label) {
   const want = set.beats[key] || BEAT_POSE[key];
   // A pose outside this figure's set (a male card is never asked for hands behind the
   // head) is skipped, not substituted: the beat still plays on the face and the gesture.
-  if (!want || !(want in set.weights) || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name) return;
+  if (!want || !(want in set.weights) || armPose.forced || armPose.beatCooldown > 0 || want === armPose.name
+      || armPose.name === "dance") return;
   armPose.beatCooldown = 20;                         // a beat may re-pose her now and then
   if (POSES[armPose.name] && POSES[armPose.name].brief) armPose.next = want;   // let a wave finish
   else startArmPose(want);
@@ -1011,9 +1025,17 @@ function updateArms(vrm, dt) {
   if (armPose.beatCooldown > 0) armPose.beatCooldown -= dt;
   if (armPose.waveCooldown > 0) armPose.waveCooldown -= dt;
   if (armPose.waveIn >= 0 && (armPose.waveIn -= dt) < 0) wave();
+  // Dancing: the arms join in unless she's speaking or listening, or a wave is on; out of
+  // the dance they go back to rest, and the usual scheduler takes over from there.
+  if (!armPose.forced && !(POSES[armPose.name] && POSES[armPose.name].brief)) {
+    if (danceArms() && armPose.name !== "dance") startArmPose("dance");
+    else if (!danceArms() && armPose.name === "dance") startArmPose("rest");
+  }
   const def = POSES[armPose.name];
   if (def && def.osc) {                           // a moving pose: re-aim every frame
-    armPose.phase += dt * Math.PI * 2 * def.osc.hz;
+    const o = [].concat(def.osc)[0];
+    armPose.phase = o.hz === "beat" ? dance.phase * Math.PI          // one pump per arm per 2 beats
+                                    : armPose.phase + dt * Math.PI * 2 * o.hz;
     armPose.to = targetArms(armPose.name, armPose.phase);
   }
   armPose.t = Math.min(1, armPose.t + dt / (def && def.brief ? POSE_EASE_S * 0.6 : POSE_EASE_S));
@@ -1026,7 +1048,7 @@ function updateArms(vrm, dt) {
     for (const c of ["tilt", "turn", "arch", "shift"])
       armPose.body[c] = armPose.bodyFrom[c] + (armPose.bodyTo[c] - armPose.bodyFrom[c]) * k;
   bodyLean(a, armPose.body);
-  if (armPose.forced || armPose.t < 1) return;
+  if (armPose.forced || armPose.t < 1 || armPose.name === "dance") return;
   armPose.hold -= dt;
   if (def && def.brief) {                         // a wave ends on time, talking or not
     if (armPose.hold <= 0) { startArmPose(armPose.next || "rest"); armPose.next = ""; }
@@ -1036,6 +1058,66 @@ function updateArms(vrm, dt) {
   // as fidgeting. A beat (above) is the exception, since it is the reply's own cue.
   if (armPose.hold <= 0 && speech.env < 0.05)
     startArmPose(armPose.name === "rest" ? pickArmPose() : "rest");
+}
+
+// ---- #115: dancing to the music ----------------------------------------------------
+// A generated dance timed to the song's tempo (avatar:dance {bpm}; null stops it): a bounce
+// down on every beat (hips, spine, a nod), a sway from side to side over two beats, the
+// shoulders rising in turn, and the arms pumping (the "dance" pose). A faster song is
+// livelier (`energy`, 0 at 80 BPM to 1 at 160), not only quicker. While she speaks or
+// listens (avatar:calm, the moments the music ducks) it softens to a sway so her face and
+// gestures read, and it eases in and out, never snapping. Like idle, every body channel is
+// additive on the bones resetPose returns to rest each frame; the hips' height is a
+// position, so the bob is applied as a change from the last frame's.
+const DANCE_EASE = 1.4;                  // how fast the dance comes and goes (1/s)
+const DANCE_CALM = 0.22;                 // how much of it stays while she talks or listens
+const dance = { bpm: 0, on: false, calm: false, w: 0, phase: 0, bob: 0, armGain: 1 };
+if (typeof window !== "undefined") window.__avatarDance = dance;
+
+function setDance(bpm) {
+  const b = Number(bpm) || 0;
+  dance.on = b > 0;
+  if (dance.on) dance.bpm = Math.max(60, Math.min(200, b));   // kept while it eases out
+  stats.dance = dance.on ? dance.bpm : 0;
+}
+
+const danceEnergy = () => Math.max(0, Math.min(1, (dance.bpm - 80) / 80));
+const danceArms = () => dance.on && !dance.calm && speech.env < 0.05 && dance.w > 0.3;
+
+function updateDance(vrm, dt) {
+  if (!idle) return;
+  const quiet = dance.calm || speech.env > 0.05;
+  const target = dance.on ? (quiet ? DANCE_CALM : 1) : 0;
+  dance.w += (target - dance.w) * Math.min(1, dt * DANCE_EASE);
+  if (dance.bpm > 0 && dance.w > 0.001) dance.phase += dt * dance.bpm / 60;   // in beats
+  const e = danceEnergy(), w = dance.w, p = dance.phase;
+  dance.armGain = 0.55 + 0.45 * e;
+  stats.danceW = w;
+  // The bounce: sharpest exactly on the beat, gone halfway between.
+  const dip = w < 0.001 ? 0 : Math.pow(1 - Math.abs(Math.sin(Math.PI * p)), 1.5) * w;
+  const sway = Math.sin(Math.PI * p) * w;                       // one side, then the other
+  const hipK = figure === "male" ? 0.5 : figure === "female" ? 1.3 : 1;
+  const { hips, spine, chest, neck, head, ls, rs } = idle;
+  if (hips) {
+    hips.rotation.z += sway * (0.035 + 0.025 * e) * hipK;
+    hips.rotation.y += sway * (0.04 + 0.03 * e) * hipK;
+    // bodyLean puts the hips back where they belong every frame when there's a lean; else
+    // the last frame's bob is taken off here, so nothing accumulates either way.
+    const reset = !!(idle.arms && idle.arms.lean && idle.arms.lean.hipsPos);
+    const bob = -dip * (0.008 + 0.012 * e);
+    hips.position.y += bob - (reset ? 0 : dance.bob);
+    dance.bob = bob;
+  }
+  if (spine) spine.rotation.x += dip * (0.02 + 0.025 * e);
+  if (chest) chest.rotation.z -= sway * (0.03 + 0.02 * e) * hipK;
+  if (neck) neck.rotation.z -= sway * 0.012;
+  if (head) {
+    head.rotation.x += dip * (0.03 + 0.035 * e);                // the nod
+    head.rotation.z += sway * 0.018;
+  }
+  const sh = Math.sin(Math.PI * p) * w * (0.03 + 0.04 * e);     // shoulders up in turn
+  if (ls) ls.rotation.z += sh;
+  if (rs) rs.rotation.z += sh;
 }
 
 function updateSpeech(vrm, dt) {
@@ -1082,6 +1164,7 @@ function disposeModel() {
   if (lookTarget) { scene.remove(lookTarget); lookTarget = null; }
   idle = null; idleFailed = false;
   speech.amp = speech.target = speech.env = speech.last = 0;
+  dance.bob = 0;                                   // a new model starts from its own hips
   currentVrm = null;
   placeholder = null;
 }
@@ -1180,6 +1263,7 @@ function tick(now) {
       updateSpeech(currentVrm, dt);      // after idle: adds to the idle pose
       updateGesture(currentVrm, dt);     // and so does gesture
       updateArms(currentVrm, dt);        // 3e: held arm poses (absolute, from rest)
+      updateDance(currentVrm, dt);       // #115: after the arms, which reset the hips' position
       updateEmotion(currentVrm, dt);     // expression track (independent of pose)
     } catch (e) {
       if (!idleFailed) {
@@ -1243,6 +1327,10 @@ export function boot() {
   window.addEventListener("pvoice:asleep", (e) => {
     if (currentVrm && !(e.detail && e.detail.why === "mic off")) wave();
   });
+  // Dancing to the music (#115): the player says the tempo (null or 0 stops), and the
+  // voice says when she is speaking or listening (the music ducks then; she calms).
+  window.addEventListener("avatar:dance", (e) => setDance(e.detail && e.detail.bpm));
+  window.addEventListener("avatar:calm", (e) => { dance.calm = !!(e.detail && e.detail.on); });
   window.addEventListener("avatar:mood", (e) => {
     const d = e.detail || {};
     if (!currentVrm) return;
