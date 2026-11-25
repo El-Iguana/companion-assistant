@@ -667,7 +667,7 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   ✅ **Dancing to the music** (#115): `avatar:dance {bpm}` (null stops) runs `updateDance` after
   the arms: a bounce down on every beat (hips' height, spine, a nod), a sway over two beats (hips,
   chest, head; more for `female`, less for `male`), the shoulders in turn, and the `dance` arm pose
-  (forearms pumping in turn; `osc` may be a list, `hz: "beat"` follows the dance's phase).
+  (arms low and relaxed, swaying with her hips since #134; `osc` may be a list, `hz: "beat"` follows the dance's phase).
   Livelier with tempo (`energy`: 80→160 BPM). While she speaks or listens (`avatar:calm`, sent by
   voice.js with every music duck) it softens to 22 % and the arms go back to rest; it eases in and
   out (`DANCE_EASE`). The harness has a BPM slider. Checked in headless Chromium on Pix: 90/128/155
