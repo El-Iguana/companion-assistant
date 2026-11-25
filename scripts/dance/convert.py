@@ -22,8 +22,11 @@ Also, per clip:
 - **Hips.** Height as a change from the clip's median, in leg lengths (the page scales it by
   the model's); side to side and back and forth only as sway about a moving centre, so she
   dances in place.
-- **Tempo.** Measured from the motion (how fast the bones turn, autocorrelated, a prior
-  around 120), folded into 80-160 like the songs' (services/skills/music_tempo.py); or given.
+- **Tempo.** Measured from the motion (how fast the bones turn, autocorrelated, a gentle prior
+  around 100), halved or doubled only outside 60-200, like the songs'
+  (services/skills/music_tempo.py); or given.
+- **Beat.** ``beat_frame``: where in each beat the body moves least, i.e. where a pose lands;
+  the page keeps that on the song's beats (#124).
 - **Loop.** Whole bars (8 or 16 beats) whose last pose is closest to the first.
 
 Output: ``<out>/<id>.json``, ``{"format": "cantinero-dance/1", ...}``; see ``write``.
@@ -44,7 +47,8 @@ FORMAT = "cantinero-dance/1"
 FPS = 30
 HEADING_WINDOW_S = 2.0
 SWAY_WINDOW_S = 2.0
-LOW, HIGH = 80.0, 160.0
+LOW, HIGH = 60.0, 200.0          # as the songs' tempos (services/skills/music_tempo.py, #124)
+PRIOR_BPM, PRIOR_OCTAVES = 100.0, 1.0
 
 # CMU joint -> VRM humanoid bone. Root first; every other bone's parent is the nearest mapped
 # ancestor (VRM_PARENT), which is how unmapped joints fold in.
@@ -317,7 +321,7 @@ def estimate_bpm(bones: dict, fps: int) -> float | None:
     ok = np.where((bpm >= 50) & (bpm <= 220))[0]
     if not len(ok):
         return None
-    prior = np.exp(-0.5 * (np.log2(bpm[ok] / 120) / 0.9) ** 2)
+    prior = np.exp(-0.5 * (np.log2(bpm[ok] / PRIOR_BPM) / PRIOR_OCTAVES) ** 2)
     i = int(ok[np.argmax(ac[ok] * prior)])
     lag = float(i)
     if 0 < i < len(ac) - 1:
@@ -325,6 +329,22 @@ def estimate_bpm(bones: dict, fps: int) -> float | None:
         if a - 2 * b + c:
             lag = i + 0.5 * (a - c) / (a - 2 * b + c)
     return fold(60 * fps / lag)
+
+
+def beat_frame(bones: dict, fps: int, bpm: float) -> int:
+    """A frame where the clip's moves land on a beat (#124). Dancers hit a pose on the beat:
+    the moment the motion stops, so the phase of the beat where the body slows down most, over
+    the whole clip. (Not where it moves least: a pose held after the hit is stillest in its
+    middle, half a hold late.)"""
+    speed = _moving_average(motion_speed(bones)[:, None], 3)[:, 0]
+    x = -np.maximum(0.0, -np.diff(speed, prepend=speed[0]))     # deceleration, as a minimum
+    period = 60 * fps / bpm
+    k = np.arange(int((len(x) - 1) / period))
+    if len(k) < 2:
+        return int(np.argmin(x))
+    phases = np.arange(max(1, int(round(period))))
+    idx = np.minimum(np.rint(phases[:, None] + k[None, :] * period).astype(int), len(x) - 1)
+    return int(phases[int(np.argmin(x[idx].mean(axis=1)))])
 
 
 def pick_loop(bones: dict, hips: np.ndarray, fps: int, bpm: float) -> tuple[int, int]:
@@ -367,6 +387,7 @@ def build(src: Path, name: str, source: str, license_: str, credit: str = "", bp
         "format": FORMAT, "id": slug(name), "name": name, "style": style,
         "bpm": tempo, "energy": round(min(1.0, speed / 60.0), 2),    # the Twist ~0.96, the Macarena ~0.32
         "fps": r["fps"], "frames": r["frames"], "loop": [int(start), int(end)],
+        "beat_frame": beat_frame(r["bones"], r["fps"], tempo),
         "source": source, "license": license_, "credit": credit,
         "bones": {b: rnd(q) for b, q in r["bones"].items()},
         "rest_dirs": {b: rnd(d) for b, d in r["rest_dirs"].items()},

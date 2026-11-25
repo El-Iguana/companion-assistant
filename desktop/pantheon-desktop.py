@@ -80,7 +80,7 @@ class DesktopShell(Gtk.Application):
         self.settings_win = None
         self.hud_extra = 0             # px the page's micro player adds to the clickable strip
         self._music_pushed = ""
-        self._dance_bpm = None             # the tempo last sent to her dance (#116); None = still
+        self._dance_bpm = None             # what her dance was last sent (#116, #124); None = still
         self._exiting = False
         # `cantinero --exit` reaches this over D-Bus (org.gtk.Actions.Activate "exit").
         exit_action = Gio.SimpleAction.new("exit", None)
@@ -447,17 +447,20 @@ class DesktopShell(Gtk.Application):
             if js != self._music_pushed:
                 self._music_pushed = js
                 self.view.evaluate_javascript(js, -1, None, None, None, None, None)
-            bpm = music.core.dance_bpm(bool(self.prefs.get("dance_to_music")), self.player.status,
-                                       self.player.queue.current, self._dance_bpm)
-            if bpm != self._dance_bpm:
-                self._dance_bpm = bpm
-                print(f"[shell] dance: {bpm or 'still'}", flush=True)
-                self.view.evaluate_javascript(music.core.dance_script(bpm), -1, None, None, None, None, None)
+            state = music.core.dance_state(bool(self.prefs.get("dance_to_music")), self.player.status,
+                                           self.player.queue.current, self._dance_bpm,
+                                           self.player._position())
+            if state != self._dance_bpm:
+                if (state or {}).get("bpm") != (self._dance_bpm or {}).get("bpm"):
+                    print(f"[shell] dance: {(state or {}).get('bpm') or 'still'}"
+                          f"{' on the beat' if state and 'phase' in state else ''}", flush=True)
+                self._dance_bpm = state
+                self.view.evaluate_javascript(music.core.dance_script(state), -1, None, None, None, None, None)
         return True                                        # the timer keeps going
 
     def _page_fresh(self):
         self._music_pushed = ""
-        self._dance_bpm = None if not self._dance_bpm else -1.0   # differs from any tempo: re-sent
+        self._dance_bpm = None if not self._dance_bpm else {"bpm": -1}   # differs from any: re-sent
 
     def _menu_dance(self, item):
         """The tray's "Dance to the music": at once, and kept for next time (shellsettings)."""

@@ -159,7 +159,23 @@ def test_a_clip_with_no_beat_needs_one_given(tmp_path):
     glb = write_glb(tmp_path / "still.glb", 5.0, {"lhumerus": axis_angle([0, 0, 1], np.zeros(300))})
     with pytest.raises(ValueError, match="--bpm"):
         cv.build(glb, "Still", "unit test", "CC0-1.0")
-    assert cv.build(glb, "Still", "unit test", "CC0-1.0", bpm=60)["bpm"] == 120    # folded
+    assert cv.build(glb, "Still", "unit test", "CC0-1.0", bpm=60)["bpm"] == 60     # 60-200: as given
+    assert cv.build(glb, "Still", "unit test", "CC0-1.0", bpm=40)["bpm"] == 80     # outside: doubled
+
+
+def test_the_beat_frame_is_where_the_pose_lands():
+    fps, bpm = 30, 120
+    period = 60 * fps / bpm                                     # 15 frames a beat
+    t = np.arange(300)
+    # A move each beat that arrives at frame 6 of the beat (6, 21, 36, ...) and holds there:
+    # moving for 9 frames, held for 6, to alternate ends.
+    u = ((t - 6) % period) / period                              # 0 at the arrival
+    moving = np.clip((u - 0.4) / 0.6, 0, 1)                      # the next move starts at 0.4
+    ease = moving * moving * (3 - 2 * moving)
+    side = np.where(((t - 6) // period) % 2 == 0, 1.0, -1.0)    # A to B, then B to A
+    angle = 0.5 * side * (1 - 2 * ease)
+    bones = {"leftUpperArm": axis_angle([0, 0, 1], angle), "hips": np.tile([0, 0, 0, 1.0], (300, 1))}
+    assert abs(cv.beat_frame(bones, fps, bpm) - 6) <= 1
 
 
 def test_not_a_cmu_skeleton_is_refused(tmp_path):
