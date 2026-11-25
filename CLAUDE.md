@@ -714,6 +714,11 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   forwards it). The shell sends `clip` and `rev` with `avatar:dance`; a chosen clip plays at
   0.6–1.6× (`CHOSEN_RATE`), `rev` makes the page fetch the clips again. The window now sends only
   the setting it changed (it holds its own copy; a whole copy undid tray switches).
+  **Part of a clip** (#138): `convert.py --parts lower --torso 0.5` keeps only the hips, legs and
+  feet and the spine/chest softened (`soften`), with the tempo, loop and beat measured on the whole
+  dance; the bones a clip leaves out are the simple bounce's (arms low and swaying, the nod).
+  "Lambada Sway" on amd-halo is the Lambada made this way. A chosen dance that doesn't fit the song
+  now falls back to the bounce, never the previous clip.
   ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
