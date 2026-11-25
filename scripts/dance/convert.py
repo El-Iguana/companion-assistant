@@ -22,9 +22,12 @@ Also, per clip:
 - **Hips.** Height as a change from the clip's median, in leg lengths (the page scales it by
   the model's); side to side and back and forth only as sway about a moving centre, so she
   dances in place.
-- **Tempo.** Measured from the motion (how fast the bones turn, autocorrelated, a gentle prior
-  around 100), halved or doubled only outside 60-200, like the songs'
-  (services/skills/music_tempo.py); or given.
+- **Tempo.** One beat per move: the moves are counted where the arms come to a stop (a hit),
+  and the tempo is the median gap between hits. The whole body's motion repeats only every two
+  moves (right arm, then left), so autocorrelating it read the Macarena at 81 when its arms hit
+  every 0.37 s (~164); played at 1.13x under a 92 BPM song, she moved in double time (user:
+  "still too fast for proper dancing", 2026-11-25). Autocorrelation is the fallback for a clip
+  with too few hits; or the tempo is given.
 - **Beat.** ``beat_frame``: where in each beat the body moves least, i.e. where a pose lands;
   the page keeps that on the song's beats (#124).
 - **Loop.** Whole bars (8 or 16 beats) whose last pose is closest to the first.
@@ -331,6 +334,35 @@ def estimate_bpm(bones: dict, fps: int) -> float | None:
     return fold(60 * fps / lag)
 
 
+ARM_BONES = ("leftUpperArm", "leftLowerArm", "leftHand", "rightUpperArm", "rightLowerArm", "rightHand")
+
+
+def hits(bones: dict, fps: int) -> list[int]:
+    """Frames where the arms come to a stop after moving: a dance move's hit."""
+    arms = [bones[b] for b in ARM_BONES if b in bones]
+    if not arms:
+        return []
+    s = sum(qangle(q[1:], q[:-1]) for q in arms) * fps
+    s = _moving_average(np.concatenate([[s[0]], s])[:, None], 3)[:, 0]
+    fast = np.percentile(s, 60)
+    out: list[int] = []
+    for i in range(2, len(s) - 2):
+        if (s[i] <= s[i - 1] and s[i] < s[i + 1] and s[max(0, i - 8):i].max() > fast
+                and (not out or i - out[-1] >= 0.25 * fps)):
+            out.append(i)
+    return out
+
+
+def tempo_from_hits(bones: dict, fps: int) -> float | None:
+    """One beat per move: the median gap between hits, or None (too few to tell)."""
+    h = hits(bones, fps)
+    if len(h) < 6:
+        return None
+    gaps = np.diff(h) / fps
+    gaps = gaps[gaps < 1.5 * np.median(gaps)]        # a pause between figures isn't a beat
+    return fold(60 / float(np.median(gaps))) if len(gaps) >= 4 else None
+
+
 def beat_frame(bones: dict, fps: int, bpm: float) -> int:
     """A frame where the clip's moves land on a beat (#124). Dancers hit a pose on the beat:
     the moment the motion stops, so the phase of the beat where the body slows down most, over
@@ -377,7 +409,7 @@ def build(src: Path, name: str, source: str, license_: str, credit: str = "", bp
           keep_heading: bool = False, style: str = "") -> dict:
     clip = load_clip(src)
     r = retarget(clip, keep_heading=keep_heading)
-    tempo = fold(bpm) if bpm else estimate_bpm(r["bones"], r["fps"])
+    tempo = fold(bpm) if bpm else (tempo_from_hits(r["bones"], r["fps"]) or estimate_bpm(r["bones"], r["fps"]))
     if not tempo:
         raise ValueError("no steady beat in this clip: give --bpm")
     start, end = pick_loop(r["bones"], r["hips"], r["fps"], tempo)

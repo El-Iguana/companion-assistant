@@ -698,7 +698,14 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   page eases small phase errors and jumps big ones (`SYNC_SNAP`). Clips carry `beat_frame` (where
   the motion decelerates most: the hit), kept on the song's beats by `onBeat` (1, 2 or ½ clip
   beats per song beat); `window.__avatarClipLead` nudges it by eye. Measured in Chromium against a
-  wandering 74–80 BPM song: dance and clip within ±45 ms. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  wandering 74–80 BPM song: dance and clip within ±45 ms.
+  **Never faster than the beat** (#126; user: "still too fast for proper dancing", "Family
+  Portrait", 92 BPM): a clip's tempo is one beat per move (`convert.hits`: where the arms stop,
+  median gap; the Macarena is 163.6, not the 81 the whole-body autocorrelation read, since it
+  repeats every two moves), and a clip plays one move per song beat or one per two, never two
+  per beat (`CLIP_PER_BEAT`). The two CMU clips fit songs ≥ ~131/144 BPM; slower songs get the
+  generated dance, which below `HALF_TIME_BPM` (100) sways over four beats and pumps the arms
+  every other beat, still nodding on every beat. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone
