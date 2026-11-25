@@ -682,7 +682,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   `updateClips` in `vtuber.mjs` samples the clip itself (a mixer can't blend with this frame's
   pose), plays it at 0.8–1.25× to fit the song (halved or doubled first), changes clip every
   4–8 bars with a 0.6 s cross-fade, fades out to the sway on `avatar:calm`, and widens the view
-  (`frameView`; the eye height is cached per model so the camera doesn't bob). **Limbs are
+  (`frameView`, for any dancing since #136, the simple bounce too; back to her face while she
+  speaks or listens; the eye height is cached per model so the camera doesn't bob). **Limbs are
   corrected by rest direction** (`restFixes`): CMU stands with its legs ~20° apart, a VRM with them
   straight, and uncorrected her legs crossed; shoulders and spine are not corrected (CMU's
   clavicle rises 34° between joints the VRM places differently). Bones only a clip moves (legs,

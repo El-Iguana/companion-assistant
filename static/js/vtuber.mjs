@@ -1404,8 +1404,11 @@ function updateClips(vrm, dt) {
       chooseClip();
     }
   }
-  // The view: out while a clip shows, back after.
-  const view = clipState.w;
+  // The view: out while she dances, a clip or the simple bounce (user: "the same scale ... as
+  // when she has one of the new dances"), and back to her face while she speaks or listens.
+  const wideWant = dance.on && !quiet ? 1 : 0;
+  clipState.view += (wideWant - clipState.view) * Math.min(1, dt * CLIP_EASE);
+  const view = Math.max(clipState.w, clipState.view);
   if (Math.abs(view - frameView) > 0.002) { frameView = view; frameBust(); }
   stats.clipW = clipState.w;
   if (!cur || clipState.w < 0.002) return;
