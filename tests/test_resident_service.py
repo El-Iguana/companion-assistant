@@ -194,3 +194,9 @@ def test_static_files_are_revalidated(client):
     r = client.get("/static/js/voice.js")
     assert r.headers["cache-control"] == "no-cache"
     assert client.get("/static/js/voice.js", headers={"If-None-Match": r.headers["etag"]}).status_code == 304
+
+
+def test_the_tempo_lookup_is_forwarded_with_its_ids(server, client):
+    seen, _ = server
+    assert client.get("/pmedia/music/tempo?ids=11,12").status_code == 200        # #114
+    assert [(m, p, a) for m, p, a, _ in seen] == [("GET", "/pmedia/music/tempo", "Bearer TOK")]

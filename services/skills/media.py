@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 from services.skills import SkillContext, Skill, Tool, error, register
 from services.skills import music_catalog
+from services.skills import music_tempo
 from services.skills import orpheus_media as om
 
 # Music only: Orpheus also holds films and shows, and an unrestricted search for a band it
@@ -389,6 +390,13 @@ async def _connect(ctx: SkillContext, args: dict) -> dict:
             "how": f"approve it on the server: orpheus pair approve {started.get('code')}"}
 
 
+def _with_tempo(ctx: SkillContext, st: dict, queue: list[dict]) -> list[dict]:
+    """Music tracks carry their ``bpm`` when it's known (#114); measuring the rest goes on in
+    the background. Spoken word never has one."""
+    music_tempo.refresh_soon(ctx.root, st)
+    return music_tempo.annotate(ctx.root, queue)
+
+
 async def _ensure_profile(ctx: SkillContext, st: dict) -> dict:
     """Bind this device to a profile, once (#112). A device Orpheus calls "shared" sees only
     shared playlists, so the user's own ("Pink Favorites", 2026-11-25) were never found.
@@ -505,6 +513,7 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
                     "final": "It's playing."}
         queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                                 playlist_id="" if pick["id"].isdigit() else pick["id"])
+        queue = _with_tempo(ctx, st, queue)
         if not queue:
             return error("NOTHING_TO_PLAY", "Nothing in that can be played (its files may be missing).")
         if args.get("shuffle") or pick.get("kind") == "artist":
@@ -657,6 +666,7 @@ async def _play_described(ctx: SkillContext, st: dict, query: str) -> str | None
         return None
     dev = await _target(ctx, st)
     queue = await om.expand(st["url"], st["token"], item_id=int(album["id"]))
+    queue = _with_tempo(ctx, st, queue)
     if not queue:
         return None
     random.shuffle(queue)
@@ -794,6 +804,7 @@ async def _play_pick(ctx: SkillContext, st: dict, pick: dict, query: str) -> str
         return Done("It's playing.")
     queue = await om.expand(st["url"], st["token"], item_id=int(pick["id"]) if pick["id"].isdigit() else None,
                             playlist_id="" if pick["id"].isdigit() else pick["id"])
+    queue = _with_tempo(ctx, st, queue)
     if not queue:
         return None
     if pick.get("kind") == "artist":
