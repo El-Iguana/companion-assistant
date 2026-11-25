@@ -305,6 +305,15 @@ async def dance_clip(clip_id: str, request: Request):
     return await _forward(request, f"/pmedia/dance/{clip_id}.json", None)
 
 
+@app.post("/pmedia/dance/{clip_id}/tempo")
+async def dance_tempo(clip_id: str, request: Request):
+    """The Settings window's tempo slider (#132), to the server."""
+    _guard(request, post=True)
+    if not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", clip_id):
+        raise HTTPException(status_code=404)
+    return await _forward(request, f"/pmedia/dance/{clip_id}/tempo", await request.body())
+
+
 @app.get("/pmedia/music/tempo")
 async def tempo(request: Request):
     """Each music track's BPM, from the server (#114): what she dances to."""

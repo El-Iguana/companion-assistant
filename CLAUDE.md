@@ -705,7 +705,15 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   repeats every two moves), and a clip plays one move per song beat or one per two, never two
   per beat (`CLIP_PER_BEAT`). The two CMU clips fit songs ≥ ~131/144 BPM; slower songs get the
   generated dance, which below `HALF_TIME_BPM` (100) sways over four beats and pumps the arms
-  every other beat, still nodding on every beat. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  every other beat, still nodding on every beat.
+  **Choosing the dance** (#132): her Settings window (`shellsettings._dance_section`) has
+  **Dance** (Auto / Simple bounce / a clip, `dance_clip` in the shell's settings, per machine) and
+  **Tempo** for the chosen clip (50–220, saved on the server in the clip by
+  `POST /pmedia/dance/<id>/tempo` → `dance.set_tempo`, which also re-finds `beat_frame`; resident
+  forwards it). The shell sends `clip` and `rev` with `avatar:dance`; a chosen clip plays at
+  0.6–1.6× (`CHOSEN_RATE`), `rev` makes the page fetch the clips again. The window now sends only
+  the setting it changed (it holds its own copy; a whole copy undid tray switches).
+  ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone

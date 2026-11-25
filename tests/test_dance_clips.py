@@ -58,3 +58,38 @@ def test_the_routes(folder, monkeypatch):
     assert r.status_code == 200 and r.json()["name"] == "Macarena"
     assert c.get("/pmedia/dance/broken.json").status_code == 404
     assert c.get("/pmedia/dance/nope.json").status_code == 404
+
+
+def test_a_tempo_set_by_hand_is_saved_in_the_clip(folder):
+    import math
+
+    # A clip whose arm swings and stops each beat at 120 BPM (15 frames), landing at frame 6.
+    frames = 120
+    q = []
+    for t in range(frames):
+        u = ((t - 6) % 15) / 15
+        m = min(1.0, max(0.0, (u - 0.4) / 0.6))
+        a = 0.5 * (1 - 2 * m * m * (3 - 2 * m)) * (1 if ((t - 6) // 15) % 2 == 0 else -1)
+        q += [0.0, 0.0, math.sin(a / 2), math.cos(a / 2)]
+    (folder / "swing.json").write_text(json.dumps(_clip(name="Swing", bpm=180.0, fps=30, frames=frames,
+                                                        bones={"leftUpperArm": q}, beat_frame=0)))
+    got = dance.set_tempo("swing", 120)
+    assert got["bpm"] == 120.0
+    d = json.loads((folder / "swing.json").read_text())
+    assert d["bpm"] == 120.0 and d["bpm_from"] == "set by hand" and abs(d["beat_frame"] - 6) <= 1
+    assert dance.set_tempo("swing", 999)["bpm"] == 240.0                # kept in range
+    with pytest.raises(KeyError):
+        dance.set_tempo("nope", 100)
+
+
+def test_the_tempo_route(folder, monkeypatch):
+    from pantheon_web import media as pmedia
+    import service
+
+    monkeypatch.setattr(pmedia, "_ctx", lambda request, resident=False: object())
+    monkeypatch.setattr(pmedia, "_require_csrf", lambda request: None)
+    c = TestClient(service.app, base_url="http://127.0.0.1:7867")
+    r = c.post("/pmedia/dance/macarena/tempo", json={"bpm": 104})
+    assert r.status_code == 200 and r.json()["clip"]["bpm"] == 104.0
+    assert c.post("/pmedia/dance/macarena/tempo", json={}).status_code == 400
+    assert c.post("/pmedia/dance/nope/tempo", json={"bpm": 100}).status_code == 404

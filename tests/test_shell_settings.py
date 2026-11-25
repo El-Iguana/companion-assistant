@@ -17,12 +17,14 @@ def config_home(tmp_path, monkeypatch):
 
 
 def test_defaults_without_a_file():
-    assert ss.load() == {"show_at_start": True, "listening_at_start": True, "dance_to_music": False}
+    assert ss.load() == {"show_at_start": True, "listening_at_start": True, "dance_to_music": False,
+                         "dance_clip": ""}
 
 
 def test_round_trip(config_home):
-    ss.save({"show_at_start": False, "listening_at_start": True, "dance_to_music": True})
-    assert ss.load() == {"show_at_start": False, "listening_at_start": True, "dance_to_music": True}
+    ss.save({"show_at_start": False, "listening_at_start": True, "dance_to_music": True, "dance_clip": "lambada"})
+    assert ss.load() == {"show_at_start": False, "listening_at_start": True, "dance_to_music": True,
+                         "dance_clip": "lambada"}
     assert (config_home / "pantheon-desktop" / "settings.json").exists()
 
 
@@ -30,7 +32,8 @@ def test_bad_values_and_unknown_keys_are_ignored(config_home):
     p = config_home / "pantheon-desktop" / "settings.json"
     p.parent.mkdir(parents=True)
     p.write_text(json.dumps({"show_at_start": "no", "listening_at_start": False, "x": 1}))
-    assert ss.load() == {"show_at_start": True, "listening_at_start": False, "dance_to_music": False}
+    assert ss.load() == {"show_at_start": True, "listening_at_start": False, "dance_to_music": False,
+                         "dance_clip": ""}
 
 
 def test_unreadable_file_gives_the_defaults(config_home):
@@ -75,3 +78,18 @@ def test_set_login_enables_and_disables_both(monkeypatch):
     assert ("disable", *ss.UNITS) in calls
     assert ss.set_login(True) == "on"
     assert not any(c[0] in ("start", "stop") for c in calls)   # never starts or stops her
+
+
+def test_a_dance_choice_of_the_wrong_type_is_ignored(config_home):
+    p = config_home / "pantheon-desktop" / "settings.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"dance_clip": 7, "dance_to_music": True}))
+    assert ss.load()["dance_clip"] == "" and ss.load()["dance_to_music"] is True
+
+
+def test_the_dance_selector_lists_auto_and_the_bounce_first():
+    got = ss.dance_choices([{"id": "lambada", "name": "Lambada", "bpm": 150},
+                            {"id": "charleston", "name": "Charleston", "bpm": 180}])
+    assert [v for v, _ in got] == ["", ss.GENERATED, "charleston", "lambada"]
+    assert got[0][1].startswith("Auto") and "bounce" in got[1][1]
+    assert ss.fits(100) == "In Auto it dances to songs of about 80–125 BPM."

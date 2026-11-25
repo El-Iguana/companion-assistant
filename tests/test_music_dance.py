@@ -63,3 +63,11 @@ def test_the_dance_state_carries_the_beat_while_playing():
     assert core.dance_state(True, "loading", {"id": 3}, {"bpm": 120.0, "phase": 9}, 0) == {"bpm": 120.0}
     assert core.dance_state(False, "playing", song, None, 0.75) is None
     assert core.dance_state(True, "paused", song, None, 0.75) is None
+
+
+def test_the_dance_chosen_in_settings_rides_along():
+    song = {"id": 1, "bpm": 120.0}
+    assert core.dance_state(True, "playing", song, None, 0, clip="lambada", rev=2) == \
+        {"bpm": 120.0, "clip": "lambada", "rev": 2}
+    assert core.dance_state(True, "playing", song, None, 0, clip="", rev=0) == {"bpm": 120.0}
+    assert core.dance_state(False, "playing", song, None, 0, clip="lambada") is None

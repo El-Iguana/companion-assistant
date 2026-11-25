@@ -81,6 +81,7 @@ class DesktopShell(Gtk.Application):
         self.hud_extra = 0             # px the page's micro player adds to the clickable strip
         self._music_pushed = ""
         self._dance_bpm = None             # what her dance was last sent (#116, #124); None = still
+        self._dance_rev = 0                # bumped when a dance's tempo is set (#132)
         self._exiting = False
         # `cantinero --exit` reaches this over D-Bus (org.gtk.Actions.Activate "exit").
         exit_action = Gio.SimpleAction.new("exit", None)
@@ -449,7 +450,8 @@ class DesktopShell(Gtk.Application):
                 self.view.evaluate_javascript(js, -1, None, None, None, None, None)
             state = music.core.dance_state(bool(self.prefs.get("dance_to_music")), self.player.status,
                                            self.player.queue.current, self._dance_bpm,
-                                           self.player._position())
+                                           self.player._position(), self.prefs.get("dance_clip", ""),
+                                           self._dance_rev)
             if state != self._dance_bpm:
                 if (state or {}).get("bpm") != (self._dance_bpm or {}).get("bpm"):
                     print(f"[shell] dance: {(state or {}).get('bpm') or 'still'}"
@@ -471,7 +473,7 @@ class DesktopShell(Gtk.Application):
     def _menu_settings(self, *_):
         if self.settings_win is None:
             self.settings_win = shellsettings.SettingsWindow(self, self.prefs, self._on_prefs,
-                                                             on_exit=self._menu_exit)
+                                                             on_exit=self._menu_exit, dance=self)
             self.settings_win.connect("close-request", self._on_settings_closed)
         self.settings_win.present()
 
@@ -531,6 +533,29 @@ class DesktopShell(Gtk.Application):
     def _on_settings_closed(self, *_):
         self.settings_win = None
         return False                               # let it close
+
+    # -- dancing, for the Settings window (#132) ------------------------------------------------
+    def _resident(self) -> str:
+        from urllib.parse import urlsplit
+        u = urlsplit(self.url)
+        return f"{u.scheme}://{u.netloc}"
+
+    def clips(self) -> list:
+        import urllib.request
+        with urllib.request.urlopen(self._resident() + "/pmedia/dance", timeout=4) as r:
+            return json.loads(r.read().decode()).get("clips") or []
+
+    def set_tempo(self, clip_id: str, bpm: float) -> dict:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{self._resident()}/pmedia/dance/{clip_id}/tempo", method="POST",
+            data=json.dumps({"bpm": bpm}).encode(),
+            headers={"Content-Type": "application/json", "X-CSRF-Token": "shell"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            got = json.loads(r.read().decode()).get("clip") or {}
+        self._dance_rev += 1                               # the page fetches the clips again
+        self._push_music()
+        return got
 
     def _on_prefs(self, prefs: dict):
         # In place: the Settings window holds this same dict, so a tray switch (dance) made

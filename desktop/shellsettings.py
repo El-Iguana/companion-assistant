@@ -9,6 +9,8 @@ server down:
   listening_at_start   the wake word is on as soon as she starts
   dance_to_music       she dances to music at its tempo (#116); the tray's "Dance to the
                        music" switches it, at once, and it is kept here. Off by default
+  dance_clip           which dance (#132): "" Auto (a clip that fits each song), "generated"
+                       (the simple bounce, no clip), or a clip's id (always that one)
 
 The file is ~/.config/pantheon-desktop/settings.json, beside geometry.json. Everything above
 the window class is plain Python, tested without GTK (tests/test_shell_settings.py).
@@ -20,7 +22,9 @@ import os
 import subprocess
 
 UNITS = ("cantinero-resident.service", "cantinero-shell.service")
-DEFAULTS = {"show_at_start": True, "listening_at_start": True, "dance_to_music": False}
+DEFAULTS = {"show_at_start": True, "listening_at_start": True, "dance_to_music": False,
+            "dance_clip": ""}
+GENERATED = "generated"
 
 
 def path() -> str:
@@ -34,7 +38,7 @@ def load() -> dict:
         with open(path(), encoding="utf-8") as f:
             saved = json.load(f)
         if isinstance(saved, dict):
-            prefs.update({k: saved[k] for k in DEFAULTS if isinstance(saved.get(k), bool)})
+            prefs.update({k: saved[k] for k, v in DEFAULTS.items() if isinstance(saved.get(k), type(v))})
     except (OSError, ValueError):
         pass                                     # none yet, or unreadable: the defaults
     return prefs
@@ -45,7 +49,7 @@ def save(prefs: dict) -> None:
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({k: bool(prefs.get(k, v)) for k, v in DEFAULTS.items()}, f, indent=1)
+        json.dump({k: type(v)(prefs.get(k, v)) for k, v in DEFAULTS.items()}, f, indent=1)
     os.replace(tmp, p)                           # atomic
 
 
@@ -81,9 +85,27 @@ def set_login(on: bool) -> str:
     return login_state()
 
 
-def SettingsWindow(app, prefs: dict, on_change, on_exit=None):
-    """The window, opened from the tray. Each switch applies at once."""
-    from gi.repository import Gdk, Gtk
+# --- dancing (#132) --------------------------------------------------------------------------
+
+TEMPO_MIN, TEMPO_MAX = 50, 220
+
+
+def dance_choices(clips: list) -> list:
+    """The dance selector's entries: (value, label), Auto and the simple bounce first."""
+    out = [("", "Auto (a dance that fits each song)"), (GENERATED, "Simple bounce (no dance clip)")]
+    return out + [(c["id"], c.get("name") or c["id"]) for c in sorted(clips, key=lambda c: (c.get("name") or "").lower())]
+
+
+def fits(bpm: float) -> str:
+    """What a dance at this tempo fits in Auto: one move per song beat, at 0.8-1.25x."""
+    return f"In Auto it dances to songs of about {round(bpm * 0.8)}–{round(bpm * 1.25)} BPM."
+
+
+def SettingsWindow(app, prefs: dict, on_change, on_exit=None, dance=None):
+    """The window, opened from the tray. Each switch applies at once. ``on_change`` gets only
+    what changed: the tray's switches change the same settings while this is open.
+    ``dance``: ``clips()`` (the dance clips: id, name, bpm) and ``set_tempo(id, bpm)``."""
+    from gi.repository import Gdk, GLib, Gtk
 
     # The shell makes every window transparent for the avatar; a class wins over that, as the
     # music window's does. The same colours as the music window.
@@ -137,7 +159,7 @@ def SettingsWindow(app, prefs: dict, on_change, on_exit=None):
     def pref(key):
         def on_set(_sw, want):
             prefs[key] = bool(want)
-            on_change(dict(prefs))
+            on_change({key: bool(want)})       # only this: the tray may have changed others
             return False                       # let the switch follow
         return on_set
 
@@ -152,6 +174,9 @@ def SettingsWindow(app, prefs: dict, on_change, on_exit=None):
     note = Gtk.Label(label="These two apply the next time she starts.", xalign=0)
     note.add_css_class("dim-label")
     box.append(note)
+
+    if dance is not None:
+        _dance_section(box, prefs, on_change, dance, Gtk, GLib)
 
     buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     if on_exit:
@@ -168,3 +193,88 @@ def SettingsWindow(app, prefs: dict, on_change, on_exit=None):
 
     win.set_child(box)
     return win
+
+
+def _dance_section(box, prefs: dict, on_change, dance, Gtk, GLib):
+    """Which dance she does, and the chosen dance's own tempo (#132). The tempo is the dance's,
+    on the server: slide it while she dances until her moves land on the beat, and Auto then
+    fits that dance to the right songs, on every machine."""
+    head = Gtk.Label(xalign=0, margin_top=6)
+    head.set_markup("<b>Dancing</b>")
+    box.append(head)
+    hint = Gtk.Label(label="She dances when the tray's \u201cDance to the music\u201d is on.",
+                     xalign=0, wrap=True, max_width_chars=48)
+    hint.add_css_class("dim-label")
+    box.append(hint)
+
+    try:
+        clips = {c["id"]: dict(c) for c in dance.clips()}
+    except Exception as e:                              # noqa: BLE001 — the server may be down
+        print(f"[settings] dance clips: {e}")
+        clips = {}
+    choices = dance_choices(list(clips.values()))
+    pick = Gtk.DropDown.new_from_strings([label for _, label in choices])
+    values = [v for v, _ in choices]
+    current = prefs.get("dance_clip", "")
+    pick.set_selected(values.index(current) if current in values else 0)
+    line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+    line.append(Gtk.Label(label="Dance", xalign=0, hexpand=True))
+    line.append(pick)
+    box.append(line)
+
+    tempo = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, TEMPO_MIN, TEMPO_MAX, 1)
+    tempo.set_digits(0)
+    tempo.set_draw_value(True)
+    tempo.set_hexpand(True)
+    tline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+    tline.append(Gtk.Label(label="Tempo", xalign=0))
+    tline.append(tempo)
+    box.append(tline)
+    info = Gtk.Label(xalign=0, wrap=True, max_width_chars=48)
+    info.add_css_class("dim-label")
+    box.append(info)
+
+    state = {"loading": False, "timer": 0}
+
+    def show():
+        value = values[pick.get_selected()] if pick.get_selected() < len(values) else ""
+        clip = clips.get(value)
+        tempo.set_sensitive(clip is not None)
+        if clip is None:
+            info.set_label("Auto picks a dance whose tempo fits the song, else the simple bounce."
+                           if value == "" else "Her own bounce and sway, on the song's beats.")
+            return
+        state["loading"] = True
+        tempo.set_value(float(clip["bpm"]))
+        state["loading"] = False
+        info.set_label("Her moves per minute. Slide it while she dances until they land on the "
+                       "beat; it's saved for this dance. " + fits(clip["bpm"]))
+
+    def on_pick(*_):
+        value = values[pick.get_selected()] if pick.get_selected() < len(values) else ""
+        prefs["dance_clip"] = value
+        on_change({"dance_clip": value})
+        show()
+
+    def save(clip_id, bpm):
+        state["timer"] = 0
+        try:
+            got = dance.set_tempo(clip_id, bpm)
+            clips[clip_id]["bpm"] = float((got or {}).get("bpm") or bpm)
+            info.set_label("Saved. " + fits(clips[clip_id]["bpm"]))
+        except Exception as e:                          # noqa: BLE001
+            info.set_label(f"Not saved: {e}")
+        return False
+
+    def on_tempo(_scale):
+        value = values[pick.get_selected()] if pick.get_selected() < len(values) else ""
+        if state["loading"] or value not in clips:
+            return
+        if state["timer"]:
+            GLib.source_remove(state["timer"])
+        bpm = round(tempo.get_value())
+        state["timer"] = GLib.timeout_add(400, save, value, bpm)   # once the slider rests
+
+    pick.connect("notify::selected", on_pick)
+    tempo.connect("value-changed", on_tempo)
+    show()

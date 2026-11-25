@@ -1096,6 +1096,16 @@ function setDance(d) {
   dance.on = b > 0;
   if (dance.on) dance.bpm = Math.max(50, Math.min(220, b));   // kept while it eases out
   stats.dance = dance.on ? dance.bpm : 0;
+  // The dance chosen in her Settings (#132): "" Auto, "generated" the simple bounce, or a
+  // clip's id. A new `rev`: a clip's tempo was set, so the clips are fetched again.
+  const choice = typeof o.clip === "string" ? o.clip : "";
+  if (choice !== clipState.choice) { clipState.choice = choice; clipState.retryAt = 0; }
+  if ((o.rev || 0) !== (clipState.rev || 0)) {
+    clipState.rev = o.rev || 0;
+    clipState.list = null; clipState.data = {}; clipState.fixes = {};
+    if (clipState.cur) { clipState.prev = null; clipState.cur = null; }
+    clipState.retryAt = 0;
+  }
   if (dance.on && Number.isFinite(o.phase)) {
     const err = o.phase - dance.phase;
     if (!dance.synced || Math.abs(err) > SYNC_SNAP) { dance.phase = o.phase; dance.err = 0; }
@@ -1190,14 +1200,17 @@ async function clipList() {
 // move takes one song beat, or two (half time); never two moves a beat: that doubled time was
 // "too fast for proper dancing" (user, 2026-11-25, the Macarena under "Family Portrait").
 const CLIP_PER_BEAT = [1, 0.5];
-function clipRate(clipBpm) {
+const CHOSEN_RATE = [0.6, 1.6];           // a dance chosen in her Settings stretches further
+function clipRate(clipBpm, chosen = false) {
   if (!clipBpm || !dance.bpm) return 0;
+  const [lo, hi] = chosen ? CHOSEN_RATE : CLIP_RATE;
   for (const m of CLIP_PER_BEAT) {
     const r = dance.bpm * m / clipBpm;
-    if (r >= CLIP_RATE[0] && r <= CLIP_RATE[1]) return r;
+    if (r >= lo && r <= hi) return r;
   }
   return 0;
 }
+const chosenClip = () => clipState.choice && clipState.choice !== "generated" ? clipState.choice : "";
 
 // The harness's "natural speed" (#128): a forced clip plays as it was captured (1x), whatever
 // the tempo, so its moves can be tapped along with to find the clip's real tempo.
@@ -1205,6 +1218,12 @@ const natural = () => !!(clipState.natural && clipState.force);
 
 function pickClip() {
   if (natural()) return (clipState.list || []).find((c) => c.id === clipState.force) || null;
+  if (clipState.choice === "generated" && !clipState.force) return null;
+  const mine = chosenClip();
+  if (mine && !clipState.force) {
+    const c = (clipState.list || []).find((x) => x.id === mine);
+    return c && clipRate(c.bpm, true) ? c : null;
+  }
   const list = (clipState.list || []).filter((c) => clipRate(c.bpm));
   if (clipState.force) return list.find((c) => c.id === clipState.force) || null;
   if (!list.length) return null;
@@ -1367,8 +1386,12 @@ function updateClips(vrm, dt) {
 
   const quiet = dance.calm || speech.env > 0.05;
   const cur = clipState.cur;
-  const rate = cur ? (natural() ? 1 : clipRate(cur.clip.bpm)) : 0;
-  const want = dance.on && !quiet && !!cur && rate > 0;
+  const chosen = !!cur && !clipState.force && cur.clip.id === chosenClip();
+  const rate = cur ? (natural() ? 1 : clipRate(cur.clip.bpm, chosen)) : 0;
+  // The Settings' choice changed: the simple bounce lets the clip go; another dance replaces it.
+  if (cur && !clipState.force && ((clipState.choice === "generated") || (chosenClip() && cur.clip.id !== chosenClip())))
+    clipState.beats = clipState.switchAt;
+  const want = dance.on && !quiet && !!cur && rate > 0 && !(clipState.choice === "generated" && !clipState.force);
   clipState.w += ((want ? 1 : 0) - clipState.w) * Math.min(1, dt * CLIP_EASE);
   if (!dance.on && clipState.w < 0.01) { clipState.cur = clipState.prev = null; stats.clip = ""; }
   // Choose: when dancing starts, when the tempo stops fitting, and every few bars.
