@@ -760,15 +760,18 @@ const POSES = {
     osc: { side: "R", part: "LowerArm", delta: [0.25, 0, 0], hz: 1.7 },
     brief: 2.6,
   },
-  // Dancing (#115): elbows in at the sides, forearms forward, loose fists, the forearms
-  // pumping up and down in turn. `osc` may be a list, each with its own `offset`; hz
-  // "beat" means the dance's own phase drives it, so the arms keep time with the body.
-  // Never picked at random (not in any POSE_SETS): only the dance asks for it.
+  // Dancing (#115): the simple bounce's arms. Lowered and relaxed, a soft bend at the elbow, and
+  // a slight sway with the body (user, 2026-11-25: "arms lowered with a slight sway"; they used
+  // to pump in front of her). Both arms swing to the same side, so the right arm's "out" is in
+  // turn; hz "beat" follows the dance's phase, so they sway in time with the hips. `osc` may be a
+  // list, each with its own `offset`. Never picked at random (in no POSE_SETS).
   dance: {
-    L: { UpperArm: [0.18, -0.9, 0.2], LowerArm: [-0.05, 0.2, 0.95], curl: [0.6, 0.4] },
-    R: { UpperArm: [0.18, -0.9, 0.2], LowerArm: [-0.05, 0.2, 0.95], curl: [0.6, 0.4] },
-    osc: [{ side: "L", part: "LowerArm", delta: [0, 0.4, -0.1], hz: "beat", offset: 0 },
-          { side: "R", part: "LowerArm", delta: [0, 0.4, -0.1], hz: "beat", offset: Math.PI }],
+    L: { UpperArm: [0.3, -0.95, 0.06], LowerArm: [0.16, -0.94, 0.3], curl: [0.3, 0.18] },
+    R: { UpperArm: [0.3, -0.95, 0.06], LowerArm: [0.16, -0.94, 0.3], curl: [0.3, 0.18] },
+    osc: [{ side: "L", part: "UpperArm", delta: [0.1, 0, 0.05], hz: "beat", offset: 0 },
+          { side: "L", part: "LowerArm", delta: [0.08, 0, 0.06], hz: "beat", offset: -0.4 },
+          { side: "R", part: "UpperArm", delta: [0.1, 0, 0.05], hz: "beat", offset: Math.PI },
+          { side: "R", part: "LowerArm", delta: [0.08, 0, 0.06], hz: "beat", offset: Math.PI - 0.4 }],
   },
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
@@ -1042,8 +1045,8 @@ function updateArms(vrm, dt) {
   const def = POSES[armPose.name];
   if (def && def.osc) {                           // a moving pose: re-aim every frame
     const o = [].concat(def.osc)[0];
-    armPose.phase = o.hz === "beat"                                  // one pump per arm per 2 beats,
-      ? dance.phase * Math.PI / (dance.bpm < HALF_TIME_BPM ? 2 : 1)   // or 4 for a slower song
+    armPose.phase = o.hz === "beat"                                  // one sway per 2 beats, with the
+      ? dance.phase * Math.PI / (dance.bpm < HALF_TIME_BPM ? 2 : 1)   // hips (4 for a slower song)
       : armPose.phase + dt * Math.PI * 2 * o.hz;
     armPose.to = targetArms(armPose.name, armPose.phase);
   }
@@ -1072,7 +1075,7 @@ function updateArms(vrm, dt) {
 // ---- #115: dancing to the music ----------------------------------------------------
 // A generated dance timed to the song's tempo (avatar:dance {bpm}; null stops it): a bounce
 // down on every beat (hips, spine, a nod), a sway from side to side over two beats, the
-// shoulders rising in turn, and the arms pumping (the "dance" pose). A faster song is
+// shoulders rising in turn, and the arms low, swaying with her (the "dance" pose). A faster song is
 // livelier (`energy`, 0 at 80 BPM to 1 at 160), not only quicker. While she speaks or
 // listens (avatar:calm, the moments the music ducks) it softens to a sway so her face and
 // gestures read, and it eases in and out, never snapping. Like idle, every body channel is
