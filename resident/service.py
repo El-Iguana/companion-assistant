@@ -5,7 +5,7 @@ forwarded to the Cantinero server.
 |---|---|
 | ``GET /desktop``, ``/static/*`` | the desktop page, unchanged from the server's |
 | ``POST /pmedia/tts``, ``/pmedia/stt`` | local Kokoro/Piper and Whisper: audio never leaves this machine |
-| ``/pdesk/*``, a card's PNG and ``avatar.vrm``, ``/pmedia/music/duck`` | forwarded, path unchanged, with the token |
+| ``/pdesk/*``, a card's PNG and ``avatar.vrm``, ``/pmedia/music/tempo`` | forwarded, path unchanged, with the token |
 | ``GET /resident/status`` | paired?, server reachable?, for the shell's tray |
 
 It listens on 127.0.0.1 only. A page from that address is a secure context, so the mic
@@ -287,6 +287,13 @@ async def card_png(card_id: str, request: Request):
 async def avatar(card_id: str, request: Request):
     _guard(request)
     return await _forward(request, f"/pmedia/card/{card_id}/avatar.vrm", None)
+
+
+@app.get("/pmedia/music/tempo")
+async def tempo(request: Request):
+    """Each music track's BPM, from the server (#114): what she dances to."""
+    _guard(request)
+    return await _forward(request, "/pmedia/music/tempo", None)
 
 
 @app.post("/pmedia/music/duck")

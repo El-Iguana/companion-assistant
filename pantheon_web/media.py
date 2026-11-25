@@ -236,6 +236,24 @@ def help_page(request: Request):
                     headers={"Cache-Control": "no-cache"})
 
 
+# --- the DJ: each music track's tempo (#114) --------------------------------------------------
+@router.get("/music/tempo")
+async def music_tempo(request: Request, ids: str = ""):
+    """The player asks before a track starts: ``?ids=681,682`` -> ``{"tempo": {"681": 129.2}}``.
+    Only measured music tracks are in it (spoken word never is); the rest are measured in the
+    background, so asking also keeps that going."""
+    from services.skills import music_tempo as mt
+    from services.skills import orpheus_media as om
+
+    cur = _ctx(request, resident=True)
+    root = cur.cards.parent
+    wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:500]
+    st = om.load(root)
+    if om.paired(st):
+        mt.refresh_soon(root, st)
+    return {"tempo": {str(k): v for k, v in mt.bpm_of(root, wanted).items()}}
+
+
 # --- the DJ: music under her voice ----------------------------------------------------
 @router.post("/music/duck")
 async def music_duck(request: Request):

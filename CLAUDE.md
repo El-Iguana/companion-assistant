@@ -829,6 +829,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     (~0.1 s). Any other date talk (weekdays, months, "until", a holiday name, `_ASKS_CALENDAR`)
     puts the next 21 days, each with its "+N", and the holidays of the next 120 days in the
     trailing note: the model's date answers went from ~6/12 right to 12/12.
+  - **Each music track's tempo** (#114, `services/skills/music_tempo.py`): the BPM tag, else
+    measured with numpy (onset flux, autocorrelation, a prior around 120), folded into 80–160.
+    Music albums only (the catalog's `spoken` mark): spoken word never gets one. Cached in
+    `<library>/music_tempo.json`, filled in the background, a track measured once. Queue entries
+    carry `bpm`; the player asks `GET /pmedia/music/tempo?ids=` (forwarded by the resident).
+    soundfile decodes, PyAV when libsndfile can't (42 of 917 MP3s). amd-halo: 917 tracks in
+    ~7 min, 915 measured; published tempos match within ~2 BPM.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
   - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns

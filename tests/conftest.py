@@ -73,3 +73,11 @@ def _orpheus_device_is_bound(monkeypatch):
     async def me(base, token):
         return {"binding": "bound", "profile": {"name": "admin"}}
     monkeypatch.setattr(om, "me", me)
+
+
+@pytest.fixture(autouse=True)
+def _no_background_tempo(monkeypatch):
+    """No test starts a background tempo build (#114); test_music_tempo.py calls build itself."""
+    from services.skills import music_tempo
+
+    monkeypatch.setattr(music_tempo, "refresh_soon", lambda root, st: None)
