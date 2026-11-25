@@ -1330,6 +1330,7 @@ export function boot() {
   // Dancing to the music (#115): the player says the tempo (null or 0 stops), and the
   // voice says when she is speaking or listening (the music ducks then; she calms).
   window.addEventListener("avatar:dance", (e) => setDance(e.detail && e.detail.bpm));
+  if (window.__cantineroDance) setDance(window.__cantineroDance);   // sent before this loaded
   window.addEventListener("avatar:calm", (e) => { dance.calm = !!(e.detail && e.detail.on); });
   window.addEventListener("avatar:mood", (e) => {
     const d = e.detail || {};

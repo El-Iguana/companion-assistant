@@ -17,12 +17,12 @@ def config_home(tmp_path, monkeypatch):
 
 
 def test_defaults_without_a_file():
-    assert ss.load() == {"show_at_start": True, "listening_at_start": True}
+    assert ss.load() == {"show_at_start": True, "listening_at_start": True, "dance_to_music": False}
 
 
 def test_round_trip(config_home):
-    ss.save({"show_at_start": False, "listening_at_start": True})
-    assert ss.load() == {"show_at_start": False, "listening_at_start": True}
+    ss.save({"show_at_start": False, "listening_at_start": True, "dance_to_music": True})
+    assert ss.load() == {"show_at_start": False, "listening_at_start": True, "dance_to_music": True}
     assert (config_home / "pantheon-desktop" / "settings.json").exists()
 
 
@@ -30,7 +30,7 @@ def test_bad_values_and_unknown_keys_are_ignored(config_home):
     p = config_home / "pantheon-desktop" / "settings.json"
     p.parent.mkdir(parents=True)
     p.write_text(json.dumps({"show_at_start": "no", "listening_at_start": False, "x": 1}))
-    assert ss.load() == {"show_at_start": True, "listening_at_start": False}
+    assert ss.load() == {"show_at_start": True, "listening_at_start": False, "dance_to_music": False}
 
 
 def test_unreadable_file_gives_the_defaults(config_home):

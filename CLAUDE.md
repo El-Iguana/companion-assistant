@@ -783,7 +783,13 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   **R7 (a formal music player, #71–#73):** ✅ a micro player under her bar while music plays (the shell
   pushes the player's state to the page; buttons come back as `music:<action>` messages); ✅ the full
   player with stop/shuffle/repeat, a polished layout and keys (`musiccore.Queue` shuffle/repeat); ✅ browse and search the library
-  (the full player's Library tab, `desktop/library.py`).
+  (the full player's Library tab, `desktop/library.py`). ✅ **She dances to the music** (#116): the tray's
+  **Dance to the music** (off by default, kept in `shellsettings` as `dance_to_music`). The shell's
+  500 ms push sends `avatar:dance` with the playing track's `bpm` when it changes
+  (`musiccore.dance_bpm`: playing and a tempo, kept between tracks, still when paused/stopped or
+  for a track with none, so spoken word never), also kept as `window.__cantineroDance` for an
+  avatar that loads later, and re-sent after a page load. A queue built here (the library) asks
+  the resident `GET /pmedia/music/tempo?ids=` for the current track and the next four (`tempo_ids`).
 - **Fortuna** (2026-11-23, `services/fortuna.py`): ai-stack's typed-decision backend
   (`http://fortuna:8009` on ai-net; `FORTUNA_URL`, `FORTUNA=off`). It answers "pick one of these" in
   0.15–0.25 s, against 7–12 s for a KoboldCPP generation.

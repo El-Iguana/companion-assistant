@@ -80,6 +80,7 @@ class DesktopShell(Gtk.Application):
         self.settings_win = None
         self.hud_extra = 0             # px the page's micro player adds to the clickable strip
         self._music_pushed = ""
+        self._dance_bpm = None             # the tempo last sent to her dance (#116); None = still
         self._exiting = False
         # `cantinero --exit` reaches this over D-Bus (org.gtk.Actions.Activate "exit").
         exit_action = Gio.SimpleAction.new("exit", None)
@@ -188,9 +189,9 @@ class DesktopShell(Gtk.Application):
         # 3 s rather than leaving an empty window for the session (found on predator,
         # 2026-11-23: the page had never loaded since the install).
         self.view.connect("load-failed", self._on_load_failed)
-        # A fresh page has no micro player yet: send it the music state again.
+        # A fresh page has no micro player and no dance yet: send it the music state again.
         self.view.connect("load-changed", lambda _v, ev: ev == WebKit.LoadEvent.FINISHED
-                          and setattr(self, "_music_pushed", ""))
+                          and self._page_fresh())
         self.view.load_uri(self.url)
 
         # Closing her (the taskbar's Close, Alt+F4) hides her to the tray, like the tray's Hide;
@@ -382,10 +383,14 @@ class DesktopShell(Gtk.Application):
         self._mi_position = MenuItem(
             6, "Move her (drag to position)", self._menu_position_mode,
             toggle=True, checked=False)
+        self._mi_dance = MenuItem(
+            13, "Dance to the music", self._menu_dance, toggle=True,
+            checked=bool(self.prefs.get("dance_to_music")), enabled=self.player is not None)
         items = [
             MenuItem(1, "Show / hide", self._menu_toggle_visible),
             MenuItem(8, "Music player", lambda _i: self.player and self.player.toggle(),
                      enabled=self.player is not None),
+            self._mi_dance,
             self._mi_chars,
             self._mi_listen,
             self._mi_position,
@@ -435,13 +440,30 @@ class DesktopShell(Gtk.Application):
             self._push_music()
 
     def _push_music(self):
-        """The micro player under her bar (Music M1): the player's state, when it changed."""
+        """The micro player under her bar (Music M1): the player's state, when it changed. And
+        her dance (#116): the playing track's tempo, when it changed."""
         if self.player and self.view and not self._exiting:
             js = "window.__cantineroMusic && window.__cantineroMusic(%s)" % json.dumps(self.player.snapshot())
             if js != self._music_pushed:
                 self._music_pushed = js
                 self.view.evaluate_javascript(js, -1, None, None, None, None, None)
+            bpm = music.core.dance_bpm(bool(self.prefs.get("dance_to_music")), self.player.status,
+                                       self.player.queue.current, self._dance_bpm)
+            if bpm != self._dance_bpm:
+                self._dance_bpm = bpm
+                print(f"[shell] dance: {bpm or 'still'}", flush=True)
+                self.view.evaluate_javascript(music.core.dance_script(bpm), -1, None, None, None, None, None)
         return True                                        # the timer keeps going
+
+    def _page_fresh(self):
+        self._music_pushed = ""
+        self._dance_bpm = None if not self._dance_bpm else -1.0   # differs from any tempo: re-sent
+
+    def _menu_dance(self, item):
+        """The tray's "Dance to the music": at once, and kept for next time (shellsettings)."""
+        self.prefs["dance_to_music"] = bool(item.checked)
+        shellsettings.save(self.prefs)
+        self._push_music()
 
     def _menu_settings(self, *_):
         if self.settings_win is None:
@@ -508,8 +530,10 @@ class DesktopShell(Gtk.Application):
         return False                               # let it close
 
     def _on_prefs(self, prefs: dict):
-        self.prefs = prefs
-        shellsettings.save(prefs)
+        # In place: the Settings window holds this same dict, so a tray switch (dance) made
+        # while it is open is not undone by its next save.
+        self.prefs.update(prefs)
+        shellsettings.save(self.prefs)
 
     def _hide(self):
         if not self.win:
