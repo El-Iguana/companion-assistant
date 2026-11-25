@@ -82,6 +82,7 @@ class MusicPlayer:
         self.orpheus = cfg["orpheus_url"].rstrip("/")
         # CANTINERO_RESIDENT_URL points the player at another resident service (development).
         base = os.environ.get("CANTINERO_RESIDENT_URL") or f"http://127.0.0.1:{resident_port}"
+        self.resident = base.rstrip("/")
         self.ws_url = base.replace("http", "ws", 1).rstrip("/") + "/player/connect"
         self.queue, self.volume, self.throttle = core.Queue(), core.Volume(), core.StateThrottle()
         self.status = "idle"
@@ -412,6 +413,7 @@ class MusicPlayer:
         self._close_session()
         self._set_status("loading")
         self._show_now(item)
+        self._ask_tempo()
         wanted = self.queue.index
 
         def done(status, data, err):
@@ -433,6 +435,32 @@ class MusicPlayer:
             self.uri_set = True
             self.pipe.set_state(Gst.State.PLAYING)
         self._orpheus("POST", f"/api/v1/items/{item['id']}/playback", {}, done)
+
+    def _ask_tempo(self):
+        """The tempos the dance needs (#116), for a queue that came without them (the library).
+        Asked once per track; a failure is asked again with the next track."""
+        ids = core.tempo_ids(self.queue)
+        if not ids:
+            return
+        asked = [e for e in self.queue.items if e["id"] in ids]
+        for e in asked:
+            e["_tempo_asked"] = True
+        msg = Soup.Message.new("GET", f"{self.resident}/pmedia/music/tempo?ids={','.join(map(str, ids))}")
+
+        def fin(session, res, _u):
+            try:
+                data = session.send_and_read_finish(res)
+                tempo = json.loads(data.get_data().decode()).get("tempo") or {} if msg.get_status() == 200 else None
+            except (GLib.Error, ValueError, UnicodeDecodeError, AttributeError):
+                tempo = None
+            if tempo is None:
+                for e in asked:
+                    e.pop("_tempo_asked", None)
+                return
+            for e in self.queue.items:
+                if str(e["id"]) in tempo:
+                    e["bpm"] = tempo[str(e["id"])]
+        self.http.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, None, fin, None)
 
     # -- transport -------------------------------------------------------------------------------
 

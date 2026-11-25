@@ -10,6 +10,7 @@ carry an ``id`` and get an ack):
 """
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -263,6 +264,46 @@ def page_command(msg: str) -> Optional[tuple]:
             return None
         return (action, min(value, 100.0) if action == "volume" else value)
     return (action, None)
+
+
+# --- dancing to the music (#116) -------------------------------------------------------------
+# The avatar dances at the playing track's tempo (vtuber.mjs, avatar:dance). Tempos come with
+# the server's queue entries (``bpm``) or are asked for (GET /pmedia/music/tempo?ids=) for a
+# queue built here (the library). A track with none, spoken word above all, has no dance.
+TEMPO_AHEAD = 4                           # ask for the current track's and the next few's
+
+
+def tempo_ids(queue: "Queue") -> list:
+    """The ids worth asking about: the current track and the next few, not asked yet."""
+    if queue.current is None:
+        return []
+    near = queue.items[queue.index: queue.index + 1 + TEMPO_AHEAD]
+    return [e["id"] for e in near if "bpm" not in e and not e.get("_tempo_asked")]
+
+
+def dance_bpm(enabled: bool, status: str, item: Optional[dict], prev: Optional[float]) -> Optional[float]:
+    """The tempo she should dance at now, or None (still). Between tracks (loading) she keeps
+    going rather than stop and start again; paused, stopped, or a track with no tempo: still."""
+    if not enabled or item is None:
+        return None
+    if status == "loading":
+        return prev
+    if status != "playing":
+        return None
+    try:
+        bpm = float(item.get("bpm") or 0)
+    except (TypeError, ValueError):
+        return None
+    return bpm if bpm > 0 else None
+
+
+def dance_script(bpm: Optional[float]) -> str:
+    """What the shell runs in the page: vtuber.mjs listens for avatar:dance."""
+    # Also kept on window: the avatar module loads on demand, and reads it when it starts, so
+    # a dance sent before it was there isn't lost.
+    b = json.dumps(bpm)
+    return (f"window.__cantineroDance = {b}; "
+            f"window.dispatchEvent(new CustomEvent('avatar:dance', {{detail: {{bpm: {b}}}}}))")
 
 
 # --- the library browser (Music M3) ------------------------------------------------------------

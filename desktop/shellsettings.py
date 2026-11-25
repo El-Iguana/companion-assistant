@@ -7,6 +7,8 @@ server down:
                        them). The source of truth is systemd, so it is not in the file.
   show_at_start        off: she starts in the tray (see-through, still listening)
   listening_at_start   the wake word is on as soon as she starts
+  dance_to_music       she dances to music at its tempo (#116); the tray's "Dance to the
+                       music" switches it, at once, and it is kept here. Off by default
 
 The file is ~/.config/pantheon-desktop/settings.json, beside geometry.json. Everything above
 the window class is plain Python, tested without GTK (tests/test_shell_settings.py).
@@ -18,7 +20,7 @@ import os
 import subprocess
 
 UNITS = ("cantinero-resident.service", "cantinero-shell.service")
-DEFAULTS = {"show_at_start": True, "listening_at_start": True}
+DEFAULTS = {"show_at_start": True, "listening_at_start": True, "dance_to_music": False}
 
 
 def path() -> str:
