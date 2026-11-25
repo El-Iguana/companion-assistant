@@ -200,3 +200,11 @@ def test_the_tempo_lookup_is_forwarded_with_its_ids(server, client):
     seen, _ = server
     assert client.get("/pmedia/music/tempo?ids=11,12").status_code == 200        # #114
     assert [(m, p, a) for m, p, a, _ in seen] == [("GET", "/pmedia/music/tempo", "Bearer TOK")]
+
+
+def test_dance_clips_are_forwarded(server, client):
+    seen, _ = server
+    assert client.get("/pmedia/dance").status_code == 200                         # #120
+    assert client.get("/pmedia/dance/macarena.json").status_code == 200
+    assert client.get("/pmedia/dance/Bad..json").status_code == 404
+    assert [(m, p) for m, p, _, _ in seen] == [("GET", "/pmedia/dance"), ("GET", "/pmedia/dance/macarena.json")]

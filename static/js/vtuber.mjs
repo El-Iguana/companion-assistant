@@ -188,10 +188,16 @@ const FRAME_W = 0.55, FRAME_H = 0.62;   // metres that should stay in view
 const MAX_VIS_H = 1.15;
 const HEAD_AIR = 0.24;                  // eye height to the top edge of the frame
 let viewerY = 1.4;                      // eye height the gaze aims at (not the camera's)
+// Dancing to a clip (#120) the view eases out to more of her (0 = the bust, 1 = most of her).
+// The eye height is measured once per model, at rest: measured while she dances, the camera
+// would bob with her head.
+const WIDE = { w: 1.0, h: 1.3, max: 1.9, air: 0.3 };
+let frameView = 0, frameEye = null;
 function frameBust() {
   if (!camera) return;
   let eye = 1.4;                                   // sane default if there is no rig
-  if (currentVrm) {
+  if (frameEye !== null) eye = frameEye;
+  else if (currentVrm) {
     // Matrices are stale right after scene.add() — without this the head reads as
     // world origin and the camera ends up on the floor looking at nothing.
     currentVrm.scene.updateWorldMatrix(true, true);
@@ -199,15 +205,17 @@ function frameBust() {
               || currentVrm.humanoid?.getRawBoneNode?.("head");
     if (head) {
       const y = head.getWorldPosition(new THREE.Vector3()).y;
-      if (y > 0.2) eye = y + 0.08;                 // head BONE sits at the jaw/ear line;
+      if (y > 0.2) { eye = y + 0.08; frameEye = eye; }   // head BONE sits at the jaw/ear line;
     }                                              // nudge up to the visual centre of the head
   }
   viewerY = eye;
+  const v = frameView, mix = (a, b) => a + (b - a) * v;
+  const fw = mix(FRAME_W, WIDE.w), fh = mix(FRAME_H, WIDE.h), maxH = mix(MAX_VIS_H, WIDE.max);
   const tan = Math.tan(camera.fov * Math.PI / 360);
   const aspect = camera.aspect || 1;
-  const d = Math.min(MAX_VIS_H / (2 * tan), Math.max(FRAME_H / (2 * tan), FRAME_W / (2 * tan * aspect)));
+  const d = Math.min(maxH / (2 * tan), Math.max(fh / (2 * tan), fw / (2 * tan * aspect)));
   const visH = 2 * d * tan;
-  const cy = Math.max(visH / 2, eye + HEAD_AIR - visH / 2);   // head top + air at the top edge
+  const cy = Math.max(visH / 2, eye + mix(HEAD_AIR, WIDE.air) - visH / 2);   // head top + air at the top edge
   camera.position.set(0, cy, d);
   camera.lookAt(0, cy, 0);
 }
@@ -1120,6 +1128,249 @@ function updateDance(vrm, dt) {
   if (rs) rs.rotation.z += sh;
 }
 
+// ---- #120: dance clips -----------------------------------------------------------------
+// Real dance motion (motion capture), made by scripts/dance/convert.py into the VRM humanoid's
+// own bone rotations (cantinero-dance/1), listed by GET /pmedia/dance. While she dances, a clip
+// whose tempo can be matched to the song's (CLIP_RATE: played 0.8-1.25x, its tempo halved or
+// doubled first) plays over the generated dance; a new one every 4-8 bars, cross-faded. Calm
+// (she speaks or listens) fades it out to the generated sway and back in after. With no clips,
+// or none that fits the tempo, she dances the generated way.
+//
+// Sampled here rather than by an AnimationMixer: a mixer blends with the bones' state at bind
+// time, not with this frame's pose, so it couldn't fade into the generated dance. The bones the
+// other channels never touch (legs, upper chest) are put back to rest every frame, so a clip
+// fading out can't leave them where it was.
+const CLIP_RATE = [0.8, 1.25];
+const CLIP_FADE_S = 0.6;                 // between two clips
+const CLIP_EASE = 1.6;                   // in and out of clips (1/s)
+const CLIP_BARS = [4, 8];                // a clip plays this many bars of the song, at random
+const clipState = {
+  list: null, listAt: 0, loading: "", data: {}, cur: null, prev: null, fade: 1, w: 0,
+  beats: 0, switchAt: 0, lastId: "", force: "", model: null, rest: {}, view: 0,
+};
+if (typeof window !== "undefined") window.__avatarClips = clipState;
+
+async function clipList() {
+  if (clipState.list && performance.now() - clipState.listAt < 5 * 60e3) return clipState.list;
+  clipState.listAt = performance.now();
+  try {
+    const r = await fetch("/pmedia/dance", { credentials: "same-origin" });
+    clipState.list = r.ok ? ((await r.json()).clips || []) : [];
+  } catch { clipState.list = []; }
+  return clipState.list;
+}
+
+// The song's tempo against a clip's: the playback rate, or 0 when it can't be matched.
+function clipRate(clipBpm) {
+  if (!clipBpm || !dance.bpm) return 0;
+  let r = dance.bpm / clipBpm;
+  while (r < 0.75) r *= 2;
+  while (r > 1.5) r /= 2;
+  return r >= CLIP_RATE[0] && r <= CLIP_RATE[1] ? r : 0;
+}
+
+function pickClip() {
+  const list = (clipState.list || []).filter((c) => clipRate(c.bpm));
+  if (clipState.force) return list.find((c) => c.id === clipState.force) || null;
+  if (!list.length) return null;
+  const e = danceEnergy();
+  const scored = list.map((c) => ({ c, s: Math.abs((c.energy ?? 0.5) - e) + Math.abs(clipRate(c.bpm) - 1)
+                                         + (c.id === clipState.lastId && list.length > 1 ? 5 : 0)
+                                         + Math.random() * 0.35 }));
+  scored.sort((a, b) => a.s - b.s);
+  return scored[0].c;
+}
+
+// A clip as typed arrays, the VRM 0.x flip applied once (its normalized rig faces -Z).
+async function loadClip(meta) {
+  if (clipState.data[meta.id]) return clipState.data[meta.id];
+  const r = await fetch(`/pmedia/dance/${encodeURIComponent(meta.id)}.json`, { credentials: "same-origin" });
+  if (!r.ok) throw new Error(`clip ${meta.id}: ${r.status}`);
+  const d = await r.json();
+  const clip = { id: meta.id, name: d.name, bpm: d.bpm, fps: d.fps, frames: d.frames,
+                 loop: d.loop || [0, d.frames - 1], bones: {}, hips: new Float32Array(d.hips || []) };
+  for (const [b, v] of Object.entries(d.bones || {})) clip.bones[b] = new Float32Array(v);
+  clip.restDirs = d.rest_dirs || {};
+  clipState.data[meta.id] = clip;
+  return clip;
+}
+
+function startClip(clip) {
+  clipState.prev = clipState.cur;
+  clipState.cur = { clip, frame: clip.loop[0] };
+  clipState.fade = clipState.prev ? 0 : 1;
+  clipState.lastId = clip.id;
+  clipState.beats = 0;
+  clipState.switchAt = 4 * (CLIP_BARS[0] + Math.floor(Math.random() * (CLIP_BARS[1] - CLIP_BARS[0] + 1)));
+  stats.clip = clip.name;
+}
+
+async function chooseClip() {
+  if (clipState.loading) return;
+  clipState.loading = "…";
+  try {
+    await clipList();
+    const meta = pickClip();
+    if (!meta) { if (!clipState.cur) stats.clip = ""; return; }
+    if (clipState.cur && meta.id === clipState.cur.clip.id) { clipState.beats = 0; return; }
+    startClip(await loadClip(meta));
+  } catch (e) {
+    console.warn("[avatar] dance clip:", e);
+  } finally { clipState.loading = ""; }
+}
+
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+function sampleBone(state, bone, out) {
+  const c = state.clip, arr = c.bones[bone];
+  const i = Math.floor(state.frame), f = state.frame - i;
+  const j = i + 1 > c.loop[1] ? c.loop[0] : i + 1;
+  _qa.fromArray(arr, i * 4); _qb.fromArray(arr, j * 4);
+  return out.copy(_qa).slerp(_qb, f);
+}
+function sampleHips(state, out) {
+  const c = state.clip, h = c.hips;
+  const i = Math.floor(state.frame), f = state.frame - i;
+  const j = i + 1 > c.loop[1] ? c.loop[0] : i + 1;
+  return out.set(h[i * 3] + (h[j * 3] - h[i * 3]) * f, h[i * 3 + 1] + (h[j * 3 + 1] - h[i * 3 + 1]) * f,
+                 h[i * 3 + 2] + (h[j * 3 + 2] - h[i * 3 + 2]) * f);
+}
+function advance(state, dt, rate) {
+  const c = state.clip;
+  state.frame += dt * c.fps * rate;
+  const len = c.loop[1] - c.loop[0];
+  if (len > 0) while (state.frame >= c.loop[1]) state.frame -= len;
+}
+
+// The humanoid's own hierarchy (the converter's VRM_PARENT), parents first, and each bone's
+// child for its rest direction.
+const CLIP_PARENT = {
+  hips: null, spine: "hips", chest: "spine", upperChest: "chest", neck: "upperChest", head: "neck",
+  leftShoulder: "upperChest", leftUpperArm: "leftShoulder", leftLowerArm: "leftUpperArm", leftHand: "leftLowerArm",
+  rightShoulder: "upperChest", rightUpperArm: "rightShoulder", rightLowerArm: "rightUpperArm", rightHand: "rightLowerArm",
+  leftUpperLeg: "hips", leftLowerLeg: "leftUpperLeg", leftFoot: "leftLowerLeg", leftToes: "leftFoot",
+  rightUpperLeg: "hips", rightLowerLeg: "rightUpperLeg", rightFoot: "rightLowerLeg", rightToes: "rightFoot",
+};
+const CLIP_ORDER = Object.keys(CLIP_PARENT);
+const CLIP_CHILD = {
+  spine: ["chest"], chest: ["upperChest", "neck"], upperChest: ["neck"], neck: ["head"],
+  leftShoulder: ["leftUpperArm"], leftUpperArm: ["leftLowerArm"], leftLowerArm: ["leftHand"],
+  leftHand: ["leftMiddleProximal"], rightShoulder: ["rightUpperArm"], rightUpperArm: ["rightLowerArm"],
+  rightLowerArm: ["rightHand"], rightHand: ["rightMiddleProximal"],
+  leftUpperLeg: ["leftLowerLeg"], leftLowerLeg: ["leftFoot"], leftFoot: ["leftToes"],
+  rightUpperLeg: ["rightLowerLeg"], rightLowerLeg: ["rightFoot"], rightFoot: ["rightToes"],
+};
+const clipParent = (clip, name) => {
+  let p = CLIP_PARENT[name];
+  while (p && !clip.bones[p]) p = CLIP_PARENT[p];
+  return p;
+};
+
+// Per model and clip: the turn that takes each bone's rest direction on THIS model to the
+// clip's (its source skeleton's rest). A normalized VRM bone's rest is the identity, so its
+// child's position is its rest direction; for VRM 0.x it is mirrored into the clip's frame.
+const LIMBS = new Set(["leftUpperLeg", "leftLowerLeg", "rightUpperLeg", "rightLowerLeg",
+  "leftUpperArm", "leftLowerArm", "rightUpperArm", "rightLowerArm"]);
+function restFixes(vrm, clip) {
+  const key = clip.id;
+  clipState.fixes = clipState.fixesFor === vrm ? clipState.fixes : {};
+  clipState.fixesFor = vrm;
+  if (clipState.fixes[key]) return clipState.fixes[key];
+  const out = {};
+  for (const [name, src] of Object.entries(clip.restDirs || {})) {
+    // Limbs only: a limb is a straight segment on both skeletons, so its direction means the
+    // same; a shoulder or spine segment runs between joints the two place differently (CMU's
+    // clavicle rises 34 deg to its shoulder), and matching those would hunch her.
+    if (!LIMBS.has(name)) continue;
+    const kid = (CLIP_CHILD[name] || []).map((c) => vrm.humanoid?.getNormalizedBoneNode?.(c)).find(Boolean);
+    if (!kid || kid.position.lengthSq() < 1e-10) continue;
+    const mine = kid.position.clone().normalize();
+    if (clipState.flip) { mine.x = -mine.x; mine.z = -mine.z; }
+    out[name] = new THREE.Quaternion().setFromUnitVectors(mine, new THREE.Vector3().fromArray(src).normalize());
+  }
+  return (clipState.fixes[key] = out);
+}
+
+const OTHER_CHANNELS = new Set(["hips", "spine", "chest", "neck", "head", "leftShoulder", "rightShoulder",
+  "leftUpperArm", "leftLowerArm", "leftHand", "rightUpperArm", "rightLowerArm", "rightHand"]);
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _v1 = new THREE.Vector3();
+
+function updateClips(vrm, dt) {
+  if (!idle) return;
+  const bone = (n) => vrm.humanoid?.getNormalizedBoneNode?.(n) || null;
+  if (clipState.model !== vrm) {                     // a new model: its rest, its orientation
+    clipState.model = vrm; clipState.rest = {};
+    clipState.flip = String(vrm.meta?.metaVersion ?? "1") === "0";
+  }
+  // Bones only a clip moves go back to rest first (see above).
+  for (const [name, q] of Object.entries(clipState.rest)) { const n = bone(name); if (n) n.quaternion.copy(q); }
+
+  const quiet = dance.calm || speech.env > 0.05;
+  const cur = clipState.cur;
+  const rate = cur ? clipRate(cur.clip.bpm) : 0;
+  const want = dance.on && !quiet && !!cur && rate > 0;
+  clipState.w += ((want ? 1 : 0) - clipState.w) * Math.min(1, dt * CLIP_EASE);
+  if (!dance.on && clipState.w < 0.01) { clipState.cur = clipState.prev = null; stats.clip = ""; }
+  // Choose: when dancing starts, when the tempo stops fitting, and every few bars.
+  if (dance.on && !clipState.loading && performance.now() >= (clipState.retryAt || 0)) {
+    if (!cur || !rate || clipState.beats >= clipState.switchAt || (clipState.force && cur.clip.id !== clipState.force)) {
+      clipState.retryAt = performance.now() + 2000;      // none fits: look again in a while
+      chooseClip();
+    }
+  }
+  // The view: out while a clip shows, back after.
+  const view = clipState.w;
+  if (Math.abs(view - frameView) > 0.002) { frameView = view; frameBust(); }
+  stats.clipW = clipState.w;
+  if (!cur || clipState.w < 0.002) return;
+
+  const r = rate || 1;
+  advance(cur, dt, r);
+  if (clipState.prev) {
+    advance(clipState.prev, dt, clipRate(clipState.prev.clip.bpm) || 1);
+    clipState.fade = Math.min(1, clipState.fade + dt / CLIP_FADE_S);
+    if (clipState.fade >= 1) clipState.prev = null;
+  }
+  clipState.beats += dt * dance.bpm / 60;
+  const w = clipState.w, prev = clipState.prev, k = clipState.fade;
+  // 1. The clip's world rotations (its locals are relative to CLIP_PARENT).
+  const world = clipState.world || (clipState.world = {});
+  for (const name of CLIP_ORDER) {
+    if (!cur.clip.bones[name]) continue;
+    const q = world[name] || (world[name] = new THREE.Quaternion());
+    sampleBone(cur, name, q);
+    if (prev && prev.clip.bones[name]) q.copy(sampleBone(prev, name, _q2).slerp(q, k));
+    const p = clipParent(cur.clip, name);
+    if (p) q.premultiply(world[p]);
+  }
+  // 2. Each of this model's bones: the clip's world turn, corrected by how its rest direction
+  //    differs from the clip's (restFix), made local to its nearest ancestor the model has.
+  const fix = restFixes(vrm, cur.clip);
+  for (const name of CLIP_ORDER) {
+    const n = bone(name);
+    if (!n || !cur.clip.bones[name]) continue;
+    if (!OTHER_CHANNELS.has(name) && !clipState.rest[name]) clipState.rest[name] = n.quaternion.clone();
+    _q1.copy(world[name]);
+    if (fix[name]) _q1.multiply(fix[name]);
+    let p = CLIP_PARENT[name];
+    while (p && !(bone(p) && cur.clip.bones[p])) p = CLIP_PARENT[p];
+    if (p) {
+      _q2.copy(world[p]);
+      if (fix[p]) _q2.multiply(fix[p]);
+      _q1.premultiply(_q2.invert());
+    }
+    if (clipState.flip) { _q1.x = -_q1.x; _q1.z = -_q1.z; }
+    n.quaternion.slerp(_q1, w);
+  }
+  // The hips' sway, in leg lengths: on top of where the other channels put them this frame.
+  const lean = idle.arms && idle.arms.lean, hips = bone("hips");
+  if (hips && lean && lean.hipsPos && cur.clip.hips.length) {
+    sampleHips(cur, _v1);
+    if (clipState.flip) { _v1.x = -_v1.x; _v1.z = -_v1.z; }
+    const leg = Math.max(0.5, lean.hipsPos.y);
+    hips.position.addScaledVector(_v1, leg * w);
+  }
+}
+
 function updateSpeech(vrm, dt) {
   const em = vrm.expressionManager;
   if (!em) return;
@@ -1165,6 +1416,8 @@ function disposeModel() {
   idle = null; idleFailed = false;
   speech.amp = speech.target = speech.env = speech.last = 0;
   dance.bob = 0;                                   // a new model starts from its own hips
+  frameEye = null; frameView = 0;
+  clipState.model = null;
   currentVrm = null;
   placeholder = null;
 }
@@ -1264,6 +1517,7 @@ function tick(now) {
       updateGesture(currentVrm, dt);     // and so does gesture
       updateArms(currentVrm, dt);        // 3e: held arm poses (absolute, from rest)
       updateDance(currentVrm, dt);       // #115: after the arms, which reset the hips' position
+      updateClips(currentVrm, dt);       // #120: real dance motion over all of that
       updateEmotion(currentVrm, dt);     // expression track (independent of pose)
     } catch (e) {
       if (!idleFailed) {
