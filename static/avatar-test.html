@@ -56,6 +56,10 @@
       <select id="pose"><option value="">auto (scheduler)</option></select>
       turn <input id="turn" type="range" min="-90" max="90" step="5" value="0">
       <span class="dim">— hold a pose; turn to check it from the side</span></div>
+    <div>dance <input id="dance" type="range" min="0" max="180" step="2" value="0">
+      <span id="dancev">off</span>
+      <label><input id="calm" type="checkbox"> speaking / listening</label>
+      <span class="dim">— BPM (0 = stop), as the music player sends it (#115)</span></div>
   </div>
 </div>
 <script type="module">
@@ -147,6 +151,7 @@ try {
       ` · face: ${st.emotion || "-"}` +
       ` · beat: ${st.beat || "-"} · gesture: ${st.gesture || "-"}` +
       ` · posture ${st.posture ?? "0"}` +
+      ` · dance ${st.dance ? st.dance + " BPM, " + ((st.danceW || 0) * 100).toFixed(0) + "%" : "-"}` +
       ` · shoulder ${(st.shoulderDeg || 0).toFixed(2)}°</span>` +
       ` · pauses ${pauses}</span>`;
     panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
@@ -212,6 +217,15 @@ try {
     const o = document.createElement("option"); o.value = o.textContent = name; psel.appendChild(o);
   }
   psel.addEventListener("change", () => { window.__avatarStats.pose = psel.value; });
+  const dsl = document.getElementById("dance"), dv = document.getElementById("dancev");
+  dsl.addEventListener("input", () => {
+    const bpm = Number(dsl.value) >= 60 ? Number(dsl.value) : 0;
+    dv.textContent = bpm ? bpm + " BPM" : "off";
+    window.dispatchEvent(new CustomEvent("avatar:dance", { detail: { bpm: bpm || null } }));
+  });
+  document.getElementById("calm").addEventListener("change", (e) => {
+    window.dispatchEvent(new CustomEvent("avatar:calm", { detail: { on: e.target.checked } }));
+  });
   const tsl = document.getElementById("turn");
   tsl.addEventListener("input", () => { window.__avatarStats.turn = Number(tsl.value); });
 

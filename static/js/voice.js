@@ -96,6 +96,8 @@
   const wakeHeld = () => Date.now() < wakeHoldUntil;
   function sendDuck(on) {
     ducked = on;
+    // The same moments calm her dance to a sway (#115): she is speaking or listening.
+    window.dispatchEvent(new CustomEvent("avatar:calm", { detail: { on } }));
     fetch("/pmedia/music/duck", { method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
       body: JSON.stringify({ on }) }).catch(() => {});

@@ -663,7 +663,15 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   the pose (`curl: [fingers, thumb]`, 0 straight to 1 a loose fist; rest keeps a slight 0.18): the
   normalized rig's reference pose has the palms down, so every hand's palm side is local −Y and
   each joint turns about (its direction × palm); the thumb aims between the palm and the little
-  finger so it closes across. Checked in close-ups on both models. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  finger so it closes across. Checked in close-ups on both models.
+  ✅ **Dancing to the music** (#115): `avatar:dance {bpm}` (null stops) runs `updateDance` after
+  the arms: a bounce down on every beat (hips' height, spine, a nod), a sway over two beats (hips,
+  chest, head; more for `female`, less for `male`), the shoulders in turn, and the `dance` arm pose
+  (forearms pumping in turn; `osc` may be a list, `hz: "beat"` follows the dance's phase).
+  Livelier with tempo (`energy`: 80→160 BPM). While she speaks or listens (`avatar:calm`, sent by
+  voice.js with every music duck) it softens to 22 % and the arms go back to rest; it eases in and
+  out (`DANCE_EASE`). The harness has a BPM slider. Checked in headless Chromium on Pix: 90/128/155
+  BPM keep time (1.47/2.13/2.58 beats/s), calm, stop. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone
