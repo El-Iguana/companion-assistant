@@ -768,10 +768,15 @@ const POSES = {
   dance: {
     L: { UpperArm: [0.3, -0.95, 0.06], LowerArm: [0.16, -0.94, 0.3], curl: [0.3, 0.18] },
     R: { UpperArm: [0.3, -0.95, 0.06], LowerArm: [0.16, -0.94, 0.3], curl: [0.3, 0.18] },
-    osc: [{ side: "L", part: "UpperArm", delta: [0.1, 0, 0.05], hz: "beat", offset: 0 },
-          { side: "L", part: "LowerArm", delta: [0.08, 0, 0.06], hz: "beat", offset: -0.4 },
-          { side: "R", part: "UpperArm", delta: [0.1, 0, 0.05], hz: "beat", offset: Math.PI },
-          { side: "R", part: "LowerArm", delta: [0.08, 0, 0.06], hz: "beat", offset: Math.PI - 0.4 }],
+    // Side to side (#140, user: "the arms are so static... the swing should be side to side,
+    // not forward and back"): both arms swing to the same side with her hips ([0]: the right
+    // arm's "out" is mirrored, so half a cycle apart is the same world side), the forearm
+    // trailing its upper arm. 0.26 out keeps the arm that swings in clear of her hips (its rest
+    // is 0.3 out). Scaled by the song's energy (dance.armGain, 0.55-1).
+    osc: [{ side: "L", part: "UpperArm", delta: [0.26, 0, 0.03], hz: "beat", offset: 0 },
+          { side: "L", part: "LowerArm", delta: [0.3, 0.04, 0.03], hz: "beat", offset: -0.5 },
+          { side: "R", part: "UpperArm", delta: [0.26, 0, 0.03], hz: "beat", offset: Math.PI },
+          { side: "R", part: "LowerArm", delta: [0.3, 0.04, 0.03], hz: "beat", offset: Math.PI - 0.5 }],
   },
 };
 if (typeof window !== "undefined") window.__avatarPoses = POSES;
