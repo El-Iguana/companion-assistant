@@ -730,6 +730,12 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   and `data/dance` is git-ignored and outside the image (`.containerignore` drops `data/`;
   `tests/test_dance_fbx.py` checks both, with a small FBX writer instead of a real download).
   Tried on three.js's "Samba Dancing.fbx": Mixamo, leg 99.8 cm, tempo read 200 (half-step hits; set it in Settings).
+  **Bundled set** (#122): the ten CMU clips the user kept (the Twist, Cabbage Patch, Egyptian Walk,
+  Charleston ×2, Dancing Bear/Animal, Lambada at 72 and Gentle Dance A at 130 as set by hand,
+  Shoulder Swing) ship in `seed/dance/` (in the image with `seed/`). `dance.folder()` copies each
+  into `data/dance/` once (`.seeded-<file>` marker, as `_vrm_dir`): never over the user's tempo,
+  a deleted one stays deleted. `tests/test_dance_bundled.py`: every bundled clip is `CMU-Mocap`
+  with the CMU credit (README credits too); `local` clips can never be bundled.
   ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
