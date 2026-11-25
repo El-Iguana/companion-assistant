@@ -62,3 +62,14 @@ def _backend_context(monkeypatch, request):
 
     monkeypatch.setattr(KoboldClient, "generate_answer", no_backend)
     monkeypatch.setattr(KoboldClient, "generate_answer_full", no_backend)
+
+
+@pytest.fixture(autouse=True)
+def _orpheus_device_is_bound(monkeypatch):
+    """No test reaches a real Orpheus to check the device's profile (#112): it's bound.
+    test_orpheus_profile.py fakes me/profiles/bind_self itself."""
+    from services.skills import orpheus_media as om
+
+    async def me(base, token):
+        return {"binding": "bound", "profile": {"name": "admin"}}
+    monkeypatch.setattr(om, "me", me)

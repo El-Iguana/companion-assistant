@@ -6,6 +6,9 @@ Contract (Orpheus docs/phase1-server-spec.md, architecture.md §5):
   GET  /api/v1/pair/{pairing_id}    pending, or {device_id, token} ONCE after a human approves
   POST /api/v1/resolve              {query, kinds?, limit?} -> {candidates, needs_disambiguation, …}
   GET  /api/v1/devices              the registered devices (bearer token)
+  GET  /api/v1/me                   this device's binding: "bound" to a profile, or "shared"
+  GET  /api/v1/profiles             every profile: id, name
+  PUT  /api/v1/devices/self/profile {profile_id} binds this device (phase 4 AD-2)
 
 The server's address comes from configuration (``ORPHEUS_MEDIA_URL``), never from the model.
 The token lives in ``data/u/<uid>/media/orpheus.json`` and never reaches a prompt or a
@@ -158,6 +161,20 @@ async def start_pairing(base: str) -> dict:
 
 async def poll_pairing(base: str, pairing_id: str) -> dict:
     return await _request("GET", f"{base}/api/v1/pair/{pairing_id}")
+
+
+async def me(base: str, token: str) -> dict:
+    return await _request("GET", f"{base}/api/v1/me", token=token)
+
+
+async def profiles(base: str, token: str) -> list[dict]:
+    out = await _request("GET", f"{base}/api/v1/profiles", token=token)
+    return out.get("profiles", []) if isinstance(out, dict) else out
+
+
+async def bind_self(base: str, token: str, profile_id: str) -> dict:
+    return await _request("PUT", f"{base}/api/v1/devices/self/profile", token=token,
+                          json={"profile_id": profile_id})
 
 
 async def resolve(base: str, token: str, query: str, kinds: list[str] | None, limit: int = 5) -> dict:

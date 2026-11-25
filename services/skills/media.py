@@ -360,10 +360,17 @@ async def _connect(ctx: SkillContext, args: dict) -> dict:
         if pending.get("pairing_id") and pending.get("server_id") == info.get("server_id"):
             got = await om.poll_pairing(base, pending["pairing_id"])
             if got.get("token") and got.get("device_id"):
-                om.save(ctx.root, {"server_id": info["server_id"], "server_name": info.get("name", "Orpheus"),
-                                   "url": base, "device_id": got["device_id"], "token": got["token"],
-                                   "paired_at": datetime.now(timezone.utc).isoformat()})
-                return {"ok": True, "status": "paired", "server": info.get("name", "Orpheus")}
+                fresh = {"server_id": info["server_id"], "server_name": info.get("name", "Orpheus"),
+                         "url": base, "device_id": got["device_id"], "token": got["token"],
+                         "paired_at": datetime.now(timezone.utc).isoformat()}
+                om.save(ctx.root, fresh)
+                done = {"ok": True, "status": "paired", "server": info.get("name", "Orpheus")}
+                bound = await _ensure_profile(ctx, fresh)
+                if bound.get("choose_profile"):
+                    done["profiles"] = bound["choose_profile"]
+                    done["how"] = ("the music server has several profiles: bind this device to the "
+                                   "user's in the Orpheus dashboard, or their own playlists stay hidden")
+                return done
             if str(got.get("status", "pending")) in ("pending", "waiting", ""):
                 return {"ok": True, "status": "waiting_for_approval", "code": pending.get("code"),
                         "how": f"approve it on the server: orpheus pair approve {pending.get('code')}"}
@@ -382,6 +389,31 @@ async def _connect(ctx: SkillContext, args: dict) -> dict:
             "how": f"approve it on the server: orpheus pair approve {started.get('code')}"}
 
 
+async def _ensure_profile(ctx: SkillContext, st: dict) -> dict:
+    """Bind this device to a profile, once (#112). A device Orpheus calls "shared" sees only
+    shared playlists, so the user's own ("Pink Favorites", 2026-11-25) were never found.
+    With one profile there's nothing to choose; with several, the user binds it in the
+    Orpheus dashboard, and this looks again next time. Never fails a play: on an error the
+    search goes ahead as before."""
+    if st.get("profile"):
+        return {"profile": st["profile"]}
+    try:
+        info = await om.me(st["url"], st["token"])
+        if info.get("binding") != "bound":
+            found = await om.profiles(st["url"], st["token"])
+            if len(found) != 1:
+                return {"choose_profile": [p.get("name", "") for p in found]}
+            await om.bind_self(st["url"], st["token"], found[0]["id"])
+            name = found[0].get("name", "")
+        else:
+            name = (info.get("profile") or {}).get("name", "")
+    except (om.OrpheusError, KeyError, TypeError):
+        return {}
+    st["profile"] = name or "(bound)"
+    om.save(ctx.root, st)
+    return {"profile": st["profile"]}
+
+
 def _paired_state(ctx: SkillContext) -> dict | None:
     st = om.load(ctx.root)
     return st if om.paired(st) else None
@@ -394,6 +426,7 @@ async def _find(ctx: SkillContext, args: dict) -> dict:
     st = _paired_state(ctx)
     if not st:
         return NOT_PAIRED
+    await _ensure_profile(ctx, st)
     try:
         cands, how = await _search(st, args["query"], args.get("kinds"))
     except om.OrpheusError as e:
@@ -409,6 +442,7 @@ async def _play(ctx: SkillContext, args: dict) -> dict:
     st = _paired_state(ctx)
     if not st:
         return NOT_PAIRED
+    await _ensure_profile(ctx, st)
     choice_id, query = args.get("id", ""), args.get("query", "")
     song = args.get("album_of", "") or album_of(query)
     if song:
@@ -682,6 +716,7 @@ async def fast_play(ctx: SkillContext, text: str, name: str = "") -> str | None:
     by_name = not music and not elsewhere and bool(_PLAY_WORDS.match(query))
     if not music and not by_name:
         return None
+    await _ensure_profile(ctx, st)                    # before any search: her own playlists (#112)
     sure = music and got[1] >= LANE_MIN
     song = album_of(query)
     if song:
