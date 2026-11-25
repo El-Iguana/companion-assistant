@@ -671,7 +671,23 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   Livelier with tempo (`energy`: 80→160 BPM). While she speaks or listens (`avatar:calm`, sent by
   voice.js with every music duck) it softens to 22 % and the arms go back to rest; it eases in and
   out (`DANCE_EASE`). The harness has a BPM slider. Checked in headless Chromium on Pix: 90/128/155
-  BPM keep time (1.47/2.13/2.58 beats/s), calm, stop. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  BPM keep time (1.47/2.13/2.58 beats/s), calm, stop.
+  ✅ **Dance clips** (#120): real dance motion over the generated dance. `scripts/dance/convert.py`
+  turns a T-pose mocap clip (CMU, via codepawl/cmu-mocap-glb's `skeleton/` GLBs) into
+  `cantinero-dance/1` JSON: each VRM bone's rotation relative to its VRM parent (joints the VRM
+  lacks fold in), the hips' sway in leg lengths, slow turns taken out (2 s moving average of the
+  heading), the clip's tempo (motion autocorrelation, folded 80–160) and a loop of 4/8/16 beats
+  whose ends match. `services/dance.py` lists `data/dance/*.json` (`GET /pmedia/dance`,
+  `/pmedia/dance/<id>.json`, forwarded by the resident; `data/dance` is git-ignored).
+  `updateClips` in `vtuber.mjs` samples the clip itself (a mixer can't blend with this frame's
+  pose), plays it at 0.8–1.25× to fit the song (halved or doubled first), changes clip every
+  4–8 bars with a 0.6 s cross-fade, fades out to the sway on `avatar:calm`, and widens the view
+  (`frameView`; the eye height is cached per model so the camera doesn't bob). **Limbs are
+  corrected by rest direction** (`restFixes`): CMU stands with its legs ~20° apart, a VRM with them
+  straight, and uncorrected her legs crossed; shoulders and spine are not corrected (CMU's
+  clavicle rises 34° between joints the VRM places differently). Bones only a clip moves (legs,
+  upper chest) go back to rest each frame. Checked in headless Chromium on Pix and
+  `baseline.vrm` (both VRM 1.0: the VRM 0.x flip is untried). ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone

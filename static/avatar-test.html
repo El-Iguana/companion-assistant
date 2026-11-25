@@ -60,6 +60,8 @@
       <span id="dancev">off</span>
       <label><input id="calm" type="checkbox"> speaking / listening</label>
       <span class="dim">— BPM (0 = stop), as the music player sends it (#115)</span></div>
+    <div>dance clip <select id="clip"><option value="">auto (by tempo)</option></select>
+      <span class="dim">— a clip from data/dance (#120); it plays only when its tempo fits</span></div>
   </div>
 </div>
 <script type="module">
@@ -152,6 +154,7 @@ try {
       ` · beat: ${st.beat || "-"} · gesture: ${st.gesture || "-"}` +
       ` · posture ${st.posture ?? "0"}` +
       ` · dance ${st.dance ? st.dance + " BPM, " + ((st.danceW || 0) * 100).toFixed(0) + "%" : "-"}` +
+      ` · clip ${st.clip ? st.clip + " " + ((st.clipW || 0) * 100).toFixed(0) + "%" : "-"}` +
       ` · shoulder ${(st.shoulderDeg || 0).toFixed(2)}°</span>` +
       ` · pauses ${pauses}</span>`;
     panel.className = live ? (fps > 5 ? "ok" : "bad") : "";
@@ -223,6 +226,12 @@ try {
     dv.textContent = bpm ? bpm + " BPM" : "off";
     window.dispatchEvent(new CustomEvent("avatar:dance", { detail: { bpm: bpm || null } }));
   });
+  const csel = document.getElementById("clip");
+  fetch("/pmedia/dance", { credentials: "same-origin" }).then((r) => r.ok ? r.json() : { clips: [] })
+    .then((d) => { for (const c of d.clips || []) {
+      const o = document.createElement("option"); o.value = c.id; o.textContent = `${c.name} (${c.bpm} BPM)`; csel.appendChild(o);
+    } }).catch(() => {});
+  csel.addEventListener("change", () => { if (window.__avatarClips) window.__avatarClips.force = csel.value; });
   document.getElementById("calm").addEventListener("change", (e) => {
     window.dispatchEvent(new CustomEvent("avatar:calm", { detail: { on: e.target.checked } }));
   });

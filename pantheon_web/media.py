@@ -225,6 +225,29 @@ async def vrm_file(name: str, request: Request):
     return await main.get_vrm(name, None)
 
 
+@router.get("/dance")
+async def dance_list(request: Request):
+    """The dance clips she can dance with (#120; services/dance.py): name, tempo, energy."""
+    from services import dance
+
+    _ctx(request, resident=True)
+    return {"clips": dance.clips()}
+
+
+@router.get("/dance/{clip_id}.json")
+async def dance_clip(clip_id: str, request: Request):
+    """One clip (cantinero-dance/1). Its name changes when it does, so it may be cached."""
+    from fastapi.responses import FileResponse
+
+    from services import dance
+
+    _ctx(request, resident=True)
+    p = dance.path_of(clip_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="no such dance clip")
+    return FileResponse(p, media_type="application/json", headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/help.html")
 def help_page(request: Request):
     """The in-app guide (pantheon_web/assets/help.html)."""

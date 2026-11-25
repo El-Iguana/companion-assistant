@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -287,6 +288,21 @@ async def card_png(card_id: str, request: Request):
 async def avatar(card_id: str, request: Request):
     _guard(request)
     return await _forward(request, f"/pmedia/card/{card_id}/avatar.vrm", None)
+
+
+@app.get("/pmedia/dance")
+async def dance_list(request: Request):
+    """The dance clips, from the server (#120)."""
+    _guard(request)
+    return await _forward(request, "/pmedia/dance", None)
+
+
+@app.get("/pmedia/dance/{clip_id}.json")
+async def dance_clip(clip_id: str, request: Request):
+    _guard(request)
+    if not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", clip_id):
+        raise HTTPException(status_code=404)
+    return await _forward(request, f"/pmedia/dance/{clip_id}.json", None)
 
 
 @app.get("/pmedia/music/tempo")
