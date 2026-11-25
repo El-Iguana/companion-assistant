@@ -318,7 +318,8 @@ def estimate_bpm(bones: dict, fps: int) -> float | None:
     x = x - _moving_average(x, fps)                      # the moves, not the drift
     if len(x) < fps * 3 or not np.any(x):
         return None
-    ac = np.correlate(x, x, mode="full")[len(x) - 1:]
+    f = np.fft.rfft(x, 2 * len(x))                       # autocorrelation by FFT (#130):
+    ac = np.fft.irfft(f * np.conj(f))[:len(x)]           # np.correlate stalls on long inputs
     lags = np.arange(len(ac), dtype=float)
     bpm = np.where(lags > 0, 60 * fps / np.maximum(lags, 1e-9), 0)
     ok = np.where((bpm >= 50) & (bpm <= 220))[0]
