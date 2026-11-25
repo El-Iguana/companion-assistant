@@ -135,7 +135,7 @@ def test_slow_turns_are_taken_out_and_a_twist_stays(tmp_path):
 def test_build_writes_a_clip_the_page_can_play(tmp_path):
     secs, fps = 10.0, 60
     t = np.arange(int(secs * fps)) / fps
-    swing = 0.5 * np.sin(2 * np.pi * (100 / 60) * t)
+    swing = 0.5 * np.sin(2 * np.pi * (100 / 120) * t)            # a stop at each end: one move a beat
     pos = np.stack([0.05 * np.sin(2 * np.pi * 0.83 * t), 0.87 + 0.02 * np.sin(2 * np.pi * 1.67 * t), np.zeros_like(t)], 1)
     glb = write_glb(tmp_path / "b.glb", secs, {"lhumerus": axis_angle([0, 0, 1], swing),
                                                "rhumerus": axis_angle([0, 0, 1], -swing)}, root_pos=pos)
@@ -176,6 +176,24 @@ def test_the_beat_frame_is_where_the_pose_lands():
     angle = 0.5 * side * (1 - 2 * ease)
     bones = {"leftUpperArm": axis_angle([0, 0, 1], angle), "hips": np.tile([0, 0, 0, 1.0], (300, 1))}
     assert abs(cv.beat_frame(bones, fps, bpm) - 6) <= 1
+
+
+def test_a_clip_is_one_beat_per_move():
+    # The Macarena's arms hit every ~0.37 s, right arm then left: the whole body repeats only
+    # every two moves, which read 81 and played her in double time under a 92 BPM song.
+    fps = 30
+    t = np.arange(12 * fps) / fps
+    beat = 60 / 160
+    side = np.floor(t / beat) % 2                                # moves alternate arms
+    u = (t % beat) / beat
+    move = np.clip(u / 0.6, 0, 1)
+    ease = move * move * (3 - 2 * move)                          # move, then hold, each beat
+    n = np.floor(t / beat)
+    left = 0.6 * ((np.floor((n + 1) / 2) % 2) * 2 - 1) * np.where(side == 0, ease, 1)
+    right = 0.6 * ((np.floor(n / 2) % 2) * 2 - 1) * np.where(side == 1, ease, 1)
+    bones = {"leftUpperArm": axis_angle([0, 0, 1], left), "rightUpperArm": axis_angle([0, 0, 1], right)}
+    assert abs(cv.tempo_from_hits(bones, fps) - 160) <= 6
+    assert cv.tempo_from_hits({"leftUpperArm": axis_angle([0, 0, 1], np.zeros(60))}, fps) is None
 
 
 def test_not_a_cmu_skeleton_is_refused(tmp_path):

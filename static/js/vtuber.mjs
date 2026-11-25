@@ -1042,8 +1042,9 @@ function updateArms(vrm, dt) {
   const def = POSES[armPose.name];
   if (def && def.osc) {                           // a moving pose: re-aim every frame
     const o = [].concat(def.osc)[0];
-    armPose.phase = o.hz === "beat" ? dance.phase * Math.PI          // one pump per arm per 2 beats
-                                    : armPose.phase + dt * Math.PI * 2 * o.hz;
+    armPose.phase = o.hz === "beat"                                  // one pump per arm per 2 beats,
+      ? dance.phase * Math.PI / (dance.bpm < HALF_TIME_BPM ? 2 : 1)   // or 4 for a slower song
+      : armPose.phase + dt * Math.PI * 2 * o.hz;
     armPose.to = targetArms(armPose.name, armPose.phase);
   }
   armPose.t = Math.min(1, armPose.t + dt / (def && def.brief ? POSE_EASE_S * 0.6 : POSE_EASE_S));
@@ -1079,6 +1080,7 @@ function updateArms(vrm, dt) {
 // position, so the bob is applied as a change from the last frame's.
 const DANCE_EASE = 1.4;                  // how fast the dance comes and goes (1/s)
 const DANCE_CALM = 0.22;                 // how much of it stays while she talks or listens
+const HALF_TIME_BPM = 100;               // slower songs: the body grooves at half time
 const dance = { bpm: 0, on: false, calm: false, w: 0, phase: 0, bob: 0, armGain: 1,
                 synced: 0, local: 0, err: 0 };
 // On the beat (#124): the player sends which beat the song is on (`phase`, beats as a float)
@@ -1118,12 +1120,16 @@ function updateDance(vrm, dt) {
     dance.phase += dt * danceRate() / 60 + fix;
     dance.err -= fix;
   }
-  const e = danceEnergy(), w = dance.w, p = dance.phase;
+  const e = danceEnergy(), w = dance.w;
+  // Below HALF_TIME_BPM the body grooves at half time: the sway takes four beats and the arms
+  // pump every other beat; the nod and the bounce still mark every beat.
+  const half = dance.bpm < HALF_TIME_BPM;
+  const p = dance.phase, ps = half ? p / 2 : p;
   dance.armGain = 0.55 + 0.45 * e;
   stats.danceW = w;
   // The bounce: sharpest exactly on the beat, gone halfway between.
   const dip = w < 0.001 ? 0 : Math.pow(1 - Math.abs(Math.sin(Math.PI * p)), 1.5) * w;
-  const sway = Math.sin(Math.PI * p) * w;                       // one side, then the other
+  const sway = Math.sin(Math.PI * ps) * w;                      // one side, then the other
   const hipK = figure === "male" ? 0.5 : figure === "female" ? 1.3 : 1;
   const { hips, spine, chest, neck, head, ls, rs } = idle;
   if (hips) {
@@ -1143,7 +1149,7 @@ function updateDance(vrm, dt) {
     head.rotation.x += dip * (0.03 + 0.035 * e);                // the nod
     head.rotation.z += sway * 0.018;
   }
-  const sh = Math.sin(Math.PI * p) * w * (0.03 + 0.04 * e);     // shoulders up in turn
+  const sh = Math.sin(Math.PI * ps) * w * (0.03 + 0.04 * e);    // shoulders up in turn
   if (ls) ls.rotation.z += sh;
   if (rs) rs.rotation.z += sh;
 }
@@ -1180,13 +1186,17 @@ async function clipList() {
   return clipState.list;
 }
 
-// The song's tempo against a clip's: the playback rate, or 0 when it can't be matched.
+// The song's tempo against a clip's: the playback rate, or 0 when it can't be matched. A clip
+// move takes one song beat, or two (half time); never two moves a beat: that doubled time was
+// "too fast for proper dancing" (user, 2026-11-25, the Macarena under "Family Portrait").
+const CLIP_PER_BEAT = [1, 0.5];
 function clipRate(clipBpm) {
   if (!clipBpm || !dance.bpm) return 0;
-  let r = dance.bpm / clipBpm;
-  while (r < 0.75) r *= 2;
-  while (r > 1.5) r /= 2;
-  return r >= CLIP_RATE[0] && r <= CLIP_RATE[1] ? r : 0;
+  for (const m of CLIP_PER_BEAT) {
+    const r = dance.bpm * m / clipBpm;
+    if (r >= CLIP_RATE[0] && r <= CLIP_RATE[1]) return r;
+  }
+  return 0;
 }
 
 function pickClip() {
