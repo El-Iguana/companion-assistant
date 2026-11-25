@@ -1394,7 +1394,11 @@ function updateClips(vrm, dt) {
   // The Settings' choice changed: the simple bounce lets the clip go; another dance replaces it.
   if (cur && !clipState.force && ((clipState.choice === "generated") || (chosenClip() && cur.clip.id !== chosenClip())))
     clipState.beats = clipState.switchAt;
-  const want = dance.on && !quiet && !!cur && rate > 0 && !(clipState.choice === "generated" && !clipState.force);
+  // Not the dance chosen in her Settings (it doesn't fit this song, or it's still loading): let
+  // the clip go, so she does the simple bounce, never the previous dance.
+  const notMine = !!cur && !clipState.force && !!chosenClip() && cur.clip.id !== chosenClip();
+  const want = dance.on && !quiet && !!cur && rate > 0 && !notMine
+               && !(clipState.choice === "generated" && !clipState.force);
   clipState.w += ((want ? 1 : 0) - clipState.w) * Math.min(1, dt * CLIP_EASE);
   if (!dance.on && clipState.w < 0.01) { clipState.cur = clipState.prev = null; stats.clip = ""; }
   // Choose: when dancing starts, when the tempo stops fitting, and every few bars.

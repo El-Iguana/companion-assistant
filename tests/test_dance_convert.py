@@ -201,3 +201,33 @@ def test_not_a_cmu_skeleton_is_refused(tmp_path):
             "rot": np.tile([0, 0, 0, 1.0], (5, 2, 1)), "pos": np.zeros((5, 2, 3)), "fps": 30}
     with pytest.raises(ValueError, match="not a CMU skeleton"):
         cv.retarget(clip)
+
+
+def test_soften_keeps_the_axis_and_scales_the_angle():
+    q = axis_angle([0, 1, 0], np.array([0.8, -0.4]))
+    half = cv.soften(q, 0.5)
+    assert np.allclose(angle_about(half, [0, 1, 0]), [0.4, -0.2], atol=1e-9)
+    assert np.allclose(cv.soften(q, 0.0), [[0, 0, 0, 1.0]] * 2, atol=1e-9)
+    assert np.allclose(cv.soften(np.array([[0, 0, 0, 1.0]]), 0.5), [[0, 0, 0, 1.0]])
+
+
+def test_lower_parts_keep_the_hips_and_legs_and_soften_the_torso(tmp_path):
+    secs, fps = 10.0, 60
+    t = np.arange(int(secs * fps)) / fps
+    swing = 0.5 * np.sin(2 * np.pi * (100 / 120) * t)
+    glb = write_glb(tmp_path / "l.glb", secs, {"lhumerus": axis_angle([0, 0, 1], swing),
+                                               "lowerback": axis_angle([0, 0, 1], 0.6 * np.ones_like(t)),
+                                               "lfemur": axis_angle([1, 0, 0], 0.3 * np.ones_like(t))})
+    full = cv.build(glb, "Full", "unit test", "CC0-1.0")
+    low = cv.build(glb, "Low", "unit test", "CC0-1.0", parts="lower", torso=0.5)
+    assert set(low["bones"]) == {"hips", "spine", "chest", "upperChest", "leftUpperLeg", "leftLowerLeg",
+                                 "leftFoot", "leftToes", "rightUpperLeg", "rightLowerLeg", "rightFoot", "rightToes"}
+    assert "leftUpperArm" in full["bones"] and "head" in full["bones"]
+    # Timing from the whole dance: the arms' tempo, loop and beat, though the arms are gone.
+    assert (low["bpm"], low["loop"], low["beat_frame"]) == (full["bpm"], full["loop"], full["beat_frame"])
+    spine = np.array(low["bones"]["spine"]).reshape(-1, 4)
+    assert np.allclose(angle_about(spine, [0, 0, 1]), 0.3, atol=1e-3)       # half of 0.6
+    assert np.allclose(np.array(low["bones"]["leftUpperLeg"]), np.array(full["bones"]["leftUpperLeg"]))
+    assert low["parts"] == "lower, torso 0.5" and set(low["rest_dirs"]) <= set(low["bones"])
+    with pytest.raises(ValueError):
+        cv.only_parts(full["bones"], "upper", 0.5)

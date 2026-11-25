@@ -406,10 +406,40 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "clip"
 
 
+# A clip's parts (#138). "lower": only the hips, legs and feet, and the spine and chest softened
+# by ``torso`` (0-1), so her torso moves with the hips; the arms, shoulders, neck and head are
+# left out, and the page's simple bounce drives them (arms low, swaying on the beat, the nod).
+# The Lambada's hips with her own arms was the user's ask, 2026-11-25.
+LOWER = ("hips", "leftUpperLeg", "leftLowerLeg", "leftFoot", "leftToes",
+         "rightUpperLeg", "rightLowerLeg", "rightFoot", "rightToes")
+TORSO = ("spine", "chest", "upperChest")
+
+
+def soften(q: np.ndarray, k: float) -> np.ndarray:
+    """The same turns, k of the way (0 = none, 1 = all)."""
+    q = np.where((q[..., 3:4] < 0), -q, q)                 # the short way
+    angle = 2 * np.arccos(np.clip(q[..., 3], -1, 1))
+    s = np.sin(angle / 2)
+    axis = np.where(s[..., None] > 1e-9, q[..., :3] / np.maximum(s, 1e-9)[..., None], [[1.0, 0, 0]])
+    half = angle * k / 2
+    return np.concatenate([axis * np.sin(half)[..., None], np.cos(half)[..., None]], axis=-1)
+
+
+def only_parts(bones: dict, parts: str, torso: float) -> dict:
+    if parts == "all":
+        return bones
+    if parts != "lower":
+        raise ValueError(f"unknown parts: {parts}")
+    out = {b: q for b, q in bones.items() if b in LOWER}
+    out.update({b: soften(bones[b], torso) for b in TORSO if b in bones})
+    return out
+
+
 def build(src: Path, name: str, source: str, license_: str, credit: str = "", bpm: float | None = None,
-          keep_heading: bool = False, style: str = "") -> dict:
+          keep_heading: bool = False, style: str = "", parts: str = "all", torso: float = 0.5) -> dict:
     clip = load_clip(src)
     r = retarget(clip, keep_heading=keep_heading)
+    # Tempo, loop and beat from the whole dance, so the parts kept keep its timing.
     tempo = fold(bpm) if bpm else (tempo_from_hits(r["bones"], r["fps"]) or estimate_bpm(r["bones"], r["fps"]))
     if not tempo:
         raise ValueError("no steady beat in this clip: give --bpm")
@@ -422,8 +452,9 @@ def build(src: Path, name: str, source: str, license_: str, credit: str = "", bp
         "fps": r["fps"], "frames": r["frames"], "loop": [int(start), int(end)],
         "beat_frame": beat_frame(r["bones"], r["fps"], tempo),
         "source": source, "license": license_, "credit": credit,
-        "bones": {b: rnd(q) for b, q in r["bones"].items()},
-        "rest_dirs": {b: rnd(d) for b, d in r["rest_dirs"].items()},
+        "parts": parts if parts == "all" else f"{parts}, torso {torso}",
+        "bones": {b: rnd(q) for b, q in only_parts(r["bones"], parts, torso).items()},
+        "rest_dirs": {b: rnd(d) for b, d in r["rest_dirs"].items() if b in only_parts(r["bones"], parts, torso)},
         "hips": rnd(r["hips"]),
     }
 
@@ -446,8 +477,13 @@ def main(argv=None) -> int:
     ap.add_argument("--credit", default="")
     ap.add_argument("--bpm", type=float, help="the clip's tempo, when measuring it goes wrong")
     ap.add_argument("--keep-heading", action="store_true", help="keep the clip's turns")
+    ap.add_argument("--parts", choices=("all", "lower"), default="all",
+                    help="lower: only hips and legs (+ a softened torso); her arms and head stay hers")
+    ap.add_argument("--torso", type=float, default=0.5, help="with --parts lower: how much of the "
+                    "clip's spine and chest to keep, 0-1")
     a = ap.parse_args(argv)
-    data = build(a.src, a.name, a.source, a.license, a.credit, a.bpm, a.keep_heading, a.style)
+    data = build(a.src, a.name, a.source, a.license, a.credit, a.bpm, a.keep_heading, a.style,
+                 a.parts, a.torso)
     p = write(a.out, data)
     print(f"{p}: {data['bpm']} BPM, loop {data['loop'][0]}-{data['loop'][1]} of {data['frames']} frames "
           f"at {data['fps']} fps, energy {data['energy']}, {p.stat().st_size // 1024} KB")
