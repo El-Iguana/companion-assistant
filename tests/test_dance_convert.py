@@ -231,3 +231,18 @@ def test_lower_parts_keep_the_hips_and_legs_and_soften_the_torso(tmp_path):
     assert low["parts"] == "lower, torso 0.5" and set(low["rest_dirs"]) <= set(low["bones"])
     with pytest.raises(ValueError):
         cv.only_parts(full["bones"], "upper", 0.5)
+
+
+def test_a_stretch_can_be_cut_out_of_a_long_take(tmp_path):
+    secs, fps = 20.0, 60
+    t = np.arange(int(secs * fps)) / fps
+    swing = np.where((t >= 8) & (t < 16), 0.5 * np.sin(2 * np.pi * (100 / 120) * t), 0.0)   # a dance mid-take
+    glb = write_glb(tmp_path / "long.glb", secs, {"lhumerus": axis_angle([0, 0, 1], swing)})
+    whole = cv.build(glb, "Whole", "unit test", "CC0-1.0", bpm=100)
+    cut = cv.build(glb, "Cut", "unit test", "CC0-1.0", start_s=8, end_s=16)
+    assert whole["frames"] == 600 and cut["frames"] == 240               # 8 s at 30 fps
+    assert abs(cut["bpm"] - 100) <= 3                                   # its own tempo, from the dance alone
+    first = np.array(cut["bones"]["leftUpperArm"][:4])
+    assert np.allclose(first, np.array(whole["bones"]["leftUpperArm"][240 * 4:241 * 4]), atol=1e-3)
+    with pytest.raises(ValueError, match="too short"):
+        cv.build(glb, "Blink", "unit test", "CC0-1.0", start_s=5, end_s=6)

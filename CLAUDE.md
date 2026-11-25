@@ -719,6 +719,8 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   dance; the bones a clip leaves out are the simple bounce's (arms low and swaying, the nod).
   "Lambada Sway" on amd-halo is the Lambada made this way. A chosen dance that doesn't fit the song
   now falls back to the bounce, never the previous clip.
+  **A stretch of a take** (#142): `convert.py --from S --to S` (CMU 15/04 has the Egyptian walk at
+  ~98–104 s and the Cabbage Patch at ~116.5–123 s between window washing and boxing).
   ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
