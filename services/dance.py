@@ -7,13 +7,14 @@ a loop of whole bars. The page lists them (``GET /pmedia/dance``), fetches the o
 dances the generated way (static/js/vtuber.mjs, #115).
 
 The folder is the library's (the data mount, like ``data/vrm/``). Clips the user adds for
-themselves (Mixamo, #121) live here too and are never in the repo; bundled ones (#122) carry
-a licence that allows sharing them.
+themselves (Mixamo, #121) live here too and are never in the repo. The bundled ones (#122) are
+in ``seed/dance/`` (CMU mocap: free to include in a product, with the credit) and copied in.
 """
 from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 FORMAT = "cantinero-dance/1"
@@ -21,10 +22,29 @@ ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _cache: dict = {}                       # path -> (mtime, summary)
 
 
-def folder() -> Path:
+def bundled() -> list[Path]:
+    """The clips that ship with Cantinero (#122): CMU mocap, whose terms allow it."""
     import main
 
-    return main.DATA / "dance"
+    return sorted((main.SEED / "dance").glob("*.json"))
+
+
+def folder() -> Path:
+    """data/dance/, with each bundled clip copied in once (its own ``.seeded-<file>`` marker,
+    as the bundled VRMs): a clip added to the bundle later still reaches existing libraries,
+    the user's tempo for one is never overwritten, and deleting one keeps it deleted."""
+    import main
+
+    d = main.DATA / "dance"
+    for src in bundled():
+        marker = d / f".seeded-{src.name}"
+        if marker.exists():
+            continue
+        d.mkdir(parents=True, exist_ok=True)
+        if not (d / src.name).exists():
+            shutil.copyfile(src, d / src.name)
+        marker.touch()
+    return d
 
 
 def _summary(p: Path) -> dict | None:

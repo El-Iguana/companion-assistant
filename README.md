@@ -104,5 +104,10 @@ and pixiv's redistributable sample `baseline.vrm`; models you import stay in you
 
 [MIT](LICENSE). The bundled avatars keep the terms in their own VRM metadata:
 `data/vrm/pix.vrm` (Pix, Mira's avatar, © 2026 El-Iguana) allows redistribution, modification and commercial
-use; `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample under pixiv's terms. The models the image downloads when it builds (Kokoro, faster-whisper)
+use; `data/vrm/baseline.vrm` is pixiv's redistributable VRM sample under pixiv's terms. The bundled dance clips
+(`seed/dance/`) are converted from the [CMU Graphics Lab Motion Capture Database](https://mocap.cs.cmu.edu/)
+(via [codepawl/cmu-mocap-glb](https://huggingface.co/datasets/codepawl/cmu-mocap-glb)), free to include in a
+product but not to resell, even converted: *The data used in this project was obtained from mocap.cs.cmu.edu.
+The database was created with funding from NSF EIA-0196217.* Dance clips you add yourself (e.g. Mixamo's,
+`docs/dance-clips.md`) stay in your own `data/dance/`. The models the image downloads when it builds (Kokoro, faster-whisper)
 keep their own licenses as well.
