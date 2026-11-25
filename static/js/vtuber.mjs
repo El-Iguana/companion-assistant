@@ -1199,7 +1199,12 @@ function clipRate(clipBpm) {
   return 0;
 }
 
+// The harness's "natural speed" (#128): a forced clip plays as it was captured (1x), whatever
+// the tempo, so its moves can be tapped along with to find the clip's real tempo.
+const natural = () => !!(clipState.natural && clipState.force);
+
 function pickClip() {
+  if (natural()) return (clipState.list || []).find((c) => c.id === clipState.force) || null;
   const list = (clipState.list || []).filter((c) => clipRate(c.bpm));
   if (clipState.force) return list.find((c) => c.id === clipState.force) || null;
   if (!list.length) return null;
@@ -1362,7 +1367,7 @@ function updateClips(vrm, dt) {
 
   const quiet = dance.calm || speech.env > 0.05;
   const cur = clipState.cur;
-  const rate = cur ? clipRate(cur.clip.bpm) : 0;
+  const rate = cur ? (natural() ? 1 : clipRate(cur.clip.bpm)) : 0;
   const want = dance.on && !quiet && !!cur && rate > 0;
   clipState.w += ((want ? 1 : 0) - clipState.w) * Math.min(1, dt * CLIP_EASE);
   if (!dance.on && clipState.w < 0.01) { clipState.cur = clipState.prev = null; stats.clip = ""; }
@@ -1381,7 +1386,7 @@ function updateClips(vrm, dt) {
 
   const r = rate || 1;
   advance(cur, dt, r);
-  onBeat(cur, r, dt);
+  if (!natural()) onBeat(cur, r, dt);
   if (clipState.prev) {
     advance(clipState.prev, dt, clipRate(clipState.prev.clip.bpm) || 1);
     clipState.fade = Math.min(1, clipState.fade + dt / CLIP_FADE_S);
