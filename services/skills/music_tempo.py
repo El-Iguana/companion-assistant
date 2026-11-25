@@ -5,12 +5,20 @@ Music only, never spoken word: tracks are taken from the catalog's music albums
 tempo and she never dances to one.
 
 Where a BPM comes from: the file's own BPM tag when it has one, else measured from the audio
-(numpy only: a spectral-flux onset curve, its autocorrelation, a prior around 120). Either way
-it is folded into a dancing range, ``LOW``-``HIGH``: a reading of 70 or 280 is 140, since an
-analyser's commonest mistake is half or double time.
+(numpy only: a spectral-flux onset curve over the whole track, its autocorrelation, a gentle
+prior around ``PRIOR_BPM``). Only a reading outside ``LOW``-``HIGH`` is halved or doubled.
+The first version folded everything into 80-160 with a prior at 120: "Cry Freedom" (slow, 78)
+came out 156 and she danced at double speed (user, 2026-11-25). Its audio's strongest beat is
+78.3 (0.41) against 156.6 (0.33); "Get The Party Started" is 64.6 (0.78) against 129.2 (0.74),
+and the prior has to pick 78 for one and 129 for the other, which 100 +- 1 octave does.
 
-Measured on amd-halo, 2026-11-25: ~0.2 s to fetch an MP3 and ~0.2 s to measure 90 s of it;
-"Get The Party Started" 129 (published ~129), "Back in Black" 94 (~94).
+**Where the beats fall** (``beats``, #124): every beat's time, by dynamic programming over the
+onset curve (Ellis 2007: each beat as strong an onset as can be found about one period after
+the last), so the grid follows a band that speeds up or slows down. One tempo and one phase
+weren't enough: "September" measured 124.3 against ~126, and that drifts several beats over a
+song. The player sends where it is between two beats, and her moves land on them.
+
+Measured on amd-halo, 2026-11-25: ~0.2 s to fetch an MP3, ~0.5 s to measure it.
 
 The cache is ``<library>/music_tempo.json`` ({"tracks": {"<item id>": {...}}}), filled in the
 background a track at a time and kept across rebuilds; a track is measured once. A play never
@@ -28,10 +36,12 @@ from services.skills import music_catalog
 from services.skills import orpheus_media as om
 
 FILE = "music_tempo.json"
-LOW, HIGH = 80.0, 160.0          # the dancing range a reading is folded into
+LOW, HIGH = 60.0, 200.0          # only a reading outside this is halved or doubled
+PRIOR_BPM, PRIOR_OCTAVES = 100.0, 1.0
+VERSION = 2                      # 2: the tempo prior moved, and beats; older entries are measured again
 MAX_AGE_S = 6 * 3600             # look for new albums this often (only new tracks are measured)
 MAX_BYTES = 200 * 1024 * 1024    # a bigger file is not fetched to be measured
-SKIP_S, TAKE_S = 30.0, 90.0      # measure 90 s from 30 s in (past an intro)
+SKIP_S, TAKE_S = 0.0, 600.0      # the whole track (up to 10 min): beat times are from its start
 SAVE_EVERY = 20
 _building: set = set()
 
@@ -90,32 +100,34 @@ def _samples(data: bytes):
     return np.concatenate(parts)[: int(TAKE_S * sr)].astype("float32"), float(sr)
 
 
-def estimate(data: bytes) -> float | None:
-    """The tempo of an audio file's bytes, folded, or None (too short, silent, unreadable)."""
+def _envelope(x, sr):
+    """The onset curve (positive spectral change) and its frame rate. Its frame i covers the
+    audio from i * hop; a sound shows when it enters the window, ``ONSET_LAG_S`` before it is
+    heard (measured on clicks: beats came out ~88 ms early without it)."""
     import numpy as np
 
-    got = _samples(data)
-    if got is None:
-        return None
-    x, sr = got
     n, hop = 1024, 128
     if len(x) < n * 4:
-        return None
+        return None, 0.0
     frames = np.lib.stride_tricks.sliding_window_view(x, n)[::hop] * np.hanning(n)
     mag = np.log1p(100 * np.abs(np.fft.rfft(frames, axis=1)))
     flux = np.maximum(0, np.diff(mag, axis=0)).sum(axis=1)
     flux = np.maximum(flux - np.convolve(flux, np.ones(32) / 32, mode="same"), 0)
-    if not flux.any():
-        return None
-    fps = sr / hop
+    return (flux if flux.any() else None), sr / hop
+
+
+def tempo_of(flux, fps: float) -> float | None:
+    """The tempo the onset curve repeats at most, with a gentle prior, folded only if extreme."""
+    import numpy as np
+
     ac = np.correlate(flux, flux, mode="full")[len(flux) - 1:]
     lags = np.arange(len(ac), dtype=float)
     with np.errstate(divide="ignore"):
         bpm = np.where(lags > 0, 60 * fps / np.maximum(lags, 1e-9), 0)
-    ok = np.where((bpm >= 50) & (bpm <= 220))[0]
+    ok = np.where((bpm >= 45) & (bpm <= 220))[0]
     if not len(ok):
         return None
-    prior = np.exp(-0.5 * (np.log2(bpm[ok] / 120) / 0.9) ** 2)
+    prior = np.exp(-0.5 * (np.log2(bpm[ok] / PRIOR_BPM) / PRIOR_OCTAVES) ** 2)
     i = int(ok[np.argmax(ac[ok] * prior)])
     lag = float(i)
     if 0 < i < len(ac) - 1:                           # between two lags: a parabola's peak
@@ -123,7 +135,68 @@ def estimate(data: bytes) -> float | None:
         den = a - 2 * b + c
         if den:
             lag = i + 0.5 * (a - c) / den
-    return fold(60 * fps / lag)
+    return 60 * fps / lag
+
+
+TIGHTNESS = 100.0                # how much a beat may stray from one period after the last
+ONSET_LAG_S = (1024 - 64) / 11025   # the onset curve's window, less half a hop (see _envelope)
+
+
+def track_beats(flux, fps: float, bpm: float) -> list[float]:
+    """Every beat's time (s): the path through the onsets that best keeps one period apart."""
+    import numpy as np
+
+    o = flux / (flux.std() or 1.0)
+    period = 60 * fps / bpm
+    lo, hi = int(round(period / 2)), int(round(period * 2))
+    lags = np.arange(lo, hi + 1)
+    penalty = -TIGHTNESS * np.log(lags / period) ** 2
+    score = o.astype(float).copy()
+    back = np.full(len(o), -1)
+    for t in range(lo, len(o)):
+        prev = t - lags
+        ok = prev >= 0
+        cand = score[prev[ok]] + penalty[ok]
+        j = int(np.argmax(cand))
+        if cand[j] > 0:
+            score[t] = o[t] + cand[j]
+            back[t] = prev[ok][j]
+    # End on the best-scoring frame of the last period, then follow the path back.
+    t = len(o) - hi + int(np.argmax(score[-hi:])) if len(o) > hi else int(np.argmax(score))
+    beats = []
+    while t >= 0:
+        beats.append(t)
+        t = back[t]
+    return [round(b / fps + ONSET_LAG_S, 3) for b in reversed(beats)]
+
+
+def analyse(data: bytes, bpm: float | None = None) -> dict | None:
+    """``{"bpm", "beats"}`` for an audio file's bytes (``bpm`` given, e.g. from a tag: the
+    beats are found at it), or None (too short, silent, unreadable)."""
+    import numpy as np
+
+    got = _samples(data)
+    if got is None:
+        return None
+    flux, fps = _envelope(*got)
+    if flux is None:
+        return None
+    raw = fold(bpm or tempo_of(flux, fps))
+    if not raw:
+        return None
+    beats = track_beats(flux, fps, raw)
+    if len(beats) < 8:
+        return None
+    # The tempo is what the beats say (the middle half, past an intro and an ending).
+    gaps = np.diff(beats)
+    mid = gaps[len(gaps) // 4: max(len(gaps) // 4 + 1, 3 * len(gaps) // 4)]
+    return {"bpm": round(60 / float(np.median(mid)), 2), "beats": beats}
+
+
+def estimate(data: bytes) -> float | None:
+    """The tempo of an audio file's bytes, or None (too short, silent, unreadable)."""
+    got = analyse(data)
+    return round(got["bpm"], 1) if got else None
 
 
 def tag_bpm(data: bytes) -> float | None:
@@ -156,13 +229,17 @@ def tag_bpm(data: bytes) -> float | None:
 
 def measure(data: bytes) -> dict:
     t = tag_bpm(data)
-    if t:
-        return {"bpm": t, "from": "tag"}
     try:
-        b = estimate(data)
+        got = analyse(data, bpm=t)
     except Exception as e:                            # noqa: BLE001 — a file it can't decode
-        return {"bpm": None, "failed": type(e).__name__}
-    return {"bpm": b, "from": "audio"} if b else {"bpm": None, "failed": "no beat"}
+        got, err = None, type(e).__name__
+    else:
+        err = "no beat"
+    if got:
+        return {**got, "from": "tag" if t else "audio", "v": VERSION}
+    if t:                                             # a tag, but audio it can't read: no beats
+        return {"bpm": t, "from": "tag", "v": VERSION}
+    return {"bpm": None, "failed": err, "v": VERSION}
 
 
 async def _fetch(st: dict, item_id: int) -> bytes | None:
@@ -190,10 +267,20 @@ async def _fetch(st: dict, item_id: int) -> bytes | None:
 
 # --- the cache -------------------------------------------------------------------------------
 
+_loaded: dict = {}                # path -> (mtime, data): the file holds every beat (~2 MB)
+
+
 def load(root: Path) -> dict:
+    p = Path(root) / FILE
     try:
-        d = json.loads((Path(root) / FILE).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
+        mtime = p.stat().st_mtime
+        hit = _loaded.get(str(p))
+        if hit and hit[0] == mtime:
+            return hit[1]
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d = d if isinstance(d, dict) else {}
+        _loaded[str(p)] = (mtime, d)
+        return d
     except (OSError, ValueError):
         return {}
 
@@ -203,6 +290,14 @@ def _save(root: Path, cache: dict) -> None:
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(cache), encoding="utf-8")
     tmp.replace(p)
+
+
+def beats_of(root: Path, ids) -> dict[int, list]:
+    """The beat times of these tracks, where they were found (the player asks for the one it
+    starts; they are too long to ride along in every queue entry)."""
+    tracks = load(root).get("tracks") or {}
+    return {int(i): (tracks.get(str(i)) or {})["beats"] for i in ids
+            if (tracks.get(str(i)) or {}).get("beats")}
 
 
 def bpm_of(root: Path, ids) -> dict[int, float]:
@@ -242,7 +337,7 @@ async def build(root: Path, st: dict) -> dict:
         for entry in queue:
             key = str(entry["id"])
             keep.add(key)
-            if key in tracks:
+            if key in tracks and tracks[key].get("v") == VERSION:
                 continue
             data = await _fetch(st, int(entry["id"]))
             tracks[key] = (await asyncio.to_thread(measure, data) if data
@@ -262,7 +357,8 @@ async def build(root: Path, st: dict) -> dict:
 def refresh_soon(root: Path, st: dict) -> None:
     """Fill in new tracks in the background when stale; one build per library at a time."""
     cache = load(root)
-    if cache and time.time() - float(cache.get("built_at") or 0) < MAX_AGE_S:
+    stale = any(v.get("v") != VERSION for v in (cache.get("tracks") or {}).values())
+    if cache and not stale and time.time() - float(cache.get("built_at") or 0) < MAX_AGE_S:
         return
     key = str(root)
     if key in _building:

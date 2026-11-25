@@ -297,13 +297,45 @@ def dance_bpm(enabled: bool, status: str, item: Optional[dict], prev: Optional[f
     return bpm if bpm > 0 else None
 
 
-def dance_script(bpm: Optional[float]) -> str:
+def beat_phase(beats: list, pos_s: float) -> Optional[tuple]:
+    """Where a song is in its beats at ``pos_s`` (#124): (beats since its first, as a float;
+    the tempo between this beat and the next). Before the first or after the last beat, the
+    nearest gap carries on."""
+    import bisect
+
+    if not beats or len(beats) < 2:
+        return None
+    i = bisect.bisect_right(beats, pos_s) - 1
+    i = max(0, min(i, len(beats) - 2))
+    gap = beats[i + 1] - beats[i]
+    if gap <= 0:
+        return None
+    return i + (pos_s - beats[i]) / gap, 60.0 / gap
+
+
+def dance_state(enabled: bool, status: str, item: Optional[dict], prev: Optional[dict],
+                pos_s: float = 0.0) -> Optional[dict]:
+    """What the avatar dances to now: ``{"bpm"}`` (the song's tempo), and while it plays and its
+    beats are known, ``"phase"`` (which beat, as a float) and ``"local"`` (the tempo right
+    here), so the moves land on the beats. None: still."""
+    bpm = dance_bpm(enabled, status, item, (prev or {}).get("bpm"))
+    if bpm is None:
+        return None
+    out = {"bpm": bpm}
+    if status == "playing" and item and item.get("beats"):
+        got = beat_phase(item["beats"], pos_s)
+        if got:
+            out.update(phase=round(got[0], 3), local=round(got[1], 2))
+    return out
+
+
+def dance_script(state: Optional[dict]) -> str:
     """What the shell runs in the page: vtuber.mjs listens for avatar:dance."""
     # Also kept on window: the avatar module loads on demand, and reads it when it starts, so
     # a dance sent before it was there isn't lost.
-    b = json.dumps(bpm)
-    return (f"window.__cantineroDance = {b}; "
-            f"window.dispatchEvent(new CustomEvent('avatar:dance', {{detail: {{bpm: {b}}}}}))")
+    d = json.dumps(state if state else {"bpm": None})
+    return (f"window.__cantineroDance = {d}; "
+            f"window.dispatchEvent(new CustomEvent('avatar:dance', {{detail: {d}}}))")
 
 
 # --- the library browser (Music M3) ------------------------------------------------------------

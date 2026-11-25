@@ -33,16 +33,38 @@ def _clicks(bpm: float, seconds: float = 40.0, sr: int = SR) -> bytes:
     return buf.getvalue()
 
 
-@pytest.mark.parametrize("bpm", [90, 100, 120, 128, 145])
+@pytest.mark.parametrize("bpm", [78, 90, 100, 120, 128])
 def test_estimate_finds_the_tempo(bpm):
     got = mt.estimate(_clicks(bpm))
     assert got is not None and abs(got - bpm) <= 2.5, got
 
 
-def test_slow_and_fast_readings_fold_into_the_dancing_range():
-    assert mt.fold(70) == 140 and mt.fold(40) == 80 and mt.fold(280) == 140 and mt.fold(200) == 100
-    assert mt.fold(120) == 120 and mt.fold(160) == 160 and mt.fold(0) is None and mt.fold(None) is None
-    assert abs(mt.estimate(_clicks(66)) - 132) <= 3.0          # a slow song dances at double time
+def test_a_fast_click_track_may_read_at_half_time():
+    # A bare click track is as much 72.5 as 145; real songs say more (#124). Half time still
+    # lands on the beats: every other one.
+    got = mt.estimate(_clicks(145))
+    assert min(abs(got - 145), abs(got - 72.5)) <= 2.5, got
+
+
+def test_only_extreme_readings_are_halved_or_doubled():
+    # The first version folded into 80-160: "Cry Freedom" (slow, ~76) became 156 (#124).
+    assert mt.fold(70) == 70 and mt.fold(76) == 76 and mt.fold(200) == 200 and mt.fold(156) == 156
+    assert mt.fold(40) == 80 and mt.fold(30) == 60 and mt.fold(280) == 140 and mt.fold(250) == 125
+    assert mt.fold(0) is None and mt.fold(None) is None
+
+
+def test_the_beats_land_on_the_clicks():
+    got = mt.analyse(_clicks(100, seconds=30))
+    beats = np.array(got["beats"])
+    period = 60 / 100
+    assert abs(got["bpm"] - 100) <= 1.5 and len(beats) >= 45
+    off = (beats / period) % 1                                 # the clicks are at 0, period, ...
+    assert np.all(np.minimum(off, 1 - off) * period < 0.04)    # within 40 ms of a click
+
+
+def test_a_slow_song_keeps_its_slow_beat():
+    got = mt.analyse(_clicks(76, seconds=40))
+    assert abs(got["bpm"] - 76) <= 1.5
 
 
 def test_too_short_or_silent_has_no_tempo():
@@ -63,8 +85,11 @@ def test_a_bpm_tag_wins_over_measuring(tmp_path):
     f["BPM"] = "174"
     f.save()
     data = path.read_bytes()
-    assert mt.tag_bpm(data) == 87.0                            # the tag, folded
-    assert mt.measure(data) == {"bpm": 87.0, "from": "tag"}
+    assert mt.tag_bpm(data) == 174.0                           # the tag, as it is (60-200)
+    f["BPM"] = "120"
+    f.save()
+    got = mt.measure(path.read_bytes())
+    assert got["from"] == "tag" and abs(got["bpm"] - 120) <= 1.5 and len(got["beats"]) > 30
     assert mt.tag_bpm(_clicks(120)) is None
     rec = mt.measure(_clicks(120))
     assert rec["from"] == "audio" and abs(rec["bpm"] - 120) <= 2.5
@@ -160,3 +185,29 @@ def test_what_libsndfile_cant_open_is_decoded_by_pyav(monkeypatch):
     got = mt.estimate(data)                                    # PyAV reads the WAV instead
     monkeypatch.setattr(soundfile, "SoundFile", real)
     assert got is not None and abs(got - 120) <= 2.5
+
+
+def test_the_beats_are_served_only_when_asked(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from pantheon_web import media as pmedia
+    import service
+
+    class Cur:
+        class cards:
+            parent = tmp_path
+    monkeypatch.setattr(pmedia, "_ctx", lambda request, resident=False: Cur)
+    mt._save(tmp_path, {"built_at": 1e12, "tracks": {"11": {"bpm": 77.1, "beats": [0.1, 0.88], "v": mt.VERSION}}})
+    c = TestClient(service.app, base_url="http://127.0.0.1:7867")
+    assert c.get("/pmedia/music/tempo?ids=11").json() == {"tempo": {"11": 77.1}}
+    assert c.get("/pmedia/music/tempo?ids=11,12&beats=1").json() == {"tempo": {"11": 77.1}, "beats": {"11": [0.1, 0.88]}}
+
+
+def test_entries_from_before_are_measured_again(tmp_path, monkeypatch):
+    fetched = []
+    _library(tmp_path, monkeypatch, fetched)
+    mt._save(tmp_path, {"built_at": 1e12, "tracks": {"11": {"bpm": 156.1, "album": 1}, "12": {"bpm": None, "failed": "x", "album": 1}}})
+    asyncio.run(mt.build(tmp_path, {"url": "http://o", "token": "t"}))
+    assert sorted(fetched) == [11, 12]                                # v1 entries: measured again
+    rec = mt.load(tmp_path)["tracks"]["11"]
+    assert rec["v"] == mt.VERSION and abs(rec["bpm"] - 128) <= 2 and rec["beats"]

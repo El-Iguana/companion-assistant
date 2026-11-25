@@ -39,7 +39,27 @@ def test_tempos_are_asked_for_the_current_track_and_the_next_few_once():
     assert core.tempo_ids(core.Queue()) == []
 
 
-def test_the_page_script_keeps_the_tempo_for_an_avatar_that_loads_later():
-    js = core.dance_script(128.5)
-    assert "window.__cantineroDance = 128.5;" in js and "'avatar:dance'" in js and "bpm: 128.5" in js
-    assert "bpm: null" in core.dance_script(None) and json.dumps(None) in core.dance_script(None)
+def test_the_page_script_keeps_the_dance_for_an_avatar_that_loads_later():
+    js = core.dance_script({"bpm": 128.5, "phase": 3.25, "local": 128.0})
+    assert 'window.__cantineroDance = {"bpm": 128.5, "phase": 3.25, "local": 128.0};' in js
+    assert "'avatar:dance'" in js
+    assert '{"bpm": null}' in core.dance_script(None)
+
+
+def test_where_the_song_is_in_its_beats():
+    beats = [1.0, 1.5, 2.0, 2.6, 3.2]
+    assert core.beat_phase(beats, 1.25) == (0.5, 120.0)
+    p, local = core.beat_phase(beats, 2.3)
+    assert abs(p - 2.5) < 1e-9 and abs(local - 100.0) < 1e-9          # a slower gap: 100 BPM there
+    assert core.beat_phase(beats, 0.5) == (-1.0, 120.0)                # before the first: carried back
+    assert abs(core.beat_phase(beats, 3.8)[0] - 5.0) < 1e-9            # after the last: carried on
+    assert core.beat_phase([1.0], 1.2) is None and core.beat_phase([], 1.2) is None
+
+
+def test_the_dance_state_carries_the_beat_while_playing():
+    song = {"id": 1, "bpm": 120.0, "beats": [0.0, 0.5, 1.0, 1.5]}
+    assert core.dance_state(True, "playing", song, None, 0.75) == {"bpm": 120.0, "phase": 1.5, "local": 120.0}
+    assert core.dance_state(True, "playing", {"id": 2, "bpm": 90.0}, None, 3.0) == {"bpm": 90.0}   # no beats yet
+    assert core.dance_state(True, "loading", {"id": 3}, {"bpm": 120.0, "phase": 9}, 0) == {"bpm": 120.0}
+    assert core.dance_state(False, "playing", song, None, 0.75) is None
+    assert core.dance_state(True, "paused", song, None, 0.75) is None

@@ -261,10 +261,11 @@ def help_page(request: Request):
 
 # --- the DJ: each music track's tempo (#114) --------------------------------------------------
 @router.get("/music/tempo")
-async def music_tempo(request: Request, ids: str = ""):
+async def music_tempo(request: Request, ids: str = "", beats: str = ""):
     """The player asks before a track starts: ``?ids=681,682`` -> ``{"tempo": {"681": 129.2}}``.
     Only measured music tracks are in it (spoken word never is); the rest are measured in the
-    background, so asking also keeps that going."""
+    background, so asking also keeps that going. ``&beats=1``: also every beat's time (s) of
+    those tracks, ``{"beats": {"681": [0.35, 0.82, ...]}}`` (#124: dancing on the beat)."""
     from services.skills import music_tempo as mt
     from services.skills import orpheus_media as om
 
@@ -274,7 +275,10 @@ async def music_tempo(request: Request, ids: str = ""):
     st = om.load(root)
     if om.paired(st):
         mt.refresh_soon(root, st)
-    return {"tempo": {str(k): v for k, v in mt.bpm_of(root, wanted).items()}}
+    out = {"tempo": {str(k): v for k, v in mt.bpm_of(root, wanted).items()}}
+    if beats == "1":
+        out["beats"] = {str(k): v for k, v in mt.beats_of(root, wanted[:4]).items()}
+    return out
 
 
 # --- the DJ: music under her voice ----------------------------------------------------

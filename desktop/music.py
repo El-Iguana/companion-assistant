@@ -414,6 +414,7 @@ class MusicPlayer:
         self._set_status("loading")
         self._show_now(item)
         self._ask_tempo()
+        self._ask_beats(item)
         wanted = self.queue.index
 
         def done(status, data, err):
@@ -460,6 +461,30 @@ class MusicPlayer:
             for e in self.queue.items:
                 if str(e["id"]) in tempo:
                     e["bpm"] = tempo[str(e["id"])]
+        self.http.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, None, fin, None)
+
+    def _ask_beats(self, item: dict):
+        """This track's beat times (#124), so she dances on them: asked once, when it starts."""
+        if item.get("_beats_asked"):
+            return
+        item["_beats_asked"] = True
+        msg = Soup.Message.new("GET", f"{self.resident}/pmedia/music/tempo?ids={item['id']}&beats=1")
+
+        def fin(session, res, _u):
+            try:
+                data = session.send_and_read_finish(res)
+                got = json.loads(data.get_data().decode()) if msg.get_status() == 200 else None
+            except (GLib.Error, ValueError, UnicodeDecodeError, AttributeError):
+                got = None
+            if not got:
+                item.pop("_beats_asked", None)
+                return
+            beats = (got.get("beats") or {}).get(str(item["id"]))
+            if beats:
+                item["beats"] = beats
+            bpm = (got.get("tempo") or {}).get(str(item["id"]))
+            if bpm:
+                item["bpm"] = bpm
         self.http.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, None, fin, None)
 
     # -- transport -------------------------------------------------------------------------------

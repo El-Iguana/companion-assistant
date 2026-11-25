@@ -1079,15 +1079,31 @@ function updateArms(vrm, dt) {
 // position, so the bob is applied as a change from the last frame's.
 const DANCE_EASE = 1.4;                  // how fast the dance comes and goes (1/s)
 const DANCE_CALM = 0.22;                 // how much of it stays while she talks or listens
-const dance = { bpm: 0, on: false, calm: false, w: 0, phase: 0, bob: 0, armGain: 1 };
+const dance = { bpm: 0, on: false, calm: false, w: 0, phase: 0, bob: 0, armGain: 1,
+                synced: 0, local: 0, err: 0 };
+// On the beat (#124): the player sends which beat the song is on (`phase`, beats as a float)
+// and the tempo right there (`local`) every half second. A small difference is eased out over
+// ~0.3 s; a big one (a seek, a new song) is jumped. Without them (no beats known), the dance
+// keeps its own time at the song's tempo, as before.
+const SYNC_SNAP = 0.3, SYNC_TTL_MS = 2000;
 if (typeof window !== "undefined") window.__avatarDance = dance;
 
-function setDance(bpm) {
-  const b = Number(bpm) || 0;
+function setDance(d) {
+  const o = d && typeof d === "object" ? d : { bpm: d };
+  const b = Number(o.bpm) || 0;
   dance.on = b > 0;
-  if (dance.on) dance.bpm = Math.max(60, Math.min(200, b));   // kept while it eases out
+  if (dance.on) dance.bpm = Math.max(50, Math.min(220, b));   // kept while it eases out
   stats.dance = dance.on ? dance.bpm : 0;
+  if (dance.on && Number.isFinite(o.phase)) {
+    const err = o.phase - dance.phase;
+    if (!dance.synced || Math.abs(err) > SYNC_SNAP) { dance.phase = o.phase; dance.err = 0; }
+    else dance.err = err;
+    dance.local = Number(o.local) || dance.bpm;
+    dance.synced = performance.now();
+  }
 }
+const danceRate = () => (dance.synced && performance.now() - dance.synced < SYNC_TTL_MS && dance.local)
+  ? dance.local : dance.bpm;
 
 const danceEnergy = () => Math.max(0, Math.min(1, (dance.bpm - 80) / 80));
 const danceArms = () => dance.on && !dance.calm && speech.env < 0.05 && dance.w > 0.3;
@@ -1097,7 +1113,11 @@ function updateDance(vrm, dt) {
   const quiet = dance.calm || speech.env > 0.05;
   const target = dance.on ? (quiet ? DANCE_CALM : 1) : 0;
   dance.w += (target - dance.w) * Math.min(1, dt * DANCE_EASE);
-  if (dance.bpm > 0 && dance.w > 0.001) dance.phase += dt * dance.bpm / 60;   // in beats
+  if (dance.bpm > 0) {                                           // in beats, kept on the song's
+    const fix = dance.err * Math.min(1, dt * 3.5);
+    dance.phase += dt * danceRate() / 60 + fix;
+    dance.err -= fix;
+  }
   const e = danceEnergy(), w = dance.w, p = dance.phase;
   dance.armGain = 0.55 + 0.45 * e;
   stats.danceW = w;
@@ -1191,13 +1211,14 @@ async function loadClip(meta) {
                  loop: d.loop || [0, d.frames - 1], bones: {}, hips: new Float32Array(d.hips || []) };
   for (const [b, v] of Object.entries(d.bones || {})) clip.bones[b] = new Float32Array(v);
   clip.restDirs = d.rest_dirs || {};
+  clip.beatFrame = Number.isFinite(d.beat_frame) ? d.beat_frame : null;
   clipState.data[meta.id] = clip;
   return clip;
 }
 
 function startClip(clip) {
   clipState.prev = clipState.cur;
-  clipState.cur = { clip, frame: clip.loop[0] };
+  clipState.cur = { clip, frame: clip.loop[0], placed: false };
   clipState.fade = clipState.prev ? 0 : 1;
   clipState.lastId = clip.id;
   clipState.beats = 0;
@@ -1234,6 +1255,31 @@ function sampleHips(state, out) {
   return out.set(h[i * 3] + (h[j * 3] - h[i * 3]) * f, h[i * 3 + 1] + (h[j * 3 + 1] - h[i * 3 + 1]) * f,
                  h[i * 3 + 2] + (h[j * 3 + 2] - h[i * 3 + 2]) * f);
 }
+// Keep a clip's beats on the song's (#124). The converter marks a frame where the clip's moves
+// land (beat_frame); played at `rate`, the clip takes m beats per song beat (1, or 2 or 1/2 when
+// its tempo was doubled or halved to fit). The difference is jumped when the clip starts and
+// eased out after, through the loop's wrap too (a loop is whole beats).
+const CLIP_LEAD = 0;                     // beats: nudge if her moves look early (+) or late (-)
+if (typeof window !== "undefined") window.__avatarClipLead = { beats: CLIP_LEAD };
+function onBeat(state, rate, dt) {
+  const c = state.clip;
+  if (c.beatFrame == null || !dance.bpm) return;
+  const pc = c.fps * 60 / c.bpm;                       // clip frames per clip beat
+  const m = Math.pow(2, Math.round(Math.log2((c.bpm * rate) / dance.bpm)));
+  const lead = (window.__avatarClipLead && window.__avatarClipLead.beats) || 0;
+  const want = (dance.phase + lead) * m;
+  let err = want - (state.frame - c.beatFrame) / pc;
+  err -= Math.round(err);                              // to the nearest beat: -0.5..0.5
+  const k = state.placed ? Math.min(1, dt * 3) : 1;
+  state.frame += err * pc * k;
+  state.placed = true;
+  const len = c.loop[1] - c.loop[0];
+  if (len > 0) {
+    while (state.frame >= c.loop[1]) state.frame -= len;
+    while (state.frame < c.loop[0]) state.frame += len;
+  }
+}
+
 function advance(state, dt, rate) {
   const c = state.clip;
   state.frame += dt * c.fps * rate;
@@ -1325,6 +1371,7 @@ function updateClips(vrm, dt) {
 
   const r = rate || 1;
   advance(cur, dt, r);
+  onBeat(cur, r, dt);
   if (clipState.prev) {
     advance(clipState.prev, dt, clipRate(clipState.prev.clip.bpm) || 1);
     clipState.fade = Math.min(1, clipState.fade + dt / CLIP_FADE_S);
@@ -1583,7 +1630,7 @@ export function boot() {
   });
   // Dancing to the music (#115): the player says the tempo (null or 0 stops), and the
   // voice says when she is speaking or listening (the music ducks then; she calms).
-  window.addEventListener("avatar:dance", (e) => setDance(e.detail && e.detail.bpm));
+  window.addEventListener("avatar:dance", (e) => setDance(e.detail));
   if (window.__cantineroDance) setDance(window.__cantineroDance);   // sent before this loaded
   window.addEventListener("avatar:calm", (e) => { dance.calm = !!(e.detail && e.detail.on); });
   window.addEventListener("avatar:mood", (e) => {

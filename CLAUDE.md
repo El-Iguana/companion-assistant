@@ -687,7 +687,18 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   straight, and uncorrected her legs crossed; shoulders and spine are not corrected (CMU's
   clavicle rises 34° between joints the VRM places differently). Bones only a clip moves (legs,
   upper chest) go back to rest each frame. Checked in headless Chromium on Pix and
-  `baseline.vrm` (both VRM 1.0: the VRM 0.x flip is untried). ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
+  `baseline.vrm` (both VRM 1.0: the VRM 0.x flip is untried).
+  ✅ **On the beat** (#124; user: "the beats are way off"): "Cry Freedom" (~76) was cached at 156
+  (prior at 120, everything folded into 80–160). Now the prior is 100 ± 1 octave, only readings
+  outside 60–200 fold, and `music_tempo.track_beats` finds every beat (Ellis-style DP over the
+  onset curve, whole track, +88 ms onset-window lag); the tempo is the median beat gap
+  (Cry Freedom 77.1, Back in Black 94.0, September 126.1). Cache `v: 2` re-measures. The player
+  asks `/pmedia/music/tempo?ids=<id>&beats=1` when a track starts; the shell sends
+  `avatar:dance {bpm, phase, local}` every 500 ms (`musiccore.dance_state`/`beat_phase`); the
+  page eases small phase errors and jumps big ones (`SYNC_SNAP`). Clips carry `beat_frame` (where
+  the motion decelerates most: the hit), kept on the song's beats by `onBeat` (1, 2 or ½ clip
+  beats per song beat); `window.__avatarClipLead` nudges it by eye. Measured in Chromium against a
+  wandering 74–80 BPM song: dance and clip within ±45 ms. ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.
   **While she is audible in full duplex the abort is DEFERRED** (`hfPendingBargeIn`): energy alone
