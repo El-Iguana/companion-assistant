@@ -248,6 +248,24 @@ async def dance_clip(clip_id: str, request: Request):
     return FileResponse(p, media_type="application/json", headers={"Cache-Control": "no-cache"})
 
 
+@router.post("/dance/{clip_id}/tempo")
+async def dance_tempo(clip_id: str, request: Request):
+    """Her Settings' tempo slider (#132): ``{"bpm": 104}`` sets this clip's tempo for good."""
+    from services import dance
+
+    _ctx(request, resident=True)
+    _require_csrf(request)
+    body = await request.json()
+    try:
+        bpm = float((body or {}).get("bpm"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="bpm required") from None
+    try:
+        return {"clip": dance.set_tempo(clip_id, bpm)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no such dance clip") from None
+
+
 @router.get("/help.html")
 def help_page(request: Request):
     """The in-app guide (pantheon_web/assets/help.html)."""

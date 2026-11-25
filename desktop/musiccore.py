@@ -314,7 +314,7 @@ def beat_phase(beats: list, pos_s: float) -> Optional[tuple]:
 
 
 def dance_state(enabled: bool, status: str, item: Optional[dict], prev: Optional[dict],
-                pos_s: float = 0.0) -> Optional[dict]:
+                pos_s: float = 0.0, clip: str = "", rev: int = 0) -> Optional[dict]:
     """What the avatar dances to now: ``{"bpm"}`` (the song's tempo), and while it plays and its
     beats are known, ``"phase"`` (which beat, as a float) and ``"local"`` (the tempo right
     here), so the moves land on the beats. None: still."""
@@ -322,6 +322,10 @@ def dance_state(enabled: bool, status: str, item: Optional[dict], prev: Optional
     if bpm is None:
         return None
     out = {"bpm": bpm}
+    if clip:                                          # #132: the dance chosen in her Settings
+        out["clip"] = clip
+    if rev:                                           # a dance's tempo was set: fetch them again
+        out["rev"] = rev
     if status == "playing" and item and item.get("beats"):
         got = beat_phase(item["beats"], pos_s)
         if got:

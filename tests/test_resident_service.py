@@ -208,3 +208,10 @@ def test_dance_clips_are_forwarded(server, client):
     assert client.get("/pmedia/dance/macarena.json").status_code == 200
     assert client.get("/pmedia/dance/Bad..json").status_code == 404
     assert [(m, p) for m, p, _, _ in seen] == [("GET", "/pmedia/dance"), ("GET", "/pmedia/dance/macarena.json")]
+
+
+def test_a_dance_tempo_is_forwarded(server, client):
+    seen, _ = server
+    assert client.post("/pmedia/dance/lambada/tempo", json={"bpm": 104}, headers=H).status_code == 200   # #132
+    assert client.post("/pmedia/dance/lambada/tempo", json={"bpm": 104}).status_code == 403             # no header
+    assert [(m, p, json.loads(b)) for m, p, _, b in seen] == [("POST", "/pmedia/dance/lambada/tempo", {"bpm": 104})]

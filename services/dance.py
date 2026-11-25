@@ -57,6 +57,50 @@ def clips() -> list[dict]:
     return sorted(out, key=lambda s: s["name"].lower())
 
 
+TEMPO_RANGE = (40.0, 240.0)
+
+
+def _beat_frame(bones: dict, fps: int, bpm: float) -> int:
+    """Where in each beat the clip's moves land at this tempo: as scripts/dance/convert.py's
+    ``beat_frame`` (the phase where the body slows down most), from the stored rotations."""
+    import numpy as np
+
+    speed = None
+    for flat in bones.values():
+        q = np.asarray(flat, dtype=float).reshape(-1, 4)
+        d = np.abs(np.sum(q[1:] * q[:-1], axis=1)).clip(0, 1)
+        s = 2 * np.arccos(d)
+        speed = s if speed is None else speed + s
+    if speed is None or len(speed) < 4:
+        return 0
+    speed = np.convolve(np.concatenate([[speed[0]], speed]), np.ones(3) / 3, mode="same")
+    x = -np.maximum(0.0, -np.diff(speed, prepend=speed[0]))
+    period = 60 * fps / bpm
+    k = np.arange(int((len(x) - 1) / period))
+    if len(k) < 2:
+        return int(np.argmin(x))
+    phases = np.arange(max(1, int(round(period))))
+    idx = np.minimum(np.rint(phases[:, None] + k[None, :] * period).astype(int), len(x) - 1)
+    return int(phases[int(np.argmin(x[idx].mean(axis=1)))])
+
+
+def set_tempo(clip_id: str, bpm: float) -> dict:
+    """The user's tempo for a clip, set by eye in her Settings (#132): saved in the clip, so
+    Auto fits it to the right songs from then on, with where its moves land found again."""
+    p = path_of(clip_id)
+    if p is None:
+        raise KeyError(clip_id)
+    bpm = round(max(TEMPO_RANGE[0], min(TEMPO_RANGE[1], float(bpm))), 1)
+    d = json.loads(p.read_text(encoding="utf-8"))
+    d["bpm"] = bpm
+    d["bpm_from"] = "set by hand"
+    d["beat_frame"] = _beat_frame(d.get("bones") or {}, int(d.get("fps") or 30), bpm)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, separators=(",", ":")), encoding="utf-8")
+    tmp.replace(p)
+    return _summary(p) or {}
+
+
 def path_of(clip_id: str) -> Path | None:
     if not ID.match(clip_id or ""):
         return None
