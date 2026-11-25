@@ -435,9 +435,24 @@ def only_parts(bones: dict, parts: str, torso: float) -> dict:
     return out
 
 
+def trim(clip: dict, start_s: float | None, end_s: float | None) -> dict:
+    """Only the stretch from ``start_s`` to ``end_s`` (seconds; None = the clip's own start or
+    end): a dance cut out of a longer take (CMU 15/04 has the Cabbage Patch between window
+    washing and boxing, #142)."""
+    if start_s is None and end_s is None:
+        return clip
+    fps, n = clip["fps"], len(clip["rot"])
+    a = max(0, int(round((start_s or 0) * fps)))
+    b = min(n, int(round(end_s * fps)) if end_s is not None else n)
+    if b - a < fps * 2:
+        raise ValueError("a stretch under 2 s is too short to dance")
+    return {**clip, "rot": clip["rot"][a:b], "pos": clip["pos"][a:b]}
+
+
 def build(src: Path, name: str, source: str, license_: str, credit: str = "", bpm: float | None = None,
-          keep_heading: bool = False, style: str = "", parts: str = "all", torso: float = 0.5) -> dict:
-    clip = load_clip(src)
+          keep_heading: bool = False, style: str = "", parts: str = "all", torso: float = 0.5,
+          start_s: float | None = None, end_s: float | None = None) -> dict:
+    clip = trim(load_clip(src), start_s, end_s)
     r = retarget(clip, keep_heading=keep_heading)
     # Tempo, loop and beat from the whole dance, so the parts kept keep its timing.
     tempo = fold(bpm) if bpm else (tempo_from_hits(r["bones"], r["fps"]) or estimate_bpm(r["bones"], r["fps"]))
@@ -477,13 +492,15 @@ def main(argv=None) -> int:
     ap.add_argument("--credit", default="")
     ap.add_argument("--bpm", type=float, help="the clip's tempo, when measuring it goes wrong")
     ap.add_argument("--keep-heading", action="store_true", help="keep the clip's turns")
+    ap.add_argument("--from", dest="start", type=float, help="start of the stretch to take (s)")
+    ap.add_argument("--to", dest="end", type=float, help="end of the stretch to take (s)")
     ap.add_argument("--parts", choices=("all", "lower"), default="all",
                     help="lower: only hips and legs (+ a softened torso); her arms and head stay hers")
     ap.add_argument("--torso", type=float, default=0.5, help="with --parts lower: how much of the "
                     "clip's spine and chest to keep, 0-1")
     a = ap.parse_args(argv)
     data = build(a.src, a.name, a.source, a.license, a.credit, a.bpm, a.keep_heading, a.style,
-                 a.parts, a.torso)
+                 a.parts, a.torso, a.start, a.end)
     p = write(a.out, data)
     print(f"{p}: {data['bpm']} BPM, loop {data['loop'][0]}-{data['loop'][1]} of {data['frames']} frames "
           f"at {data['fps']} fps, energy {data['energy']}, {p.stat().st_size // 1024} KB")
