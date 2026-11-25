@@ -4,6 +4,9 @@ bone rotations, so the avatar page plays it on any model with no retargeting of 
 
     python scripts/dance/convert.py SRC.glb --out data/dance --name "Macarena" \\
         --source "CMU mocap, subject 143 trial 35" --license "CMU-Mocap" --credit "..."
+    python scripts/dance/convert.py "Hip Hop Dancing.fbx" --name "Hip Hop" --source "Mixamo"
+
+Input: a CMU GLB (below), or a Mixamo FBX downloaded "without skin" (fbx.py reads it; #121).
 
 Input: a glTF/GLB whose skeleton is in a T-pose at rest, facing +Z with its left on +X (the
 VRM 1.0 normalized rig's own convention). The CMU database as converted by
@@ -64,6 +67,24 @@ CMU_MAP = {
     "lfemur": "leftUpperLeg", "ltibia": "leftLowerLeg", "lfoot": "leftFoot", "ltoes": "leftToes",
     "rfemur": "rightUpperLeg", "rtibia": "rightLowerLeg", "rfoot": "rightFoot", "rtoes": "rightToes",
 }
+# Mixamo (#121): its bones are "mixamorig:Hips" ..., the prefix varies ("mixamorig1:", none),
+# so names are matched without it. Its rest is the same T-pose as CMU's, rotations zero.
+MIXAMO_MAP = {
+    "Hips": "hips", "Spine": "spine", "Spine1": "chest", "Spine2": "upperChest",
+    "Neck": "neck", "Head": "head",
+    "LeftShoulder": "leftShoulder", "LeftArm": "leftUpperArm", "LeftForeArm": "leftLowerArm",
+    "LeftHand": "leftHand",
+    "RightShoulder": "rightShoulder", "RightArm": "rightUpperArm", "RightForeArm": "rightLowerArm",
+    "RightHand": "rightHand",
+    "LeftUpLeg": "leftUpperLeg", "LeftLeg": "leftLowerLeg", "LeftFoot": "leftFoot", "LeftToeBase": "leftToes",
+    "RightUpLeg": "rightUpperLeg", "RightLeg": "rightLowerLeg", "RightFoot": "rightFoot",
+    "RightToeBase": "rightToes",
+}
+SKELETONS = {"CMU": CMU_MAP, "Mixamo": MIXAMO_MAP}
+# Without these a clip can't be danced; the rest (toes, shoulders, neck) are kept when there.
+REQUIRED = ("hips", "spine", "head", "leftUpperArm", "leftLowerArm", "rightUpperArm", "rightLowerArm",
+            "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightUpperLeg", "rightLowerLeg", "rightFoot")
+
 VRM_PARENT = {
     "hips": None, "spine": "hips", "chest": "spine", "upperChest": "chest", "neck": "upperChest",
     "head": "neck",
@@ -161,7 +182,11 @@ def _accessor(gltf: dict, binc: bytes, i: int) -> np.ndarray:
 
 def load_clip(path: Path, fps: int = FPS) -> dict:
     """Nodes (name, parent, rest translation and rotation) and, resampled to ``fps``, every
-    node's rotation and the root's translation."""
+    node's rotation and the root's translation. A ``.fbx`` (Mixamo, #121) is read by fbx.py."""
+    if Path(path).suffix.lower() == ".fbx":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import fbx
+        return fbx.load(path, fps)
     gltf, binc = read_glb(path)
     nodes = gltf["nodes"]
     parent = [-1] * len(nodes)
@@ -232,8 +257,27 @@ def _moving_average(x: np.ndarray, n: int) -> np.ndarray:
     return (c[n:] - c[:-n]) / n
 
 
-def retarget(clip: dict, bone_map: dict = CMU_MAP, keep_heading: bool = False) -> dict:
-    names, parent = clip["names"], clip["parent"]
+def bare(name: str) -> str:
+    """A joint's name without its rig's namespace: "mixamorig:Hips" -> "Hips"."""
+    return name.rsplit(":", 1)[-1]
+
+
+def skeleton_of(names: list) -> tuple[str, dict]:
+    """Which rig this is, by its joint names: the map that finds every required bone."""
+    have = {bare(n) for n in names}
+    for kind, m in SKELETONS.items():
+        found = {v for j, v in m.items() if j in have}
+        if all(b in found for b in REQUIRED):
+            return kind, m
+    best = max(SKELETONS.items(), key=lambda kv: sum(j in have for j in kv[1]))
+    missing = [j for j, v in best[1].items() if v in REQUIRED and j not in have]
+    raise ValueError(f"not a CMU or Mixamo skeleton: no {', '.join(missing)}")
+
+
+def retarget(clip: dict, bone_map: dict | None = None, keep_heading: bool = False) -> dict:
+    names, parent = [bare(n) for n in clip["names"]], clip["parent"]
+    if bone_map is None:
+        bone_map = skeleton_of(names)[1]
     order = _order(parent)
     if order != list(range(len(parent))):                # make parents come first
         raise ValueError("node order with children before parents is not supported")
@@ -241,9 +285,6 @@ def retarget(clip: dict, bone_map: dict = CMU_MAP, keep_heading: bool = False) -
     world0 = _world(parent, clip["rest_r"][None])[0]     # (N, 4)
     delta = qmul(world, qinv(world0)[None])              # each joint's turn from its rest
     by_name = {n: i for i, n in enumerate(names)}
-    missing = [j for j in bone_map if j not in by_name]
-    if bone_map is CMU_MAP and missing:
-        raise ValueError(f"not a CMU skeleton: no {', '.join(missing)}")
     joint_of = {v: by_name[j] for j, v in bone_map.items() if j in by_name}
     root = joint_of["hips"]
     fps = clip["fps"]
@@ -266,9 +307,11 @@ def retarget(clip: dict, bone_map: dict = CMU_MAP, keep_heading: bool = False) -
         bones[bone] = qcontinuous(q / np.linalg.norm(q, axis=-1, keepdims=True))
 
     # Hips: in leg lengths, about the clip's median height and a moving centre.
-    lt = [by_name[n] for n in ("lfemur", "ltibia", "lfoot", "ltoes") if n in by_name]
-    leg = float(-sum(clip["rest_t"][i][1] for i in lt)) if lt else 0.9
-    leg = leg if leg > 0.2 else 0.9
+    # The leg's length in the clip's own unit (CMU metres, Mixamo centimetres).
+    lt = [joint_of[b] for b in ("leftUpperLeg", "leftLowerLeg", "leftFoot", "leftToes") if b in joint_of]
+    leg = float(-sum(clip["rest_t"][i][1] for i in lt)) if lt else 0.0
+    if leg <= 0:
+        raise ValueError("no leg length: is the skeleton standing (Y up)?")
     p = clip["pos"][:, root].copy()
     centre = _moving_average(p[:, [0, 2]], SWAY_WINDOW_S * fps)
     sway = np.zeros_like(p)
@@ -488,7 +531,8 @@ def main(argv=None) -> int:
     ap.add_argument("--name", required=True)
     ap.add_argument("--style", default="")
     ap.add_argument("--source", required=True)
-    ap.add_argument("--license", required=True, help="e.g. CMU-Mocap, or local for a clip you may not share")
+    ap.add_argument("--license", default="local", help="CMU-Mocap for a CMU clip; local (the default) for "
+                    "one you may not share, e.g. Mixamo's: it stays in your library")
     ap.add_argument("--credit", default="")
     ap.add_argument("--bpm", type=float, help="the clip's tempo, when measuring it goes wrong")
     ap.add_argument("--keep-heading", action="store_true", help="keep the clip's turns")

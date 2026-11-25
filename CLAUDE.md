@@ -721,6 +721,15 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   now falls back to the bounce, never the previous clip.
   **A stretch of a take** (#142): `convert.py --from S --to S` (CMU 15/04 has the Egyptian walk at
   ~98–104 s and the Cabbage Patch at ~116.5–123 s between window washing and boxing).
+  **Your own clips** (#121, how-to: `docs/dance-clips.md`): `convert.py` also reads a Mixamo FBX
+  ("FBX Binary", "without skin"), with `scripts/dance/fbx.py`, a numpy binary-FBX reader (models,
+  Euler rotation orders, pre/post-rotation, animation curves; ASCII refused). Mixamo's rest is
+  CMU's T-pose with zero rotations, so only a bone map differs (`MIXAMO_MAP`; `skeleton_of`
+  picks the rig by names, namespace stripped; leg length from the mapped leg bones, so
+  centimetres work). `--license` defaults to `local`: Mixamo's terms forbid sharing the files,
+  and `data/dance` is git-ignored and outside the image (`.containerignore` drops `data/`;
+  `tests/test_dance_fbx.py` checks both, with a small FBX writer instead of a real download).
+  Tried on three.js's "Samba Dancing.fbx": Mixamo, leg 99.8 cm, tempo read 200 (half-step hits; set it in Settings).
   ✅ **Phase 5 interruption done** — barge-in works in hands-free mode; speaking over her calls
   `stopSpeaking()`+`abortChat()`. `AppSettings.full_duplex` lifts the half-duplex gate (safe on
   headphones; needs an echo canceller on speakers) and `mic_device_id` selects the capture source.

@@ -199,7 +199,7 @@ def test_a_clip_is_one_beat_per_move():
 def test_not_a_cmu_skeleton_is_refused(tmp_path):
     clip = {"names": ["a", "b"], "parent": [-1, 0], "rest_t": np.zeros((2, 3)), "rest_r": np.tile([0, 0, 0, 1.0], (2, 1)),
             "rot": np.tile([0, 0, 0, 1.0], (5, 2, 1)), "pos": np.zeros((5, 2, 3)), "fps": 30}
-    with pytest.raises(ValueError, match="not a CMU skeleton"):
+    with pytest.raises(ValueError, match="not a CMU or Mixamo skeleton"):
         cv.retarget(clip)
 
 
