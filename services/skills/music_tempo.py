@@ -116,11 +116,23 @@ def _envelope(x, sr):
     return (flux if flux.any() else None), sr / hop
 
 
+def autocorr(x):
+    """The autocorrelation for lags 0..len(x)-1, by FFT. Not np.correlate: that makes one dot
+    product per lag, each spread over every core by the BLAS, and on a whole song (~23,000
+    points) it burned 5 h 40 min of CPU in 22 min and never finished, in the server's own
+    background job too ("What About Us", 2026-11-25)."""
+    import numpy as np
+
+    n = len(x)
+    f = np.fft.rfft(x, 2 * n)
+    return np.fft.irfft(f * np.conj(f))[:n]
+
+
 def tempo_of(flux, fps: float) -> float | None:
     """The tempo the onset curve repeats at most, with a gentle prior, folded only if extreme."""
     import numpy as np
 
-    ac = np.correlate(flux, flux, mode="full")[len(flux) - 1:]
+    ac = autocorr(flux)
     lags = np.arange(len(ac), dtype=float)
     with np.errstate(divide="ignore"):
         bpm = np.where(lags > 0, 60 * fps / np.maximum(lags, 1e-9), 0)

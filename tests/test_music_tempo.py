@@ -211,3 +211,16 @@ def test_entries_from_before_are_measured_again(tmp_path, monkeypatch):
     assert sorted(fetched) == [11, 12]                                # v1 entries: measured again
     rec = mt.load(tmp_path)["tracks"]["11"]
     assert rec["v"] == mt.VERSION and abs(rec["bpm"] - 128) <= 2 and rec["beats"]
+
+
+def test_a_whole_song_is_measured_quickly():
+    # np.correlate on a whole song's onset curve (~23,000 points) never finished in the server
+    # (#130); the FFT autocorrelation does it in milliseconds.
+    import time
+
+    x = np.random.default_rng(1).random(23_000)
+    t = time.perf_counter()
+    ac = mt.autocorr(x)
+    assert time.perf_counter() - t < 1.0
+    ref = np.correlate(x[:2000], x[:2000], mode="full")[1999:]
+    assert np.allclose(mt.autocorr(x[:2000]), ref)
