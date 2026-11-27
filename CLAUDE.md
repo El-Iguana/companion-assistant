@@ -826,6 +826,9 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
   - **Streams:** the player fetches each track from Orpheus as the resident's own `player` device
     (`pair-orpheus`, a `gstreamer` capability report, so everything plays direct).
   - **Ducking** is local (page → resident → player).
+  - **Named "Cantinero" in the system mixer** (`GLib.set_application_name` in the shell's `main`):
+    WirePlumber saves volume and mute per app name, and as plain "python3" one muted Python program
+    muted her music too (found on predator 2026-11-27).
   - Verified on predator against a harness: play, volume, duck, next, seek, previous, pause, stop.
   - **Two GStreamer traps:**
     - a seek past the end raises *two* errors (HTTP 416, then "internal data stream error"); one skip

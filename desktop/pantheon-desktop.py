@@ -726,6 +726,9 @@ def main() -> int:
                     help="tray icon: a name in desktop/icons/ (default: cantinero) or the icon theme")
     args = ap.parse_args()
 
+    # The name GStreamer gives its audio stream: the system mixer shows "Cantinero" and keeps its
+    # own volume and mute, instead of sharing one saved mute with every "python3" program.
+    GLib.set_application_name("Cantinero")
     app = DesktopShell(args.url, args.width, args.height, not args.no_tray, not args.no_music)
     app.icon_name = args.icon
     return app.run([])
