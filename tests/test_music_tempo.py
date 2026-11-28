@@ -11,6 +11,8 @@ import soundfile as sf
 from services.skills import music_catalog, music_tempo as mt
 from services.skills import orpheus_media as om
 
+_REAL_REFRESH_SOON = mt.refresh_soon                 # conftest stubs it out for every test
+
 SR = 22050
 
 
@@ -103,7 +105,7 @@ def _library(tmp_path, monkeypatch, fetched):
     tracks = {1: [11, 12], 2: [21]}
 
     async def expand(base, token, *, item_id=None, playlist_id=""):
-        return [{"id": t, "title": f"t{t}"} for t in tracks[item_id]]
+        return [{"id": t, "identity_key": f"track:k{t}", "title": f"t{t}"} for t in tracks[item_id]]
 
     async def fetch(st, item_id):
         fetched.append(item_id)
@@ -125,7 +127,7 @@ def test_build_measures_music_only_once_and_never_spoken_word(tmp_path, monkeypa
     assert sorted(fetched) == [11, 12]                         # measured once, failures included
     tracks[1] = [12]                                           # 11 left the library
     asyncio.run(mt.build(tmp_path, st))
-    assert "11" not in mt.load(tmp_path)["tracks"]
+    assert "track:k11" not in mt.load(tmp_path)["tracks"] and "11" not in mt.load(tmp_path)["ids"]
 
 
 def test_an_album_marked_spoken_later_loses_its_tempos(tmp_path, monkeypatch):
@@ -209,7 +211,7 @@ def test_entries_from_before_are_measured_again(tmp_path, monkeypatch):
     mt._save(tmp_path, {"built_at": 1e12, "tracks": {"11": {"bpm": 156.1, "album": 1}, "12": {"bpm": None, "failed": "x", "album": 1}}})
     asyncio.run(mt.build(tmp_path, {"url": "http://o", "token": "t"}))
     assert sorted(fetched) == [11, 12]                                # v1 entries: measured again
-    rec = mt.load(tmp_path)["tracks"]["11"]
+    rec = mt.load(tmp_path)["tracks"]["track:k11"]
     assert rec["v"] == mt.VERSION and abs(rec["bpm"] - 128) <= 2 and rec["beats"]
 
 
@@ -224,3 +226,48 @@ def test_a_whole_song_is_measured_quickly():
     assert time.perf_counter() - t < 1.0
     ref = np.correlate(x[:2000], x[:2000], mode="full")[1999:]
     assert np.allclose(mt.autocorr(x[:2000]), ref)
+
+
+# --- keyed by identity_key (#148) ------------------------------------------------------------
+
+def test_a_cache_from_before_is_rekeyed_without_measuring_again(tmp_path, monkeypatch):
+    fetched = []
+    _library(tmp_path, monkeypatch, fetched)
+    mt._save(tmp_path, {"built_at": 1e12, "tracks": {
+        "11": {"bpm": 77.1, "beats": [0.1, 0.88], "from": "audio", "v": mt.VERSION, "album": 1},
+        "12": {"bpm": None, "failed": "no beat", "v": mt.VERSION, "album": 1}}})
+    assert mt.bpm_of(tmp_path, [11]) == {11: 77.1}                     # still read before the build
+    asyncio.run(mt.build(tmp_path, {"url": "http://o", "token": "t"}))
+    assert fetched == []                                               # nothing measured again
+    cache = mt.load(tmp_path)
+    assert cache["format"] == mt.FORMAT and cache["ids"] == {"11": "track:k11", "12": "track:k12"}
+    assert cache["tracks"]["track:k11"]["beats"] == [0.1, 0.88] and cache["tracks"]["track:k11"]["id"] == 11
+    assert mt.bpm_of(tmp_path, [11, 12]) == {11: 77.1} and mt.beats_of(tmp_path, [11]) == {11: [0.1, 0.88]}
+
+
+def test_a_cache_from_before_counts_as_stale(tmp_path, monkeypatch):
+    started = []
+    monkeypatch.setattr(mt.asyncio, "ensure_future", lambda coro: (started.append(1), coro.close()))
+    mt._save(tmp_path, {"built_at": 1e15, "tracks": {"11": {"bpm": 77.1, "v": mt.VERSION}}})
+    _REAL_REFRESH_SOON(tmp_path, {"url": "http://o", "token": "t"})
+    assert started == [1]
+
+
+def test_a_rebuilt_orpheus_library_keeps_each_song_its_own_tempo(tmp_path, monkeypatch):
+    """Orpheus rebuilt library.db: the same songs, other ids, and 11 is now another song's id."""
+    fetched = []
+    tracks = _library(tmp_path, monkeypatch, fetched)
+    st = {"url": "http://o", "token": "t"}
+    asyncio.run(mt.build(tmp_path, st))
+    before = mt.bpm_of(tmp_path, [11])[11]
+    renumbered = {11: 512, 12: 11}                                     # k11 is 512 now; k12 is 11
+
+    async def expand(base, token, *, item_id=None, playlist_id=""):
+        return [{"id": renumbered[t], "identity_key": f"track:k{t}"} for t in tracks[item_id]]
+    monkeypatch.setattr(om, "expand", expand)
+    # A queue built after the rebuild, before the next build, is matched by key, not by id.
+    q = mt.annotate(tmp_path, [{"id": 11, "identity_key": "track:k12"}, {"id": 512, "identity_key": "track:k11"}])
+    assert q == [{"id": 11, "identity_key": "track:k12"}, {"id": 512, "identity_key": "track:k11", "bpm": before}]
+    asyncio.run(mt.build(tmp_path, st))
+    assert sorted(fetched) == [11, 12]                                 # measured once, at the start
+    assert mt.bpm_of(tmp_path, [512, 11]) == {512: before}             # 11 is the song with no beat

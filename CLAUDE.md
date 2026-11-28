@@ -918,6 +918,10 @@ gestures) · ✅ **desktop mode** · ✅ multi-user · ✅ Mira seeded into new 
     carry `bpm`; the player asks `GET /pmedia/music/tempo?ids=` (forwarded by the resident).
     soundfile decodes, PyAV when libsndfile can't (42 of 917 MP3s). amd-halo: 917 tracks in
     ~7 min, 915 measured; published tempos match within ~2 BPM.
+    **Keyed by Orpheus `identity_key`** (#148, cache `format: 3`, plus an `ids` index for the
+    player's lookups by id), because `item.id` changes when Orpheus rebuilds `library.db`. An old
+    id-keyed file is re-keyed on the next build without being measured again. How new music gets
+    measured (Orpheus `changed_at`, the library watcher, play-before-measured): `docs/tempo.md`.
   - A failure turns Fortuna off for 60 s; it is never an error. Tests set `FORTUNA=off`.
   - Each turn logs `[turn] <session> <s>: …` with where the time went.
   - **The memory gate:** `assistant_memory.worth_reading` leaves out of extraction the user turns

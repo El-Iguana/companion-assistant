@@ -142,8 +142,8 @@ def test_expand_an_album_an_artist_a_track_and_a_playlist(monkeypatch):
     monkeypatch.setattr(om, "_request", req)
     got = asyncio.run(om.expand("http://o", "t", item_id=10))
     assert [e["title"] for e in got] == ["Tom Sawyer", "Red Barchetta"]                 # in order, playable only
-    assert got[0] == {"id": 11, "title": "Tom Sawyer", "artist": "Rush", "album": "Moving Pictures",
-                      "artwork_id": 5, "duration_ms": 276000}
+    assert got[0] == {"id": 11, "identity_key": "", "title": "Tom Sawyer", "artist": "Rush",
+                      "album": "Moving Pictures", "artwork_id": 5, "duration_ms": 276000}
     assert [e["title"] for e in asyncio.run(om.expand("http://o", "t", item_id=1))] == ["Tom Sawyer", "Red Barchetta"]
     one = asyncio.run(om.expand("http://o", "t", item_id=11))
     assert one[0]["artist"] == "Rush" and one[0]["album"] == "Moving Pictures"

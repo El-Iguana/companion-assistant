@@ -20,9 +20,14 @@ song. The player sends where it is between two beats, and her moves land on them
 
 Measured on amd-halo, 2026-11-25: ~0.2 s to fetch an MP3, ~0.5 s to measure it.
 
-The cache is ``<library>/music_tempo.json`` ({"tracks": {"<item id>": {...}}}), filled in the
-background a track at a time and kept across rebuilds; a track is measured once. A play never
-waits for it: a track not measured yet simply has no ``bpm``.
+The cache is ``<library>/music_tempo.json``, filled in the background a track at a time and kept
+across rebuilds; a track is measured once. A play never waits for it: a track not measured yet
+simply has no ``bpm``. Format 3 (#148): ``{"format": 3, "tracks": {"<identity_key>": {...,
+"id": <item id>}}, "ids": {"<item id>": "<identity_key>"}}``. Tracks are keyed by Orpheus's
+``identity_key``, which survives a ``library.db`` rebuild; ``item.id`` doesn't, and after a rebuild
+the same number can be another song. ``ids`` is the id each track had at the last build, for the
+player, which asks by id. A file from before (keyed by id, no ``format``) is still read, and the
+next build re-keys it without measuring anything again. How new music gets measured: docs/tempo.md.
 """
 from __future__ import annotations
 
@@ -39,6 +44,7 @@ FILE = "music_tempo.json"
 LOW, HIGH = 60.0, 200.0          # only a reading outside this is halved or doubled
 PRIOR_BPM, PRIOR_OCTAVES = 100.0, 1.0
 VERSION = 2                      # 2: the tempo prior moved, and beats; older entries are measured again
+FORMAT = 3                       # 3: keyed by identity_key (#148); the measurements are unchanged
 MAX_AGE_S = 6 * 3600             # look for new albums this often (only new tracks are measured)
 MAX_BYTES = 200 * 1024 * 1024    # a bigger file is not fetched to be measured
 SKIP_S, TAKE_S = 0.0, 600.0      # the whole track (up to 10 min): beat times are from its start
@@ -304,31 +310,51 @@ def _save(root: Path, cache: dict) -> None:
     tmp.replace(p)
 
 
+def _record(cache: dict, item_id=None, key: str = "") -> dict:
+    """A track's entry: by its identity key when the caller has it, else by the id it had at
+    the last build; in a file from before #148, by id."""
+    tracks = cache.get("tracks") or {}
+    if cache.get("format") != FORMAT:
+        return tracks.get(str(item_id)) or {} if item_id is not None else {}
+    if key:
+        return tracks.get(key) or {}
+    k = (cache.get("ids") or {}).get(str(item_id)) if item_id is not None else None
+    return tracks.get(k) or {} if k else {}
+
+
 def beats_of(root: Path, ids) -> dict[int, list]:
     """The beat times of these tracks, where they were found (the player asks for the one it
     starts; they are too long to ride along in every queue entry)."""
-    tracks = load(root).get("tracks") or {}
-    return {int(i): (tracks.get(str(i)) or {})["beats"] for i in ids
-            if (tracks.get(str(i)) or {}).get("beats")}
+    cache = load(root)
+    out = {}
+    for i in ids:
+        rec = _record(cache, i)
+        if rec.get("beats"):
+            out[int(i)] = rec["beats"]
+    return out
 
 
 def bpm_of(root: Path, ids) -> dict[int, float]:
     """The known BPMs among these track ids (music only; the rest are left out)."""
-    tracks = load(root).get("tracks") or {}
+    cache = load(root)
     out = {}
     for i in ids:
-        rec = tracks.get(str(i)) or {}
+        rec = _record(cache, i)
         if rec.get("bpm"):
             out[int(i)] = float(rec["bpm"])
     return out
 
 
 def annotate(root: Path, queue: list[dict]) -> list[dict]:
-    """Queue entries gain ``bpm`` where it's known."""
-    known = bpm_of(root, [e.get("id") for e in queue if e.get("id") is not None])
+    """Queue entries gain ``bpm`` where it's known, found by the entry's identity key when it
+    has one (right even if Orpheus was rebuilt since the last build)."""
+    cache = load(root)
     for e in queue:
-        if e.get("id") in known:
-            e["bpm"] = known[e["id"]]
+        if e.get("id") is None and not e.get("identity_key"):
+            continue
+        rec = _record(cache, e.get("id"), e.get("identity_key") or "")
+        if rec.get("bpm"):
+            e["bpm"] = float(rec["bpm"])
     return queue
 
 
@@ -336,9 +362,15 @@ async def build(root: Path, st: dict) -> dict:
     """Measure every music track not measured yet; forget tracks no longer on a music album."""
     cat = music_catalog.load(root) or await music_catalog.build(root, st)
     cache = load(root)
-    tracks: dict = dict(cache.get("tracks") or {})
-    keep: set[str] = set()
+    keyed = cache.get("format") == FORMAT
+    tracks: dict = dict(cache.get("tracks") or {}) if keyed else {}
+    by_id: dict = {} if keyed else dict(cache.get("tracks") or {})   # a file from before #148
+    ids: dict[str, str] = {}
     measured = 0
+
+    def snapshot() -> dict:
+        return {"format": FORMAT, "built_at": cache.get("built_at", 0) if keyed else 0,
+                "tracks": tracks, "ids": dict(ids)}
     for album in music_catalog.music_albums(cat):
         try:
             queue = await om.expand(st["url"], st["token"], item_id=int(album["id"]))
@@ -347,19 +379,23 @@ async def build(root: Path, st: dict) -> dict:
                 raise
             continue
         for entry in queue:
-            key = str(entry["id"])
-            keep.add(key)
-            if key in tracks and tracks[key].get("v") == VERSION:
+            item_id = int(entry["id"])
+            key = entry.get("identity_key") or f"id:{item_id}"   # every Orpheus track has one
+            ids[str(item_id)] = key
+            rec = tracks.get(key) or by_id.pop(str(item_id), None)   # re-keyed, not re-measured
+            if rec and rec.get("v") == VERSION:
+                tracks[key] = {**rec, "id": item_id, "album": int(album["id"])}
                 continue
-            data = await _fetch(st, int(entry["id"]))
+            data = await _fetch(st, item_id)
             tracks[key] = (await asyncio.to_thread(measure, data) if data
                            else {"bpm": None, "failed": "not fetched"})
-            tracks[key]["album"] = int(album["id"])
+            tracks[key].update(id=item_id, album=int(album["id"]))
             measured += 1
             if measured % SAVE_EVERY == 0:
-                _save(root, {"built_at": cache.get("built_at", 0), "tracks": tracks})
+                _save(root, snapshot())
+    keep = set(ids.values())
     tracks = {k: v for k, v in tracks.items() if k in keep}      # an album now spoken, or gone
-    out = {"built_at": time.time(), "tracks": tracks}
+    out = {"format": FORMAT, "built_at": time.time(), "tracks": tracks, "ids": ids}
     _save(root, out)
     print(f"[music] tempo: {sum(1 for v in tracks.values() if v.get('bpm'))} of {len(tracks)} tracks "
           f"({measured} measured now)", flush=True)
@@ -369,7 +405,8 @@ async def build(root: Path, st: dict) -> dict:
 def refresh_soon(root: Path, st: dict) -> None:
     """Fill in new tracks in the background when stale; one build per library at a time."""
     cache = load(root)
-    stale = any(v.get("v") != VERSION for v in (cache.get("tracks") or {}).values())
+    stale = (cache.get("format") != FORMAT
+             or any(v.get("v") != VERSION for v in (cache.get("tracks") or {}).values()))
     if cache and not stale and time.time() - float(cache.get("built_at") or 0) < MAX_AGE_S:
         return
     key = str(root)
