@@ -200,7 +200,8 @@ QUEUE_MAX = 500
 
 
 def _entry(item: dict, artist: str = "", album: str = "") -> dict:
-    return {"id": int(item["id"]), "title": item.get("title") or "", "artist": artist, "album": album,
+    return {"id": int(item["id"]), "identity_key": item.get("identity_key") or "",
+            "title": item.get("title") or "", "artist": artist, "album": album,
             "artwork_id": item.get("artwork_id"), "duration_ms": item.get("duration_ms")}
 
 
